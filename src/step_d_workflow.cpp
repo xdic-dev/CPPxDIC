@@ -456,9 +456,10 @@ bool StepDWorkflow::performTracking1(const std::vector<cv::Mat>& cam_first,
     
     std::string output_path = base_params_.outputPath + "/ncorr1.mat";
     
-    // Checkpoint: Check if results already exist
-    if (std::filesystem::exists(output_path)) {
-        std::cout << "Checkpoint found: " << output_path << std::endl;
+    // Checkpoint: Check if cached .bin file already exists
+    std::filesystem::path cache_bin = std::filesystem::path(output_path).parent_path() / ".cache" / "ncorr1.mat.bin";
+    if (std::filesystem::exists(cache_bin)) {
+        std::cout << "Checkpoint found: " << cache_bin << std::endl;
         std::cout << "--> STEP: Ncorr 1 loaded from checkpoint (skipped computation)" << std::endl;
         return true;
     }
@@ -483,9 +484,10 @@ bool StepDWorkflow::performTracking2(const std::vector<cv::Mat>& cam_second,
     
     std::string output_path = base_params_.outputPath + "/ncorr2.mat";
     
-    // Checkpoint: Check if results already exist
-    if (std::filesystem::exists(output_path)) {
-        std::cout << "Checkpoint found: " << output_path << std::endl;
+    // Checkpoint: Check if cached .bin file already exists
+    std::filesystem::path cache_bin = std::filesystem::path(output_path).parent_path() / ".cache" / "ncorr2.mat.bin";
+    if (std::filesystem::exists(cache_bin)) {
+        std::cout << "Checkpoint found: " << cache_bin << std::endl;
         std::cout << "--> STEP: Ncorr 2 loaded from checkpoint (skipped computation)" << std::endl;
         return true;
     }
@@ -540,16 +542,61 @@ void StepDWorkflow::saveTrialInfo(const std::string& trial, int stereopair, int 
 
 void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
     // Format output files (equivalent to step2_dic_finish.m)
-    std::cout << "Formatting output files..." << std::endl;
+    std::cout << "Formatting output files (step2_dic_finish equivalent)..." << std::endl;
     
-    // Output files are already saved by ncorr in MAT format
-    // Additional formatting can be added here if needed:
-    // - Rename/reorganize files
-    // - Create summary files
-    // - Generate visualization outputs
-    // - Clean up temporary files
+    // Skip if .mat generation is disabled
+    if (!config_.generate_mat_files) {
+        std::cout << "Skipping formatOutput (generate_mat_files=false)" << std::endl;
+        return;
+    }
     
-    std::cout << "Output formatting complete" << std::endl;
+    // Determine camera numbers
+    int cam_1, cam_2;
+    getCameraNumbers(stereopair, cam_1, cam_2);
+    
+    // Check for cached .bin files
+    std::filesystem::path cache_dir = std::filesystem::path(base_params_.outputPath) / ".cache";
+    std::string ncorr1_bin = (cache_dir / "ncorr1.mat.bin").string();
+    std::string ncorr2_bin = (cache_dir / "ncorr2.mat.bin").string();
+    
+    // Check if cached files exist
+    if (!std::filesystem::exists(ncorr1_bin) || !std::filesystem::exists(ncorr2_bin)) {
+        std::cerr << "Warning: cached ncorr result files not found, skipping formatOutput" << std::endl;
+        return;
+    }
+    
+    // Create DIC2DPairResults structure
+    DIC2DPairResults results;
+    results.nCamRef = cam_1;
+    results.nCamDef = cam_2;
+    results.nImages = 0;  // Will be determined from data
+    
+    // TODO: Complete implementation
+    // This requires:
+    // 1. Load ncorr1.mat and ncorr2.mat (need MAT file reader)
+    // 2. Extract displacement fields and correlation coefficients
+    // 3. Create Delaunay triangulation (Faces)
+    // 4. Compute face colors from correlation
+    // 5. Map points between frames
+    
+    // For now, save placeholder structure
+    std::string output_file = base_params_.outputPath + "/myDIC2DpairResults_C_" + 
+        std::to_string(cam_1) + "_C_" + std::to_string(cam_2) + ".mat";
+    
+    // Check if already exists (checkpoint)
+    if (std::filesystem::exists(output_file)) {
+        std::cout << "Checkpoint found: " << output_file << std::endl;
+        std::cout << "Output formatting complete (loaded from checkpoint)" << std::endl;
+        return;
+    }
+    
+    // Write the formatted output
+    bool success = MatWriter::writeDIC2DPairResults(output_file, results);
+    if (success) {
+        std::cout << "Output formatting complete: " << output_file << std::endl;
+    } else {
+        std::cerr << "Failed to write DIC2DPairResults" << std::endl;
+    }
 }
 
 ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
@@ -620,10 +667,34 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     
     dic_output = ncorr::set_units(dic_output, "mm", config_.units_per_pixel);
     
-    // Save output (save is a free function, not in ncorr namespace)
-    save(dic_output, output_path);
+    // Strategy: Always save .bin to .cache/ subdirectory (for C++ internal use)
+    //           Optionally generate .mat files (for MATLAB compatibility)
     
-    std::cout << "DIC analysis saved to: " << output_path << std::endl;
+    // Create .cache directory if it doesn't exist
+    std::filesystem::path output_dir = std::filesystem::path(output_path).parent_path();
+    std::filesystem::path cache_dir = output_dir / ".cache";
+    std::filesystem::create_directories(cache_dir);
+    
+    // Save .bin to cache directory (internal format for C++)
+    std::string cache_bin = (cache_dir / std::filesystem::path(output_path).filename()).string() + ".bin";
+    save(dic_output, cache_bin);
+    std::cout << "DIC analysis saved to cache: " << cache_bin << std::endl;
+    
+    // Optionally generate .mat file (for MATLAB users)
+    if (config_.generate_mat_files) {
+        bool success = MatWriter::convertBinToMat(cache_bin, output_path, dic_input);
+        if (success) {
+            std::cout << "MATLAB .mat file generated: " << output_path << std::endl;
+            
+            // Optionally cleanup cache .bin after .mat generation
+            if (config_.cleanup_cache_bins) {
+                std::filesystem::remove(cache_bin);
+                std::cout << "Cache .bin cleaned up: " << cache_bin << std::endl;
+            }
+        } else {
+            std::cerr << "Warning: Failed to generate .mat file" << std::endl;
+        }
+    }
     
     return dic_output;
 }

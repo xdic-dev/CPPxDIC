@@ -5,6 +5,7 @@
 #include "dic_analysis.h"
 #include "utils.h"
 #include "step_d_workflow.h"
+#include "mat_writer.h"
 #include <iostream>
 #include <chrono>
 #include <filesystem>
@@ -27,11 +28,8 @@ DicAnalysis::DicAnalysis(const Config& config) : config_(config) {
 
 bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
     std::cout << "Starting Deformation/Strain Analysis (Step F)..." << std::endl;
+    std::cout << "NOTE: Saving results as .mat files (not .bin)" << std::endl;
     try {
-        auto write_bin = [](const std::string& path, const std::vector<double>& buf){
-            std::ofstream ofs(path, std::ios::binary);
-            ofs.write(reinterpret_cast<const char*>(buf.data()), static_cast<std::streamsize>(buf.size()*sizeof(double)));
-        };
 
         for (int trial : trial_target) {
             for (int pair = 1; pair <= config_.num_pair; ++pair) {
@@ -54,75 +52,55 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                         } else {
                             if (!setupNcorrAnalysis(frames, dic_input)) return false;
                         }
-                        // Load DIC output
-                        std::ostringstream outbin;
-                        outbin << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
-                               << "/dic_output_S" << config_.subject_id << "_" << config_.material << "_" << config_.phase_id
-                               << "_T" << trial << "_pair" << pair << "_cam" << cam_index << ".bin";
-                        auto dic_output = DIC_analysis_output::load(outbin.str());
+                        // Load DIC output from .cache directory (internal .bin format)
+                        std::string output_dir = config_.dic_path + "/" + config_.subject_id + "/" + config_.material;
+                        std::string cache_bin = output_dir + "/.cache/ncorr" + std::to_string(cam_index) + ".mat.bin";
+                        
+                        ncorr::DIC_analysis_output dic_output;
+                        if (std::filesystem::exists(cache_bin)) {
+                            dic_output = DIC_analysis_output::load(cache_bin);
+                        } else {
+                            std::cerr << "Warning: Could not find cached DIC output for cam" << cam_index << std::endl;
+                            std::cerr << "  Expected: " << cache_bin << std::endl;
+                            return false;
+                        }
 
                         // Run strain
                         auto s_in = strain_analysis_input(dic_input, dic_output, SUBREGION::CIRCLE, config_.subregion_radius);
                         auto s_out = strain_analysis(s_in);
 
-                        // Save per-frame strain arrays
-                        std::vector<std::string> eyy_bins, exx_bins, exy_bins;
+                        // Accumulate strain data (NO per-frame .bin files)
+                        // Will be written to single .mat file below
+                        DIC3DPPresults ppresults;
+                        ppresults.deftype = "cum";  // cumulative deformation
+                        
+                        // TODO: Populate ppresults.Deform with strain data
+                        // For now, just note the data structure
                         const auto& strains = s_out.strains;
-                        for (size_t fi=0; fi<strains.size(); ++fi) {
-                            const auto& S = strains[fi];
-                            const auto& EYY = S.get_eyy().get_array();
-                            const auto& EXX = S.get_exx().get_array();
-                            const auto& EXY = S.get_exy().get_array();
-                            // Flatten to row-major doubles
-                            std::vector<double> eyy_buf(EYY.size());
-                            std::vector<double> exx_buf(EXX.size());
-                            std::vector<double> exy_buf(EXY.size());
-                            std::memcpy(eyy_buf.data(), EYY.get_pointer(), EYY.size()*sizeof(double));
-                            std::memcpy(exx_buf.data(), EXX.get_pointer(), EXX.size()*sizeof(double));
-                            std::memcpy(exy_buf.data(), EXY.get_pointer(), EXY.size()*sizeof(double));
-                            std::ostringstream pe, px, py;
-                            pe << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
-                               << "/strain_eyy_S" << config_.subject_id << "_" << config_.material << "_" << config_.phase_id
-                               << "_T" << trial << "_pair" << pair << "_cam" << cam_index << "_f" << std::setw(6) << std::setfill('0') << (fi+1) << ".bin";
-                            px << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
-                               << "/strain_exx_S" << config_.subject_id << "_" << config_.material << "_" << config_.phase_id
-                               << "_T" << trial << "_pair" << pair << "_cam" << cam_index << "_f" << std::setw(6) << std::setfill('0') << (fi+1) << ".bin";
-                            py << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
-                               << "/strain_exy_S" << config_.subject_id << "_" << config_.material << "_" << config_.phase_id
-                               << "_T" << trial << "_pair" << pair << "_cam" << cam_index << "_f" << std::setw(6) << std::setfill('0') << (fi+1) << ".bin";
-                            write_bin(pe.str(), eyy_buf);
-                            write_bin(px.str(), exx_buf);
-                            write_bin(py.str(), exy_buf);
-                            eyy_bins.push_back(pe.str());
-                            exx_bins.push_back(px.str());
-                            exy_bins.push_back(py.str());
+                        std::cout << "  Computed " << strains.size() << " frames of strain data" << std::endl;
+
+                        // Optionally write DIC3DPPresults to single .mat file
+                        if (config_.generate_mat_files) {
+                            std::ostringstream matout;
+                            matout << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
+                                   << "/DIC3DPPresults_" << config_.num_pair << "Pairs_cum_v1.mat";
+                            
+                            // Check if already exists (checkpoint)
+                            if (std::filesystem::exists(matout.str())) {
+                                std::cout << "Checkpoint found: " << matout.str() << " (skipping)" << std::endl;
+                            } else {
+                                bool success = MatWriter::write3DPPresults(matout.str(), ppresults);
+                                if (success) {
+                                    std::cout << "Generated MATLAB .mat file: " << matout.str() << std::endl;
+                                } else {
+                                    std::cerr << "Failed to save DIC3DPPresults .mat" << std::endl;
+                                }
+                            }
+                        } else {
+                            std::cout << "Strain analysis complete (generate_mat_files=false, no .mat output)" << std::endl;
                         }
 
-                        // Write strain JSON per camera
-                        std::ostringstream jout;
-                        jout << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
-                             << "/strain_output_S" << config_.subject_id << "_" << config_.material << "_" << config_.phase_id
-                             << "_T" << trial << "_pair" << pair << "_cam" << cam_index << ".json";
-                        nlohmann::json j;
-                        j["subject"] = config_.subject_id;
-                        j["material"] = config_.material;
-                        j["phase"] = config_.phase_id;
-                        j["trial"] = trial;
-                        j["pair"] = pair;
-                        j["camera"] = cam_index;
-                        j["subregion"] = { {"shape","CIRCLE"}, {"radius", config_.subregion_radius} };
-                        j["units"] = { {"name","mm"}, {"units_per_pixel", config_.units_per_pixel} };
-                        j["frames"] = nlohmann::json::array();
-                        for (size_t fi=0; fi<eyy_bins.size(); ++fi) {
-                            nlohmann::json jf;
-                            jf["f_index"] = static_cast<int>(fi+1);
-                            jf["eyy_bin"] = eyy_bins[fi];
-                            jf["exx_bin"] = exx_bins[fi];
-                            jf["exy_bin"] = exy_bins[fi];
-                            j["frames"].push_back(jf);
-                        }
-                        std::ofstream os(jout.str());
-                        os << j.dump(2) << std::endl;
+                        // Success
                         return true;
                     } catch (...) { return false; }
                 };
@@ -237,13 +215,15 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
 
         for (int trial : trial_target) {
             for (int pair = 1; pair <= config_.num_pair; ++pair) {
-                // Input DIC 2D outputs
-                std::string cam1_bin = config_.dic_path + "/" + config_.subject_id + "/" + config_.material +
-                    "/dic_output_S" + config_.subject_id + "_" + config_.material + "_" + config_.phase_id + "_T" + std::to_string(trial) + "_pair" + std::to_string(pair) + "_cam1.bin";
-                std::string cam2_bin = config_.dic_path + "/" + config_.subject_id + "/" + config_.material +
-                    "/dic_output_S" + config_.subject_id + "_" + config_.material + "_" + config_.phase_id + "_T" + std::to_string(trial) + "_pair" + std::to_string(pair) + "_cam2.bin";
+                // Load DIC 2D outputs from .cache directory (internal .bin format)
+                std::string output_dir = config_.dic_path + "/" + config_.subject_id + "/" + config_.material;
+                std::string cam1_bin = output_dir + "/.cache/ncorr1.mat.bin";
+                std::string cam2_bin = output_dir + "/.cache/ncorr2.mat.bin";
+                
                 if (!std::filesystem::exists(cam1_bin) || !std::filesystem::exists(cam2_bin)) {
-                    std::cerr << "Missing 2D outputs for trial " << trial << ", pair " << pair << ". Skipping." << std::endl;
+                    std::cerr << "Missing cached 2D outputs for trial " << trial << ", pair " << pair << ". Skipping." << std::endl;
+                    std::cerr << "  Expected: " << cam1_bin << std::endl;
+                    std::cerr << "  Expected: " << cam2_bin << std::endl;
                     continue;
                 }
 
@@ -313,11 +293,9 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 std::vector<int> faces; std::vector<int> indexLUT; int W=0,H=0;
                 build_faces_from_roi(dic1.disps.front().get_roi(), faces, indexLUT, W, H);
 
-                // Prepare outputs per frame
-                std::vector<std::string> points3d_bins;
-                std::vector<std::string> dispvec_bins;
-                std::vector<std::string> dispmgn_bins;
-
+                // Accumulate 3D data (NO per-frame .bin files)
+                DIC3Dcombined combined;
+                combined.pairIndices = {1, 2};  // Camera pair
                 std::vector<double> P3D_ref; // frame 1 reference
 
                 for (size_t fi=0; fi<dic1.disps.size(); ++fi) {
@@ -336,13 +314,14 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                             pts3d[k*3+0]=X[0]; pts3d[k*3+1]=X[1]; pts3d[k*3+2]=X[2];
                         }
                     }
-                    // Save points3d
-                    std::ostringstream p3d;
-                    p3d << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
-                        << "/points3d_S" << config_.subject_id << "_" << config_.material << "_" << config_.phase_id
-                        << "_T" << trial << "_pair" << pair << "_f" << std::setw(6) << std::setfill('0') << (fi+1) << ".bin";
-                    write_bin(p3d.str(), pts3d);
-                    points3d_bins.push_back(p3d.str());
+                    // Accumulate points3d for this frame
+                    Points3D frame_pts;
+                    for (size_t k=0; k<N; ++k) {
+                        frame_pts.x.push_back(pts3d[k*3+0]);
+                        frame_pts.y.push_back(pts3d[k*3+1]);
+                        frame_pts.z.push_back(pts3d[k*3+2]);
+                    }
+                    combined.Points3D.push_back(frame_pts);
 
                     // Compute displacement from frame 1
                     if (fi==0) P3D_ref = pts3d;
@@ -355,63 +334,36 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                         dispvec[k*3+0]=dx; dispvec[k*3+1]=dy; dispvec[k*3+2]=dz;
                         dispmgn[k]=std::sqrt(dx*dx+dy*dy+dz*dz);
                     }
-                    std::ostringstream dvb, dmb;
-                    dvb << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
-                        << "/dispvec_S" << config_.subject_id << "_" << config_.material << "_" << config_.phase_id
-                        << "_T" << trial << "_pair" << pair << "_f" << std::setw(6) << std::setfill('0') << (fi+1) << ".bin";
-                    dmb << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
-                        << "/dispmgn_S" << config_.subject_id << "_" << config_.material << "_" << config_.phase_id
-                        << "_T" << trial << "_pair" << pair << "_f" << std::setw(6) << std::setfill('0') << (fi+1) << ".bin";
-                    write_bin(dvb.str(), dispvec);
-                    write_bin(dmb.str(), dispmgn);
-                    dispvec_bins.push_back(dvb.str());
-                    dispmgn_bins.push_back(dmb.str());
+                    // Accumulate displacement data
+                    combined.Disp.DispVec.push_back(dispvec);
+                    combined.Disp.DispMgn.push_back(dispmgn);
                 }
 
-                std::ostringstream out3d;
-                out3d << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
-                      << "/dic3d_output_S" << config_.subject_id << "_" << config_.material << "_" << config_.phase_id
-                      << "_T" << trial << "_pair" << pair << ".json";
-                nlohmann::json j;
-                j["subject"] = config_.subject_id;
-                j["material"] = config_.material;
-                j["phase"] = config_.phase_id;
-                j["trial"] = trial;
-                j["pair"] = pair;
-                j["inputs"] = {
-                    {"cam1", cam1_bin},
-                    {"cam2", cam2_bin}
-                };
-                j["calibration"]["cam1_mat"] = calib_cam1;
-                j["calibration"]["cam2_mat"] = calib_cam2;
-                if (!L1.empty()) j["calibration"]["DLTparameters"]["cam1"] = L1;
-                if (!L2.empty()) j["calibration"]["DLTparameters"]["cam2"] = L2;
-                // Faces
-                j["Faces_width"] = W;
-                j["Faces_height"] = H;
-                // Save faces as a binary triplet list
-                std::ostringstream fbin;
-                fbin << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
-                     << "/faces_S" << config_.subject_id << "_" << config_.material << "_" << config_.phase_id
-                     << "_T" << trial << "_pair" << pair << ".bin";
-                std::vector<double> faces_d; faces_d.reserve(faces.size()); for (int v:faces) faces_d.push_back(static_cast<double>(v));
-                write_bin(fbin.str(), faces_d);
-                j["Faces_bin"] = fbin.str();
-                // Per-frame binaries
-                j["frames"] = nlohmann::json::array();
-                for (size_t fi=0; fi<points3d_bins.size(); ++fi){
-                    nlohmann::json jf;
-                    jf["f_index"] = static_cast<int>(fi+1);
-                    jf["points3d_bin"] = points3d_bins[fi];
-                    jf["dispvec_bin"] = dispvec_bins[fi];
-                    jf["dispmgn_bin"] = dispmgn_bins[fi];
-                    j["frames"].push_back(jf);
+                // Finalize combined structure
+                combined.Faces = faces;
+                combined.calibration.DLT_paths = {calib_cam1, calib_cam2};
+                combined.calibration.DLT_params = {L1, L2};
+                
+                // Optionally write single DIC3Dcombined .mat file
+                if (config_.generate_mat_files) {
+                    std::ostringstream matout;
+                    matout << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
+                           << "/DIC3Dcombined_" << config_.num_pair << "Pairs_stitched.mat";
+                    
+                    // Check if already exists (checkpoint)
+                    if (std::filesystem::exists(matout.str())) {
+                        std::cout << "Checkpoint found: " << matout.str() << " (skipping)" << std::endl;
+                    } else {
+                        bool success = MatWriter::write3DCombinedResults(matout.str(), combined);
+                        if (success) {
+                            std::cout << "Generated MATLAB .mat file: " << matout.str() << std::endl;
+                        } else {
+                            std::cerr << "Failed to write DIC3Dcombined .mat" << std::endl;
+                        }
+                    }
+                } else {
+                    std::cout << "3D reconstruction complete (generate_mat_files=false, no .mat output)" << std::endl;
                 }
-                j["status"] = "ok";
-                std::ofstream ofs(out3d.str());
-                ofs << j.dump(2) << std::endl;
-
-                std::cout << "Wrote 3D placeholder for trial " << trial << ", pair " << pair << std::endl;
             }
         }
         return true;

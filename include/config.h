@@ -48,6 +48,10 @@ public:
     bool showvisu = false;               // Boolean for visualization
     bool debug_mode = false;             // Debug mode flag
     
+    // Output format control
+    bool generate_mat_files = false;     // Generate MATLAB .mat files (default: false, true if debug_mode)
+    bool cleanup_cache_bins = false;     // Delete cached .bin files after use (default: false)
+    
     // Units and subregion (from dic_param.m or config)
     double units_per_pixel = 0.2;        // e.g., mm per pixel
     int subregion_radius = 20;           // default subset radius (pixels)
@@ -56,6 +60,7 @@ public:
     std::string material;                // Material name from frictional_conditions
     
     // Methods
+    Config();                            // Constructor to set defaults
     void loadGlobalParams();
     void loadDicParams();
     void updateVariables();

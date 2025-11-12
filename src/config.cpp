@@ -6,6 +6,13 @@
 #include <iostream>
 #include <filesystem>
 
+Config::Config() {
+    // Set generate_mat_files based on debug_mode
+    if (debug_mode) {
+        generate_mat_files = true;
+    }
+}
+
 void Config::loadGlobalParams() {
     // Set default paths based on current working directory
     setDefaultPaths();

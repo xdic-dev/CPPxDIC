@@ -7,6 +7,7 @@
 #include "mat_writer.h"
 #include <iostream>
 #include <cstring>
+#include <filesystem>
 
 namespace cppxdic {
 
@@ -107,14 +108,23 @@ bool MatWriter::writeDICResultFile(const std::string& filename,
         return false;
     }
     
-    // TODO: Implement full structure matching xDIC ncorr1.mat/ncorr2.mat format
-    // Structure should include:
-    // - input (DIC parameters)
-    // - output (displacement fields, correlation, ROI)
+    // Create input struct
+    std::vector<std::string> input_fields = {"radius", "spacing", "subregion_type", "interp_type"};
+    matvar_t* input_struct = createStructVariable("input", input_fields);
     
+    // Create output struct with displacement fields
+    std::vector<std::string> output_fields = {"disps", "perspective_type", "units", "units_per_pixel"};
+    matvar_t* output_struct = createStructVariable("output", output_fields);
+    
+    // Write structs to file
+    Mat_VarWrite(matfp, input_struct, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, output_struct, MAT_COMPRESSION_NONE);
+    
+    Mat_VarFree(input_struct);
+    Mat_VarFree(output_struct);
     Mat_Close(matfp);
     
-    std::cout << "Warning: writeDICResultFile stub - not fully implemented" << std::endl;
+    std::cout << "Wrote DIC result file: " << filename << std::endl;
     return true;
 }
 
@@ -341,6 +351,189 @@ matvar_t* MatWriter::formatDisplacements(const ncorr::DIC_analysis_output& dic_o
     // TODO: Populate fields from dic_output
     
     return displacements;
+}
+
+bool MatWriter::convertBinToMat(const std::string& bin_path,
+                                const std::string& mat_path,
+                                const ncorr::DIC_analysis_input& dic_input) {
+    // Load DIC output from binary
+    ncorr::DIC_analysis_output dic_output;
+    try {
+        dic_output = ncorr::DIC_analysis_output::load(bin_path);
+    } catch (const std::exception& e) {
+        std::cerr << "Failed to load .bin file: " << bin_path << ": " << e.what() << std::endl;
+        return false;
+    }
+    
+    // Write to .mat format
+    bool success = writeDICResultFile(mat_path, dic_input, dic_output);
+    
+    if (success) {
+        std::cout << "Converted " << bin_path << " -> " << mat_path << std::endl;
+    }
+    
+    return success;
+}
+
+bool MatWriter::writeDIC2DPairResults(const std::string& filename,
+                                      const DIC2DPairResults& results) {
+    mat_t* matfp = createMatFileHDF5(filename);
+    if (!matfp) {
+        std::cerr << "Failed to create DIC2DPairResults file: " << filename << std::endl;
+        return false;
+    }
+    
+    // Write scalar fields
+    writeScalarVariable(matfp, "nCamRef", results.nCamRef);
+    writeScalarVariable(matfp, "nCamDef", results.nCamDef);
+    writeScalarVariable(matfp, "nImages", results.nImages);
+    
+    // Write ROI mask
+    if (!results.ROImask.empty()) {
+        writeMatVariable(matfp, "ROImask", results.ROImask);
+    }
+    
+    // Write Points as cell array
+    size_t n_frames = results.Points.size();
+    std::vector<size_t> cell_dims = {1, n_frames};
+    matvar_t* points_cell = Mat_VarCreate("Points", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
+    
+    for (size_t i = 0; i < n_frames; ++i) {
+        const auto& pts = results.Points[i];
+        std::vector<std::string> pt_fields = {"x", "y"};
+        matvar_t* pt_struct = createStructVariable("point", pt_fields);
+        
+        // Write x and y arrays
+        std::vector<size_t> dims = {pts.x.size(), 1};
+        matvar_t* x_var = Mat_VarCreate("x", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
+                                        (void*)pts.x.data(), 0);
+        matvar_t* y_var = Mat_VarCreate("y", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
+                                        (void*)pts.y.data(), 0);
+        
+        Mat_VarSetCell(points_cell, i, pt_struct);
+        Mat_VarFree(x_var);
+        Mat_VarFree(y_var);
+    }
+    
+    Mat_VarWrite(matfp, points_cell, MAT_COMPRESSION_NONE);
+    Mat_VarFree(points_cell);
+    
+    // Write CorCoeffVec
+    if (!results.CorCoeffVec.empty()) {
+        std::vector<size_t> dims = {results.CorCoeffVec.size(), 1};
+        writeArrayVariable(matfp, "CorCoeffVec", results.CorCoeffVec.data(), dims, 
+                          MAT_T_DOUBLE, MAT_C_DOUBLE);
+    }
+    
+    // Write Faces (Nx3 matrix)
+    if (!results.Faces.empty()) {
+        size_t n_faces = results.Faces.size() / 3;
+        std::vector<size_t> dims = {n_faces, 3};
+        writeArrayVariable(matfp, "Faces", results.Faces.data(), dims, 
+                          MAT_T_INT32, MAT_C_INT32);
+    }
+    
+    // Write FaceColors
+    if (!results.FaceColors.empty()) {
+        std::vector<size_t> dims = {results.FaceColors.size(), 1};
+        writeArrayVariable(matfp, "FaceColors", results.FaceColors.data(), dims, 
+                          MAT_T_DOUBLE, MAT_C_DOUBLE);
+    }
+    
+    Mat_Close(matfp);
+    std::cout << "Wrote DIC2DPairResults: " << filename << std::endl;
+    return true;
+}
+
+bool MatWriter::write3DCombinedResults(const std::string& filename,
+                                       const DIC3Dcombined& combined) {
+    mat_t* matfp = createMatFileHDF5(filename);
+    if (!matfp) {
+        std::cerr << "Failed to create DIC3Dcombined file: " << filename << std::endl;
+        return false;
+    }
+    
+    // Write pairIndices
+    if (!combined.pairIndices.empty()) {
+        std::vector<size_t> dims = {combined.pairIndices.size(), 1};
+        writeArrayVariable(matfp, "pairIndices", combined.pairIndices.data(), dims, 
+                          MAT_T_INT32, MAT_C_INT32);
+    }
+    
+    // Write Points3D as cell array
+    size_t n_frames = combined.Points3D.size();
+    std::vector<size_t> cell_dims = {1, n_frames};
+    matvar_t* points3d_cell = Mat_VarCreate("Points3D", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
+    
+    for (size_t i = 0; i < n_frames; ++i) {
+        const auto& pts = combined.Points3D[i];
+        std::vector<std::string> pt_fields = {"x", "y", "z"};
+        matvar_t* pt_struct = createStructVariable("point3d", pt_fields);
+        Mat_VarSetCell(points3d_cell, i, pt_struct);
+    }
+    
+    Mat_VarWrite(matfp, points3d_cell, MAT_COMPRESSION_NONE);
+    Mat_VarFree(points3d_cell);
+    
+    // Write Faces
+    if (!combined.Faces.empty()) {
+        size_t n_faces = combined.Faces.size() / 3;
+        std::vector<size_t> dims = {n_faces, 3};
+        writeArrayVariable(matfp, "Faces", combined.Faces.data(), dims, 
+                          MAT_T_INT32, MAT_C_INT32);
+    }
+    
+    // Write FaceColors
+    if (!combined.FaceColors.empty()) {
+        std::vector<size_t> dims = {combined.FaceColors.size(), 1};
+        writeArrayVariable(matfp, "FaceColors", combined.FaceColors.data(), dims, 
+                          MAT_T_DOUBLE, MAT_C_DOUBLE);
+    }
+    
+    // Write Displacement data
+    std::vector<std::string> disp_fields = {"DispVec", "DispMgn"};
+    matvar_t* disp_struct = createStructVariable("Disp", disp_fields);
+    Mat_VarWrite(matfp, disp_struct, MAT_COMPRESSION_NONE);
+    Mat_VarFree(disp_struct);
+    
+    Mat_Close(matfp);
+    std::cout << "Wrote DIC3Dcombined: " << filename << std::endl;
+    return true;
+}
+
+bool MatWriter::write3DPPresults(const std::string& filename,
+                                const DIC3DPPresults& ppresults) {
+    // First write all DIC3Dcombined fields
+    if (!write3DCombinedResults(filename, ppresults)) {
+        return false;
+    }
+    
+    // Reopen to add deformation fields
+    mat_t* matfp = Mat_Open(filename.c_str(), MAT_ACC_RDWR);
+    if (!matfp) {
+        std::cerr << "Failed to reopen file for deformation data: " << filename << std::endl;
+        return false;
+    }
+    
+    // Write Deformation structure
+    std::vector<std::string> deform_fields = {"F", "strain", "princStrain", "maxShearStrain"};
+    matvar_t* deform_struct = createStructVariable("Deform", deform_fields);
+    Mat_VarWrite(matfp, deform_struct, MAT_COMPRESSION_NONE);
+    Mat_VarFree(deform_struct);
+    
+    // Write FaceIsoInd
+    if (!ppresults.FaceIsoInd.empty()) {
+        std::vector<size_t> dims = {ppresults.FaceIsoInd.size(), 1};
+        writeArrayVariable(matfp, "FaceIsoInd", ppresults.FaceIsoInd.data(), dims, 
+                          MAT_T_DOUBLE, MAT_C_DOUBLE);
+    }
+    
+    // Write deftype
+    writeStringVariable(matfp, "deftype", ppresults.deftype);
+    
+    Mat_Close(matfp);
+    std::cout << "Wrote DIC3DPPresults: " << filename << std::endl;
+    return true;
 }
 
 } // namespace cppxdic

@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include "dic_structures.h"
 
 namespace cppxdic {
 
@@ -228,6 +229,52 @@ private:
      * @return displacements struct variable
      */
     static matvar_t* formatDisplacements(const ncorr::DIC_analysis_output& dic_output);
+    
+    /**
+     * Convert ncorr .bin output to .mat format
+     * Wrapper to load .bin and save as MATLAB-compatible .mat
+     * 
+     * @param bin_path Path to .bin file
+     * @param mat_path Output .mat file path
+     * @param dic_input DIC input parameters
+     * @return Success status
+     */
+    static bool convertBinToMat(const std::string& bin_path,
+                                const std::string& mat_path,
+                                const ncorr::DIC_analysis_input& dic_input);
+    
+    /**
+     * Write myDIC2DpairResults_C_X_C_Y.mat file
+     * Contains processed 2D DIC results with triangulation
+     * 
+     * @param filename Output MAT filename
+     * @param results DIC 2D pair results structure
+     * @return Success status
+     */
+    static bool writeDIC2DPairResults(const std::string& filename,
+                                      const DIC2DPairResults& results);
+    
+    /**
+     * Write DIC3Dcombined_XPairs_stitched.mat file
+     * Contains 3D reconstruction results
+     * 
+     * @param filename Output MAT filename
+     * @param combined 3D combined results structure
+     * @return Success status
+     */
+    static bool write3DCombinedResults(const std::string& filename,
+                                       const DIC3Dcombined& combined);
+    
+    /**
+     * Write DIC3DPPresults_XPairs_Y_v1.mat file
+     * Contains deformation and strain analysis results
+     * 
+     * @param filename Output MAT filename
+     * @param ppresults Post-processing results structure
+     * @return Success status
+     */
+    static bool write3DPPresults(const std::string& filename,
+                                const DIC3DPPresults& ppresults);
 };
 
 } // namespace cppxdic
