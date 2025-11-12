@@ -9,8 +9,8 @@ echo "Building CPPXDIC - C++ Digital Image Correlation Library"
 echo "======================================================"
 
 # Check if ncorr library exists
-NCORR_LIB="../ncorr_2D_cpp-master/lib/libncorr.a"
-NCORR_INCLUDE="../ncorr_2D_cpp-master/include"
+NCORR_LIB="Tools/CppNCorr/lib/libncorr.a"
+NCORR_INCLUDE="Tools/CppNCorr/include"
 
 if [ ! -f "$NCORR_LIB" ]; then
     echo "Error: ncorr library not found at $NCORR_LIB"
@@ -67,10 +67,10 @@ else
     # Manual build fallback
     echo "Building manually..."
     g++ -std=c++17 -O2 -Wall -Wextra \
-        -Iinclude -I../ncorr_2D_cpp-master/include -isystem /opt/homebrew/include \
+        -Iinclude -ITools/CppNCorr/include -isystem /opt/homebrew/include \
         src/main.cpp src/config.cpp src/dic_analysis.cpp src/utils.cpp \
         $(pkg-config --cflags --libs opencv4 2>/dev/null || pkg-config --cflags --libs opencv) \
-        -L../ncorr_2D_cpp-master/lib -lncorr \
+        -LTools/CppNCorr/lib -lncorr \
         -L/opt/homebrew/lib -lfftw3 \
         -lspqr -lcholmod -lsuitesparseconfig -lamd -lcolamd \
         -llapack -lblas -pthread \

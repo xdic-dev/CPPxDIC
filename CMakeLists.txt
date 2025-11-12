@@ -10,7 +10,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -isystem /opt/homebrew/include")
 
 # Include directories
 include_directories(include)
-include_directories(../ncorr_2D_cpp-master/include)
+include_directories(Tools/CppNCorr/include)
 
 # Add executable with new source files
 add_executable(cppxdic
@@ -30,7 +30,7 @@ include_directories(${OpenCV_INCLUDE_DIRS})
 target_link_libraries(cppxdic ${OpenCV_LIBS})
 
 # Add ncorr library
-find_library(NCORR_LIBRARY NAMES ncorr PATHS ../ncorr_2D_cpp-master/lib)
+find_library(NCORR_LIBRARY NAMES ncorr PATHS Tools/CppNCorr/lib)
 target_link_libraries(cppxdic ${NCORR_LIBRARY})
 
 # Add OpenCV libraries explicitly (following ncorr pattern)
@@ -110,6 +110,32 @@ target_link_libraries(cppxdic ${BLAS_LIBRARY})
 find_package(Threads)
 target_link_libraries(cppxdic ${CMAKE_THREAD_LIBS_INIT})
 
+# Add OpenMP support (required by ncorr library) - following ncorr's approach
+if(APPLE)
+    # Check for Homebrew OpenMP installation
+    if(EXISTS "/opt/homebrew/opt/libomp")
+        set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include")
+        set(OpenMP_C_LIB_NAMES "omp")
+        set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include")
+        set(OpenMP_CXX_LIB_NAMES "omp")
+        set(OpenMP_omp_LIBRARY "/opt/homebrew/opt/libomp/lib/libomp.dylib")
+    elseif(EXISTS "/usr/local/opt/libomp")
+        set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp -I/usr/local/opt/libomp/include")
+        set(OpenMP_C_LIB_NAMES "omp")
+        set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I/usr/local/opt/libomp/include")
+        set(OpenMP_CXX_LIB_NAMES "omp")
+        set(OpenMP_omp_LIBRARY "/usr/local/opt/libomp/lib/libomp.dylib")
+    endif()
+endif()
+
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    message(STATUS "OpenMP found - enabling parallel support")
+    target_link_libraries(cppxdic OpenMP::OpenMP_CXX)
+else()
+    message(WARNING "OpenMP not found - please install: brew install libomp")
+endif()
+
 # Compiler flags
 target_compile_options(cppxdic PRIVATE -Wall -Wextra -O2)
 
@@ -119,8 +145,8 @@ file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/video)
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/images)
 
 # Copy test images if they exist
-if(EXISTS ${CMAKE_SOURCE_DIR}/../ncorr_2D_cpp-master/test/images)
-    file(COPY ${CMAKE_SOURCE_DIR}/../ncorr_2D_cpp-master/test/images 
+if(EXISTS ${CMAKE_SOURCE_DIR}/Tools/CppNCorr/test/examples/ohtcfrp/images)
+    file(COPY ${CMAKE_SOURCE_DIR}/Tools/CppNCorr/test/examples/ohtcfrp/images 
          DESTINATION ${CMAKE_BINARY_DIR})
 endif()
 
@@ -129,7 +155,7 @@ install(TARGETS cppxdic DESTINATION bin)
 
 # Print configuration info
 message(STATUS "Building cppxdic - C++ equivalent of Matlab xDIC")
-message(STATUS "Using ncorr library from: ${CMAKE_SOURCE_DIR}/../ncorr_2D_cpp-master/lib/libncorr.a")
+message(STATUS "Using ncorr library from: ${CMAKE_SOURCE_DIR}/Tools/CppNCorr/lib/libncorr.a")
 message(STATUS "OpenCV version: ${OpenCV_VERSION}")
 
 # Find and link nlohmann/json library for ncorr_test_json, ncorr_test_verif
