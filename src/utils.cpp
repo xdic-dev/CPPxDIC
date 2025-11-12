@@ -1,0 +1,589 @@
+/**
+ * Utility functions implementation for CPPXDIC
+ */
+
+#include "utils.h"
+#include <iostream>
+#include <filesystem>
+#include <regex>
+#include <sstream>
+#include <iomanip>
+#include <fstream>
+// Video IO
+#include <opencv2/opencv.hpp>
+// MAT file IO
+#include <matio.h>
+// JSON
+#include <nlohmann/json.hpp>
+
+bool Utils::dicCheck(const Config& config) {
+    std::cout << "Checking data and protocol..." << std::endl;
+    
+    bool success = true;
+    
+    // Check parallel processing requirements
+    if (config.parallel_processing) {
+        std::cout << "Parallel processing is enabled" << std::endl;
+        
+        if (!checkROIReferences(config)) {
+            success = false;
+        }
+        
+        if (!checkSeedReferences(config)) {
+            success = false;
+        }
+    }
+    
+    // Check protocol files
+    if (!checkProtocolFiles(config)) {
+        success = false;
+    }
+    
+    // Check calibration files
+    if (!checkCalibrationFiles(config)) {
+        success = false;
+    }
+    
+    if (success) {
+        std::cout << "...done Checking." << std::endl;
+    }
+    
+    return success;
+}
+
+bool Utils::checkCalibrationFiles(const Config& config) {
+    try {
+        std::string calib_dir = config.dic_path + "/" + config.subject_id + "/calib/" + config.calib_folder_set + "/";
+        if (!std::filesystem::exists(calib_dir)) {
+            std::cerr << "Calibration directory not found: " << calib_dir << std::endl;
+            return false;
+        }
+        bool cam1=false, cam2=false;
+        for (const auto& entry : std::filesystem::directory_iterator(calib_dir)) {
+            if (!entry.is_regular_file()) continue;
+            auto name = entry.path().filename().string();
+            std::string lower = name; std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            if (lower.find("cam_1.mat") != std::string::npos || lower.find("camera1.mat") != std::string::npos) cam1 = true;
+            if (lower.find("cam_2.mat") != std::string::npos || lower.find("camera2.mat") != std::string::npos) cam2 = true;
+        }
+        if (!cam1 || !cam2) {
+            std::cerr << "Calibration files missing in " << calib_dir << ": cam_1.mat=" << (cam1?"ok":"missing")
+                      << ", cam_2.mat=" << (cam2?"ok":"missing") << std::endl;
+            return false;
+        }
+        std::cout << "Calibration files found in " << calib_dir << std::endl;
+        return true;
+    } catch (...) {
+        std::cerr << "Error while checking calibration files" << std::endl;
+        return false;
+    }
+}
+
+bool Utils::checkROIReferences(const Config& config) {
+    std::cout << "Checking ROI References..." << std::endl;
+    
+    for (int pair_i = 1; pair_i <= config.num_pair; ++pair_i) {
+        std::ostringstream oss;
+        oss << config.dic_path << "/" << config.subject_id << "/" << config.material 
+            << "/REF_MASK_" << std::setfill('0') << std::setw(3) << config.ref_trial_id 
+            << "_" << config.phase_id << "_pair" << pair_i << ".mat";
+        
+        std::string roifile = oss.str();
+        
+        if (!fileExists(roifile)) {
+            std::cerr << "This file " << roifile << " must exist to be able to run DIC analysis in parallel." << std::endl;
+            std::cerr << "This file comes from Drawing Reference ROI process." << std::endl;
+            std::cerr << "Error: ROI file for the stereopair " << pair_i 
+                      << " from the Reference Trial " << config.ref_trial_id 
+                      << " for the subject " << config.subject_id << " not found." << std::endl;
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+bool Utils::checkSeedReferences(const Config& config) {
+    std::cout << "Checking SEED References..." << std::endl;
+    
+    for (int pair_i = 1; pair_i <= config.num_pair; ++pair_i) {
+        std::ostringstream oss;
+        oss << config.dic_path << "/" << config.subject_id << "/" << config.material 
+            << "/REF_SEED_" << std::setfill('0') << std::setw(3) << config.ref_trial_id 
+            << "_" << config.phase_id << "_pair" << pair_i << ".mat";
+        
+        std::string seedfile = oss.str();
+        
+        if (!fileExists(seedfile)) {
+            std::cerr << "This file " << seedfile << " must exist to be able to run DIC analysis in parallel." << std::endl;
+            std::cerr << "This file comes from Selecting the seed of ROI process." << std::endl;
+            std::cerr << "Error: SEED file for the stereopair " << pair_i 
+                      << " from the Reference Trial " << config.ref_trial_id 
+                      << " for the subject " << config.subject_id << " not found." << std::endl;
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+bool Utils::checkProtocolFiles(const Config& config) {
+    std::string protocol_path = config.data_path + "/rawdata/" + config.subject_id 
+                              + "/speckles/" + config.material + "/protocol/";
+    
+    auto protocol_files = findFiles(protocol_path, "*.mat");
+    
+    if (protocol_files.empty()) {
+        std::cerr << "Protocol files in " << protocol_path << " must exist to be able to run DIC analysis." << std::endl;
+        std::cerr << "Error: Protocol not found." << std::endl;
+        return false;
+    }
+    
+    return true;
+}
+
+bool Utils::fileExists(const std::string& path) {
+    return std::filesystem::exists(path) && std::filesystem::is_regular_file(path);
+}
+
+bool Utils::directoryExists(const std::string& path) {
+    return std::filesystem::exists(path) && std::filesystem::is_directory(path);
+}
+
+std::vector<std::string> Utils::findFiles(const std::string& directory, 
+                                        const std::string& pattern) {
+    std::vector<std::string> files;
+    
+    if (!directoryExists(directory)) {
+        return files;
+    }
+    
+    try {
+        // Convert glob pattern to regex
+        std::string regex_pattern = pattern;
+        std::replace(regex_pattern.begin(), regex_pattern.end(), '*', '.');
+        regex_pattern = ".*" + regex_pattern + ".*";
+        
+        std::regex file_regex(regex_pattern);
+        
+        for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+            if (entry.is_regular_file()) {
+                std::string filename = entry.path().filename().string();
+                if (std::regex_match(filename, file_regex)) {
+                    files.push_back(entry.path().string());
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error searching for files: " << e.what() << std::endl;
+    }
+    
+    return files;
+}
+
+std::vector<std::string> Utils::split(const std::string& str, char delimiter) {
+    std::vector<std::string> tokens;
+    std::stringstream ss(str);
+    std::string token;
+    
+    while (std::getline(ss, token, delimiter)) {
+        tokens.push_back(token);
+    }
+    
+    return tokens;
+}
+
+void Utils::getCamerasForPair(int stereopair, int& cam_first, int& cam_second) {
+    switch (stereopair) {
+        case 1:
+            cam_first = 1;
+            cam_second = 2;
+            break;
+        case 2:
+            cam_first = 4;
+            cam_second = 3;
+            break;
+        default:
+            throw std::runtime_error("Unrecognized stereopair value");
+    }
+}
+
+static bool ensure_dir(const std::string& path) {
+    try {
+        if (!std::filesystem::exists(path)) {
+            return std::filesystem::create_directories(path);
+        }
+        return true;
+    } catch (...) { return false; }
+}
+
+static std::string find_video_file(const std::string& base_raw_path,
+                                   const std::string& subject,
+                                   const std::string& material,
+                                   const std::string& trialname,
+                                   int cam_id) {
+    std::string vid_dir = base_raw_path + "/" + subject + "/speckles/" + material + "/vid";
+    std::cout << "Video directory: " << vid_dir << std::endl;
+    if (!Utils::directoryExists(vid_dir)) return "";
+    // Pattern like: <subject>_<material>_speckles_<trialname with 3 digits>_.*_cam<cam_id>.mp4
+    // Example: S09_coating_speckles_007_545_050_trial005_cam_1.mp4
+    std::regex pat(subject + "_" + material + "_speckles_" + trialname + "_.*_cam_" + std::to_string(cam_id) + ".*\\.mp4$");
+    for (const auto& entry : std::filesystem::directory_iterator(vid_dir)) {
+        if (!entry.is_regular_file()) continue;
+        std::string name = entry.path().filename().string();
+        if (std::regex_match(name, pat)) {
+            return entry.path().string();
+        }
+    }
+    return "";
+}
+
+std::string padNumberWithZeros(int num, int n) {
+    std::ostringstream oss;
+    oss << std::setw(n) << std::setfill('0') << num;
+    return oss.str();
+}
+
+bool Utils::importRawVid(const Config& config,
+                         int trial,
+                         int stereopair,
+                         int frameStart,
+                         int frameEnd,
+                         int frameJump,
+                         std::vector<std::string>& cam1Frames,
+                         std::vector<std::string>& cam2Frames) {
+    try {
+        int cam_first = 0, cam_second = 0;
+        getCamerasForPair(stereopair, cam_first, cam_second);
+
+        std::string trialname = padNumberWithZeros(trial, 3);
+        std::string base_raw = config.data_path + "/rawdata";
+
+        std::string vid1 = find_video_file(base_raw, config.subject_id, config.material, trialname, cam_first);
+        std::string vid2 = find_video_file(base_raw, config.subject_id, config.material, trialname, cam_second);
+        if (vid1.empty() || vid2.empty()) {
+            std::cerr << "Video files not found for trial=" << trial << " pair=" << stereopair << std::endl;
+            return false;
+        }
+
+        cv::VideoCapture cap1(vid1);
+        cv::VideoCapture cap2(vid2);
+        if (!cap1.isOpened() || !cap2.isOpened()) {
+            std::cerr << "Failed to open video files: " << vid1 << " or " << vid2 << std::endl;
+            return false;
+        }
+
+        std::cout << "Video loaded successfully." << std::endl;
+        std::cout << "Video 1: " << vid1 << std::endl;
+        std::cout << "Video 2: " << vid2 << std::endl;
+
+        int total1 = static_cast<int>(cap1.get(cv::CAP_PROP_FRAME_COUNT));
+        int total2 = static_cast<int>(cap2.get(cv::CAP_PROP_FRAME_COUNT));
+        if (frameEnd <= 0) frameEnd = std::min(total1, total2);
+        frameStart = std::max(1, frameStart);
+        frameEnd = std::min(frameEnd, std::min(total1, total2));
+        if (frameJump <= 0) frameJump = 1;
+
+        // Output directory
+        std::ostringstream odir;
+        odir << config.dic_path << "/" << config.subject_id << "/" << config.material
+             << "/tmp_frames/T" << trial << "/pair" << stereopair << "/";
+        std::string base_dir = odir.str();
+        std::string cam1_dir = base_dir + "cam" + std::to_string(cam_first);
+        std::string cam2_dir = base_dir + "cam" + std::to_string(cam_second);
+        if (!ensure_dir(cam1_dir) || !ensure_dir(cam2_dir)) {
+            std::cerr << "Failed to create frame directories" << std::endl;
+            return false;
+        }
+
+        // Extract frames
+        for (int f = frameStart; f <= frameEnd; f += frameJump) {
+            cap1.set(cv::CAP_PROP_POS_FRAMES, f - 1);
+            cap2.set(cv::CAP_PROP_POS_FRAMES, f - 1);
+            cv::Mat im1, im2;
+            if (!cap1.read(im1) || !cap2.read(im2)) break;
+
+            std::ostringstream f1, f2;
+            f1 << cam1_dir << "/frame_" << std::setw(6) << std::setfill('0') << f << ".png";
+            f2 << cam2_dir << "/frame_" << std::setw(6) << std::setfill('0') << f << ".png";
+            cv::imwrite(f1.str(), im1);
+            cv::imwrite(f2.str(), im2);
+            cam1Frames.push_back(f1.str());
+            cam2Frames.push_back(f2.str());
+        }
+
+        return !cam1Frames.empty() && !cam2Frames.empty();
+    } catch (const std::exception& e) {
+        std::cerr << "importRawVid error: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+bool Utils::importVid(const Config& config,
+                      int trial,
+                      int stereopair,
+                      std::vector<std::string>& cam1Frames,
+                      std::vector<std::string>& cam2Frames) {
+    auto calc_ranges = [](const std::string& phase, int nLoad, int nSlide, int nRelax, int& s, int& e) {
+        if (phase == "loading") { s = 1; e = s + nLoad - 1; return true; }
+        if (phase == "slide1") { s = nLoad + 1; e = s + nSlide - 1; return true; }
+        if (phase == "relax1") { s = nLoad + nSlide + 1; e = s + nRelax - 1; return true; }
+        if (phase == "slide2") { s = nLoad + nSlide + nRelax + 1; e = s + nSlide - 1; return true; }
+        if (phase == "relax2") { s = nLoad + 2*nSlide + nRelax + 1; e = s + nRelax - 1; return true; }
+        if (phase == "all") { s = 1; e = nLoad + 2*nSlide + 2*nRelax; return true; }
+        return false;
+    };
+
+    int frameStart = config.idx_frame_start;
+    int frameEnd = config.idx_frame_end;
+    int frameJump = config.frame_jump;
+
+    // Read protocol to compute ranges if available
+    try {
+        std::string protocol_dir = config.data_path + "/rawdata/" + config.subject_id + "/speckles/" + config.material + "/protocol/";
+        auto protos = Utils::findFiles(protocol_dir, "*.mat");
+        if (!protos.empty()) {
+            std::string proto_file = protos.front();
+            mat_t *matfp = Mat_Open(proto_file.c_str(), MAT_ACC_RDONLY);
+            if (matfp) {
+                matvar_t *cond = Mat_VarRead(matfp, "cond");
+                if (cond && cond->class_type == MAT_C_STRUCT) {
+                    matvar_t *table = Mat_VarGetStructFieldByName(cond, "table", 0);
+                    matvar_t *dur = Mat_VarGetStructFieldByName(cond, "dur", 0);
+                    if (table && table->class_type == MAT_C_CELL && dur && (dur->class_type == MAT_C_DOUBLE || dur->class_type == MAT_C_SINGLE)) {
+                        int nLoad = 0, nSlide = 0, nRelax = 0;
+                        if (dur->data && dur->nbytes >= 5 * dur->data_size) {
+                            double d3 = 0.0, d5 = 0.0;
+                            if (dur->class_type == MAT_C_DOUBLE) {
+                                const double* dd = static_cast<const double*>(dur->data);
+                                d3 = dd[2]; d5 = dd[4];
+                            } else {
+                                const float* ff = static_cast<const float*>(dur->data);
+                                d3 = ff[2]; d5 = ff[4];
+                            }
+                            int fps = 50;
+                            nLoad = static_cast<int>(std::round(d3/1e3 * fps));
+                            // Slide duration depends on dst/spd
+                            size_t ntrial = table->dims[0];
+                            size_t ncond = table->dims[1];
+                            size_t i = static_cast<size_t>(std::max(1, trial) - 1);
+                            auto cell_at = [&](size_t ii, size_t jj) -> matvar_t* {
+                                size_t idx = ii + jj * ntrial;
+                                return static_cast<matvar_t**>(table->data)[idx];
+                            };
+                            double dst = 0.0, spd = 0.0;
+                            if (ncond >= 5) {
+                                matvar_t* c_dst = cell_at(i, 4);
+                                matvar_t* c_spd = cell_at(i, 3);
+                                if (c_dst && c_dst->data) {
+                                    if (c_dst->class_type == MAT_C_DOUBLE) dst = static_cast<const double*>(c_dst->data)[0];
+                                    else if (c_dst->class_type == MAT_C_SINGLE) dst = static_cast<const float*>(c_dst->data)[0];
+                                }
+                                if (c_spd && c_spd->data) {
+                                    if (c_spd->class_type == MAT_C_DOUBLE) spd = static_cast<const double*>(c_spd->data)[0];
+                                    else if (c_spd->class_type == MAT_C_SINGLE) spd = static_cast<const float*>(c_spd->data)[0];
+                                }
+                            }
+                            if (spd > 0.0) nSlide = static_cast<int>(std::round(dst/spd * fps)); else nSlide = 0;
+                            nRelax = static_cast<int>(std::round(d5/1e3 * fps));
+                            int s=frameStart, e=frameEnd;
+                            if (calc_ranges(config.phase_id, nLoad, nSlide, nRelax, s, e)) {
+                                frameStart = s; frameEnd = e;
+                            }
+                        }
+                    }
+                }
+                if (cond) Mat_VarFree(cond);
+                Mat_Close(matfp);
+            }
+        }
+    } catch (...) {
+        // Fallback to config frames silently
+    }
+
+    return importRawVid(config, trial, stereopair, frameStart, frameEnd, frameJump, cam1Frames, cam2Frames);
+}
+
+bool Utils::loadROIFromMat(const Config& config,
+                           int trial,
+                           int stereopair,
+                           std::string& roiJsonPath,
+                           std::string& roiMaskImagePath) {
+    try {
+        std::ostringstream matname;
+        matname << config.dic_path << "/" << config.subject_id << "/" << config.material
+                << "/REF_MASK_" << std::setw(3) << std::setfill('0') << config.ref_trial_id
+                << "_" << config.phase_id << "_pair" << stereopair << ".mat";
+        std::string mat_path = matname.str();
+        if (!fileExists(mat_path)) {
+            roiJsonPath.clear();
+            roiMaskImagePath.clear();
+            return false;
+        }
+        cv::Mat maskImg;
+        mat_t *matfp = Mat_Open(mat_path.c_str(), MAT_ACC_RDONLY);
+        if (matfp) {
+            // Read exact Matlab variable name 'refmask'
+            matvar_t *mv = Mat_VarRead(matfp, "refmask");
+            if (mv && mv->rank == 2 && mv->data && mv->dims[0] > 0 && mv->dims[1] > 0) {
+                size_t h = mv->dims[0], w = mv->dims[1];
+                cv::Mat m(h, w, CV_8UC1, cv::Scalar(0));
+                if (mv->class_type == MAT_C_DOUBLE) {
+                    const double* d = static_cast<const double*>(mv->data);
+                    for (size_t y=0; y<h; ++y) for (size_t x=0; x<w; ++x) m.at<uchar>(y,x) = d[y + x*h] > 0.5 ? 255 : 0;
+                } else if (mv->class_type == MAT_C_SINGLE) {
+                    const float* d = static_cast<const float*>(mv->data);
+                    for (size_t y=0; y<h; ++y) for (size_t x=0; x<w; ++x) m.at<uchar>(y,x) = d[y + x*h] > 0.5 ? 255 : 0;
+                } else if (mv->class_type == MAT_C_UINT8) {
+                    const uint8_t* d = static_cast<const uint8_t*>(mv->data);
+                    for (size_t y=0; y<h; ++y) for (size_t x=0; x<w; ++x) m.at<uchar>(y,x) = d[y + x*h] ? 255 : 0;
+                }
+                maskImg = m.clone();
+            }
+            if (mv) Mat_VarFree(mv);
+            Mat_Close(matfp);
+        }
+        std::ostringstream jsonname;
+        jsonname << config.dic_path << "/" << config.subject_id << "/" << config.material
+                 << "/REF_MASK_" << config.subject_id << "_" << config.material << "_" << config.phase_id
+                 << "_T" << trial << "_pair" << stereopair << ".json";
+        roiJsonPath = jsonname.str();
+        // If mask found, write mask image alongside JSON
+        roiMaskImagePath.clear();
+        if (!maskImg.empty()) {
+            std::ostringstream pm;
+            pm << config.dic_path << "/" << config.subject_id << "/" << config.material
+               << "/REF_MASK_" << config.subject_id << "_" << config.material << "_" << config.phase_id
+               << "_T" << trial << "_pair" << stereopair << ".png";
+            if (ensure_dir(std::filesystem::path(pm.str()).parent_path().string())) {
+                cv::imwrite(pm.str(), maskImg);
+                roiMaskImagePath = pm.str();
+            }
+        }
+        nlohmann::json j;
+        j["trial"] = trial;
+        j["pair"] = stereopair;
+        j["phase"] = config.phase_id;
+        j["source"] = { {"type","mat"}, {"path", mat_path} };
+        j["mask_path"] = roiMaskImagePath;
+        std::ofstream ofs(roiJsonPath);
+        ofs << j.dump(2) << std::endl;
+        return true;
+    } catch (...) {
+        roiJsonPath.clear();
+        roiMaskImagePath.clear();
+        return false;
+    }
+}
+
+bool Utils::loadSeedFromMat(const Config& config,
+                            int trial,
+                            int stereopair,
+                            std::string& seedJsonPath) {
+    try {
+        std::ostringstream matname;
+        matname << config.dic_path << "/" << config.subject_id << "/" << config.material
+                << "/REF_SEED_" << std::setw(3) << std::setfill('0') << config.ref_trial_id
+                << "_" << config.phase_id << "_pair" << stereopair << ".mat";
+        std::string mat_path = matname.str();
+        if (!fileExists(mat_path)) {
+            seedJsonPath.clear();
+            return false;
+        }
+        std::vector<std::string> varnames;
+        std::vector<std::pair<double,double>> seeds;
+        double radius = static_cast<double>(config.subregion_radius);
+        mat_t *matfp = Mat_Open(mat_path.c_str(), MAT_ACC_RDONLY);
+        if (matfp) {
+            // Enumerate variables and collect candidates
+            matvar_t *vinfo = nullptr;
+            std::vector<std::string> candidates;
+            while ((vinfo = Mat_VarReadNextInfo(matfp)) != nullptr) {
+                if (vinfo->name) {
+                    varnames.emplace_back(vinfo->name);
+                    std::string n(vinfo->name);
+                    std::string nl = n; std::transform(nl.begin(), nl.end(), nl.begin(), ::tolower);
+                    if (nl.find("seed") != std::string::npos || nl == "xy" || nl == "points") {
+                        candidates.push_back(n);
+                    } else if (nl == "radius" || nl == "r") {
+                        // handled later when reading
+                    }
+                }
+                Mat_VarFree(vinfo);
+            }
+            Mat_Close(matfp);
+            // Reopen to read
+            matfp = Mat_Open(mat_path.c_str(), MAT_ACC_RDONLY);
+            if (matfp) {
+                auto try_read_points = [&](const std::string& name)->bool {
+                    matvar_t *mv = Mat_VarRead(matfp, name.c_str());
+                    if (!mv) return false;
+                    bool ok = false;
+                    if (mv->rank == 2 && mv->data && mv->dims[1] >= 2) {
+                        size_t rows = mv->dims[0];
+                        size_t cols = mv->dims[1];
+                        if (cols >= 2 && rows >= 1) {
+                            if (mv->class_type == MAT_C_DOUBLE) {
+                                const double* d = static_cast<const double*>(mv->data);
+                                for (size_t i=0;i<rows;i++) seeds.emplace_back(d[i + 0*rows], d[i + 1*rows]);
+                                ok = true;
+                            } else if (mv->class_type == MAT_C_SINGLE) {
+                                const float* d = static_cast<const float*>(mv->data);
+                                for (size_t i=0;i<rows;i++) seeds.emplace_back(d[i + 0*rows], d[i + 1*rows]);
+                                ok = true;
+                            }
+                        }
+                    }
+                    Mat_VarFree(mv);
+                    return ok;
+                };
+                bool got = false;
+                for (const auto& c : candidates) { if (try_read_points(c)) { got = true; break; } }
+                // Also try common names
+                if (!got) { try_read_points("seeds"); }
+                if (!got) { try_read_points("seed"); }
+                if (!got) { try_read_points("xy"); }
+                // Try read radius
+                auto try_read_radius = [&](const std::string& name){
+                    matvar_t *mv = Mat_VarRead(matfp, name.c_str());
+                    if (!mv) return;
+                    if (mv->data) {
+                        if (mv->class_type == MAT_C_DOUBLE) radius = static_cast<const double*>(mv->data)[0];
+                        else if (mv->class_type == MAT_C_SINGLE) radius = static_cast<const float*>(mv->data)[0];
+                        else if (mv->class_type == MAT_C_INT32) radius = static_cast<const int32_t*>(mv->data)[0];
+                    }
+                    Mat_VarFree(mv);
+                };
+                try_read_radius("radius");
+                try_read_radius("r");
+                Mat_Close(matfp);
+            }
+        }
+        std::ostringstream jsonname;
+        jsonname << config.dic_path << "/" << config.subject_id << "/" << config.material
+                 << "/REF_SEED_" << config.subject_id << "_" << config.material << "_" << config.phase_id
+                 << "_T" << trial << "_pair" << stereopair << ".json";
+        seedJsonPath = jsonname.str();
+        std::ofstream ofs(seedJsonPath);
+        ofs << "{\n";
+        ofs << "  \"trial\": " << trial << ",\n";
+        ofs << "  \"pair\": " << stereopair << ",\n";
+        ofs << "  \"phase\": \"" << config.phase_id << "\",\n";
+        ofs << "  \"source\": { \"type\": \"mat\", \"path\": \"" << mat_path << "\" },\n";
+        ofs << "  \"vars\": [";
+        for (size_t i=0;i<varnames.size();++i) { ofs << "\"" << varnames[i] << "\""; if (i+1<varnames.size()) ofs << ", "; }
+        ofs << "],\n";
+        ofs << "  \"radius\": " << radius << ",\n";
+        ofs << "  \"seeds\": [";
+        for (size_t i=0;i<seeds.size();++i) {
+            ofs << "{ \"x\": " << seeds[i].first << ", \"y\": " << seeds[i].second << " }";
+            if (i+1<seeds.size()) ofs << ", ";
+        }
+        ofs << "]\n";
+        ofs << "}\n";
+        return true;
+    } catch (...) {
+        seedJsonPath.clear();
+        return false;
+    }
+}
