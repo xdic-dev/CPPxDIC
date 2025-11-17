@@ -5,6 +5,7 @@
  */
 
 #include "roi_manager.h"
+#include "mat_reader.h"
 #include <matio.h>
 #include <iostream>
 #include <filesystem>
@@ -149,22 +150,63 @@ bool ROIManager::loadMatchingResults(const std::string& matching_file,
         return false;
     }
     
-    // Structure:
-    // matching.reference_save.roi.mask → refmask_REF
-    // matching.current_save.roi.mask → refmask_trial  
-    // matching.data_dic_save.displacements.plot_u_ref_formatted → U
-    // matching.data_dic_save.displacements.plot_v_ref_formatted → V
+    std::cout << "Loading matching results from: " << matching_file << std::endl;
     
-    // This is a simplified version - full implementation would need to navigate the struct hierarchy
-    // For now, we'll load the basic structure
+    // Load reference mask: reference_save.roi.mask
+    matvar_t* ref_roi_mask = MatReader::readNestedField(matfp, "reference_save.roi.mask");
+    if (ref_roi_mask) {
+        refmask_REF = MatReader::readImage(ref_roi_mask);
+        Mat_VarFree(ref_roi_mask);
+        std::cout << "  Loaded reference ROI mask: " << refmask_REF.size() << std::endl;
+    } else {
+        std::cerr << "  Warning: Could not load reference_save.roi.mask" << std::endl;
+    }
     
-    // TODO: Complete implementation to match MATLAB structure
-    // This requires proper struct navigation using matio
+    // Load current mask: current_save.roi.mask
+    matvar_t* cur_roi_mask = MatReader::readNestedField(matfp, "current_save.roi.mask");
+    if (cur_roi_mask) {
+        refmask_trial = MatReader::readImage(cur_roi_mask);
+        Mat_VarFree(cur_roi_mask);
+        std::cout << "  Loaded current ROI mask: " << refmask_trial.size() << std::endl;
+    } else {
+        std::cerr << "  Warning: Could not load current_save.roi.mask" << std::endl;
+    }
+    
+    // Load displacements: data_dic_save.displacements.plot_u_ref_formatted (cell array)
+    matvar_t* u_cell = MatReader::readNestedField(matfp, "data_dic_save.displacements.plot_u_ref_formatted");
+    if (u_cell && u_cell->class_type == MAT_C_CELL) {
+        // Get first cell (frame 0)
+        matvar_t* u_mat = MatReader::getCellElement(u_cell, 0);
+        if (u_mat) {
+            U_mapped = MatReader::readImage(u_mat);
+            std::cout << "  Loaded U displacements: " << U_mapped.size() << std::endl;
+        }
+        Mat_VarFree(u_cell);
+    } else {
+        std::cerr << "  Warning: Could not load plot_u_ref_formatted" << std::endl;
+    }
+    
+    // Load V displacements: data_dic_save.displacements.plot_v_ref_formatted (cell array)
+    matvar_t* v_cell = MatReader::readNestedField(matfp, "data_dic_save.displacements.plot_v_ref_formatted");
+    if (v_cell && v_cell->class_type == MAT_C_CELL) {
+        // Get first cell (frame 0)
+        matvar_t* v_mat = MatReader::getCellElement(v_cell, 0);
+        if (v_mat) {
+            V_mapped = MatReader::readImage(v_mat);
+            std::cout << "  Loaded V displacements: " << V_mapped.size() << std::endl;
+        }
+        Mat_VarFree(v_cell);
+    } else {
+        std::cerr << "  Warning: Could not load plot_v_ref_formatted" << std::endl;
+    }
     
     Mat_Close(matfp);
     
-    std::cout << "Warning: loadMatchingResults not fully implemented yet" << std::endl;
-    return false;
+    bool success = !refmask_REF.empty() && !refmask_trial.empty();
+    if (success) {
+        std::cout << "Successfully loaded matching results" << std::endl;
+    }
+    return success;
 }
 
 cv::Mat ROIManager::createFullROI(const cv::Size& image_size) {

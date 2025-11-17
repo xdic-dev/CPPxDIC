@@ -89,9 +89,9 @@ struct DIC3Dcombined {
     std::vector<Points3D> Points3D;  // 3D points per frame (cell array in MATLAB)
     std::vector<int> Faces;  // Triangular mesh faces (Nx3 flattened)
     std::vector<double> FaceColors;  // Face colors
-    std::vector<double> corrComb;  // Combined correlation coefficients
-    std::vector<double> FaceCorrComb;  // Face correlation coefficients
-    std::vector<std::vector<double>> FaceCentroids;  // Triangle centroids
+    std::vector<std::vector<double>> corrComb;  // Combined correlation coefficients per frame
+    std::vector<std::vector<double>> FaceCorrComb;  // Face correlation coefficients per frame
+    std::vector<std::vector<double>> FaceCentroids;  // Triangle centroids per frame (nFrames x nFaces x 3)
     DispData Disp;  // Displacement data
     CalibrationData calibration;  // Calibration info
     std::map<std::string, std::string> distortion;  // Distortion model

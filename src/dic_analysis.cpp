@@ -71,28 +71,43 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                         auto s_in = strain_analysis_input(dic_input, dic_output, SUBREGION::CIRCLE, config_.subregion_radius);
                         auto s_out = strain_analysis(s_in);
 
-                        // Accumulate strain data
+                        // Load 3D reconstruction results
+                        // First try to load from .mat file if it exists
+                        std::ostringstream dic3d_path;
+                        dic3d_path << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
+                                  << "/DIC3Dcombined_" << config_.num_pair << "Pairs_stitched.mat";
+                        
+                        // For now, we need to have run dic3DReconstruction first
+                        // In a real workflow, we would load the DIC3Dcombined structure here
+                        // TODO: Implement MAT file reader for DIC3Dcombined
+                        
+                        std::cout << "  Note: Full 3D deformation requires DIC3Dcombined from dic3DReconstruction" << std::endl;
+                        std::cout << "  Expected file: " << dic3d_path.str() << std::endl;
+                        
+                        // For now, create a minimal ppresults with ncorr 2D strain data
                         DIC3DPPresults ppresults;
                         ppresults.deftype = "cum";  // cumulative deformation
                         
                         const auto& strains = s_out.strains;
-                        std::cout << "  Computed " << strains.size() << " frames of strain data" << std::endl;
-                        
-                        // NOTE: Full 3D strain computation requires:
-                        // 1. 3D reconstructed points from dic3DReconstruction
-                        // 2. Triangle faces from formatOutput
-                        // 3. Integration with computeTriSurfaceDeformation()
-                        //
-                        // The ncorr strain_analysis provides 2D strains (exx, eyy, exy)
-                        // which are stored in s_out.strains but need 3D geometry for
-                        // full deformation gradient tensors and principal strains.
-                        //
-                        // For now, we store the availability of strain data.
-                        // Full implementation requires coordination with 3D reconstruction
-                        // to pass Points3D and Faces to computeTriSurfaceDeformation().
-                        
-                        // Store frame count for later processing
                         ppresults.n_frames = strains.size();
+                        std::cout << "  Computed " << strains.size() << " frames of 2D strain data" << std::endl;
+                        
+                        // NOTE: Complete 3D deformation workflow:
+                        // 1. Run dic3DReconstruction to create DIC3Dcombined structure
+                        // 2. Load DIC3Dcombined.Points3D and DIC3Dcombined.Faces
+                        // 3. Convert to Eigen::Vector3d format
+                        // 4. Call: computeTriSurfaceDeformation(Faces, Points3D{1}, Points3D, cum=1)
+                        // 5. Store FrameDeformationResult in ppresults.Deform
+                        //
+                        // The result would populate:
+                        //   - Deformation gradient F
+                        //   - Strain tensors (Lagrangian E, Eulerian e)
+                        //   - Principal strains (Epc1, Epc2)
+                        //   - Max shear strain
+                        //   - Equivalent strain (von Mises)
+                        //
+                        // This matches MATLAB step4_dic_rewrited.m line 106:
+                        //   deformationStruct = triSurfaceDeformation_rewrited(F, Points3D{1}, Points3D, cum)
 
                         // Optionally write DIC3DPPresults to single .mat file
                         if (config_.generate_mat_files) {
@@ -312,6 +327,19 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 DIC3Dcombined combined;
                 combined.pairIndices = {1, 2};  // Camera pair
                 std::vector<double> P3D_ref; // frame 1 reference
+                
+                // Extract correlation coefficients from both cameras (for combined corr)
+                std::vector<std::vector<double>> corrCam1, corrCam2;
+                for (size_t fi=0; fi<dic1.disps.size(); ++fi) {
+                    std::vector<double> corr1, corr2;
+                    // Note: ncorr doesn't store correlation directly in Disp2D, 
+                    // we use placeholder values (0.95 as in formatOutput)
+                    size_t N = indexLUT.size();
+                    corr1.resize(N, 0.95);
+                    corr2.resize(N, 0.95);
+                    corrCam1.push_back(corr1);
+                    corrCam2.push_back(corr2);
+                }
 
                 for (size_t fi=0; fi<dic1.disps.size(); ++fi) {
                     const auto& d1 = dic1.disps[fi];
@@ -337,6 +365,50 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                         frame_pts.z.push_back(pts3d[k*3+2]);
                     }
                     combined.Points3D.push_back(frame_pts);
+
+                    // Compute combined correlation (max of cam1 and cam2 - worst case)
+                    std::vector<double> corr_comb;
+                    for (size_t k=0; k<N; ++k) {
+                        corr_comb.push_back(std::max(corrCam1[fi][k], corrCam2[fi][k]));
+                    }
+                    combined.corrComb.push_back(corr_comb);
+                    
+                    // Compute face-based correlation (max of 3 vertices)
+                    size_t nFaces = faces.size() / 3;
+                    std::vector<double> face_corr;
+                    for (size_t iface=0; iface<nFaces; ++iface) {
+                        int v0 = faces[iface*3];
+                        int v1 = faces[iface*3+1];
+                        int v2 = faces[iface*3+2];
+                        if (v0 < N && v1 < N && v2 < N) {
+                            double max_corr = std::max({corr_comb[v0], corr_comb[v1], corr_comb[v2]});
+                            face_corr.push_back(max_corr);
+                        } else {
+                            face_corr.push_back(std::numeric_limits<double>::quiet_NaN());
+                        }
+                    }
+                    combined.FaceCorrComb.push_back(face_corr);
+                    
+                    // Compute face centroids
+                    std::vector<double> face_centroids;
+                    for (size_t iface=0; iface<nFaces; ++iface) {
+                        int v0 = faces[iface*3];
+                        int v1 = faces[iface*3+1];
+                        int v2 = faces[iface*3+2];
+                        if (v0 < N && v1 < N && v2 < N) {
+                            double cx = (pts3d[v0*3+0] + pts3d[v1*3+0] + pts3d[v2*3+0]) / 3.0;
+                            double cy = (pts3d[v0*3+1] + pts3d[v1*3+1] + pts3d[v2*3+1]) / 3.0;
+                            double cz = (pts3d[v0*3+2] + pts3d[v1*3+2] + pts3d[v2*3+2]) / 3.0;
+                            face_centroids.push_back(cx);
+                            face_centroids.push_back(cy);
+                            face_centroids.push_back(cz);
+                        } else {
+                            face_centroids.push_back(std::numeric_limits<double>::quiet_NaN());
+                            face_centroids.push_back(std::numeric_limits<double>::quiet_NaN());
+                            face_centroids.push_back(std::numeric_limits<double>::quiet_NaN());
+                        }
+                    }
+                    combined.FaceCentroids.push_back(face_centroids);
 
                     // Compute displacement from frame 1
                     if (fi==0) P3D_ref = pts3d;
