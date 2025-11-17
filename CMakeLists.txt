@@ -22,6 +22,9 @@ add_executable(cppxdic
     src/roi_manager.cpp
     src/mat_writer.cpp
     src/step_d_workflow.cpp
+    src/strain_computation.cpp
+    src/mat_reader.cpp
+    src/delaunay_triangulation.cpp
 )
 
 # Find OpenCV (following ncorr pattern)
@@ -80,6 +83,24 @@ if(HDF5_FOUND)
     message(STATUS "Found HDF5: ${HDF5_C_LIBRARIES}")
 else()
     message(WARNING "HDF5 not found. MAT v7.3 (HDF5) format may not work. Install with: brew install hdf5")
+endif()
+
+# Add CGAL library (for Delaunay triangulation matching MATLAB)
+find_package(CGAL REQUIRED)
+if(CGAL_FOUND)
+    target_link_libraries(cppxdic CGAL::CGAL)
+    message(STATUS "Found CGAL: ${CGAL_VERSION}")
+else()
+    message(FATAL_ERROR "CGAL not found. Please install it: brew install cgal")
+endif()
+
+# Add Eigen library (for matrix operations in strain computation)
+find_package(Eigen3 REQUIRED)
+if(Eigen3_FOUND)
+    target_include_directories(cppxdic PRIVATE ${EIGEN3_INCLUDE_DIR})
+    message(STATUS "Found Eigen3: ${EIGEN3_INCLUDE_DIR}")
+else()
+    message(FATAL_ERROR "Eigen3 not found. Please install it: brew install eigen")
 endif()
 
 # Add suite sparse libraries
