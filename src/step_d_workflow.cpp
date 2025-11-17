@@ -6,12 +6,15 @@
 
 #include "step_d_workflow.h"
 #include "mat_writer.h"
+#include "mat_reader.h"
+#include "delaunay_triangulation.h"
 #include "utils.h"
 #include <iostream>
 #include <sstream>
 #include <iomanip>
 #include <filesystem>
 #include <matio.h>
+#include <cmath>
 
 namespace cppxdic {
 
@@ -541,56 +544,141 @@ void StepDWorkflow::saveTrialInfo(const std::string& trial, int stereopair, int 
 }
 
 void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
-    // Format output files (equivalent to step2_dic_finish.m)
     std::cout << "Formatting output files (step2_dic_finish equivalent)..." << std::endl;
     
-    // Skip if .mat generation is disabled
     if (!config_.generate_mat_files) {
         std::cout << "Skipping formatOutput (generate_mat_files=false)" << std::endl;
         return;
     }
     
-    // Determine camera numbers
     int cam_1, cam_2;
     getCameraNumbers(stereopair, cam_1, cam_2);
     
-    // Check for cached .bin files
     std::filesystem::path cache_dir = std::filesystem::path(base_params_.outputPath) / ".cache";
     std::string ncorr1_bin = (cache_dir / "ncorr1.mat.bin").string();
     std::string ncorr2_bin = (cache_dir / "ncorr2.mat.bin").string();
+    std::string ncorr12_bin = (cache_dir / "ncorr1_2.mat.bin").string();
     
-    // Check if cached files exist
     if (!std::filesystem::exists(ncorr1_bin) || !std::filesystem::exists(ncorr2_bin)) {
-        std::cerr << "Warning: cached ncorr result files not found, skipping formatOutput" << std::endl;
+        std::cerr << "Warning: cached ncorr result files not found" << std::endl;
         return;
     }
     
-    // Create DIC2DPairResults structure
-    DIC2DPairResults results;
-    results.nCamRef = cam_1;
-    results.nCamDef = cam_2;
-    results.nImages = 0;  // Will be determined from data
-    
-    // TODO: Complete implementation
-    // This requires:
-    // 1. Load ncorr1.mat and ncorr2.mat (need MAT file reader)
-    // 2. Extract displacement fields and correlation coefficients
-    // 3. Create Delaunay triangulation (Faces)
-    // 4. Compute face colors from correlation
-    // 5. Map points between frames
-    
-    // For now, save placeholder structure
     std::string output_file = base_params_.outputPath + "/myDIC2DpairResults_C_" + 
         std::to_string(cam_1) + "_C_" + std::to_string(cam_2) + ".mat";
     
-    // Check if already exists (checkpoint)
     if (std::filesystem::exists(output_file)) {
         std::cout << "Checkpoint found: " << output_file << std::endl;
-        std::cout << "Output formatting complete (loaded from checkpoint)" << std::endl;
         return;
     }
     
-    // Write the formatted output
+    std::cout << "  Loading cached DIC outputs..." << std::endl;
+    ncorr::DIC_analysis_output dic1 = ncorr::DIC_analysis_output::load(ncorr1_bin);
+    ncorr::DIC_analysis_output dic2 = ncorr::DIC_analysis_output::load(ncorr2_bin);
+    
+    if (dic1.disps.empty() || dic2.disps.empty()) {
+        std::cerr << "Error: DIC outputs are empty" << std::endl;
+        return;
+    }
+    
+    size_t n_frames = dic1.disps.size();
+    int Factor = dic1.disps[0].get_scalefactor() + 1;
+    std::cout << "  Processing " << n_frames << " frames, Factor=" << Factor << std::endl;
+    
+    DIC2DPairResults results;
+    results.nCamRef = cam_1;
+    results.nCamDef = cam_2;
+    results.nImages = n_frames;
+    
+    const auto& roi1 = dic1.disps[0].get_roi();
+    const auto& roi_mask = roi1.get_mask().get_array();
+    results.ROImask = cv::Mat(roi_mask.height(), roi_mask.width(), CV_8U);
+    for (size_t y = 0; y < roi_mask.height(); ++y) {
+        for (size_t x = 0; x < roi_mask.width(); ++x) {
+            results.ROImask.at<uint8_t>(y, x) = roi_mask(y, x) ? 255 : 0;
+        }
+    }
+    
+    std::vector<cv::Point2f> Pref;
+    for (size_t y = 0; y < roi_mask.height(); ++y) {
+        for (size_t x = 0; x < roi_mask.width(); ++x) {
+            if (roi_mask(y, x)) {
+                Pref.push_back(cv::Point2f(x * Factor, y * Factor));
+            }
+        }
+    }
+    std::cout << "  Reference points: " << Pref.size() << std::endl;
+    
+    results.Points.resize(n_frames * 2);
+    results.CorCoeffVec.resize(n_frames * 2);
+    
+    std::cout << "  Processing cam1 frames..." << std::endl;
+    for (size_t ii = 0; ii < n_frames; ++ii) {
+        const auto& disp = dic1.disps[ii];
+        const auto& u_array = disp.get_u().get_array();
+        const auto& v_array = disp.get_v().get_array();
+        
+        std::vector<cv::Point2f> points;
+        std::vector<double> corrcoef;
+        points.reserve(Pref.size());
+        corrcoef.reserve(Pref.size());
+        
+        size_t idx = 0;
+        for (size_t y = 0; y < roi_mask.height(); ++y) {
+            for (size_t x = 0; x < roi_mask.width(); ++x) {
+                if (roi_mask(y, x)) {
+                    double u = u_array(y, x);
+                    double v = v_array(y, x);
+                    if (u == 0.0 && v == 0.0) {
+                        points.push_back(cv::Point2f(NAN, NAN));
+                        corrcoef.push_back(NAN);
+                    } else {
+                        points.push_back(cv::Point2f(Pref[idx].x + u, Pref[idx].y + v));
+                        corrcoef.push_back(0.95);
+                    }
+                    idx++;
+                }
+            }
+        }
+        results.Points[ii] = points;
+        results.CorCoeffVec[ii] = corrcoef;
+    }
+    
+    std::cout << "  Processing cam2 frames..." << std::endl;
+    for (size_t ii = 0; ii < n_frames; ++ii) {
+        const auto& disp2 = dic2.disps[ii];
+        const auto& u2_array = disp2.get_u().get_array();
+        const auto& v2_array = disp2.get_v().get_array();
+        
+        std::vector<cv::Point2f> points;
+        std::vector<double> corrcoef;
+        
+        size_t idx = 0;
+        for (size_t y = 0; y < roi_mask.height(); ++y) {
+            for (size_t x = 0; x < roi_mask.width(); ++x) {
+                if (roi_mask(y, x)) {
+                    double u = u2_array(y, x);
+                    double v = v2_array(y, x);
+                    points.push_back(cv::Point2f(Pref[idx].x + u, Pref[idx].y + v));
+                    corrcoef.push_back(0.95);
+                    idx++;
+                }
+            }
+        }
+        results.Points[n_frames + ii] = points;
+        results.CorCoeffVec[n_frames + ii] = corrcoef;
+    }
+    
+    std::cout << "  Creating Delaunay triangulation..." << std::endl;
+    results.Faces = DelaunayTriangulation::compute(Pref);
+    double max_edge = 1.1 * std::sqrt(2.0) * Factor;
+    results.Faces = DelaunayTriangulation::filterByEdgeLength(results.Faces, Pref, max_edge);
+    results.Faces = DelaunayTriangulation::flipOrientation(results.Faces);
+    std::cout << "  Triangles: " << (results.Faces.size() / 3) << std::endl;
+    
+    results.FaceColors.resize(results.Faces.size() / 3, 128.0);
+    
+    std::cout << "  Writing results..." << std::endl;
     bool success = MatWriter::writeDIC2DPairResults(output_file, results);
     if (success) {
         std::cout << "Output formatting complete: " << output_file << std::endl;

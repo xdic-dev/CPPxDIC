@@ -139,6 +139,7 @@ struct DIC3DPPresults : DIC3Dcombined {
     DeformData Deform;  // Deformation and strain data
     std::vector<double> FaceIsoInd;  // Face isotropy index
     std::string deftype;  // "cum" (cumulative) or "rate"
+    size_t n_frames;  // Number of frames processed
 };
 
 } // namespace cppxdic

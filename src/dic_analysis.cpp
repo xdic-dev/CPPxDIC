@@ -6,6 +6,7 @@
 #include "utils.h"
 #include "step_d_workflow.h"
 #include "mat_writer.h"
+#include "strain_computation.h"
 #include <iostream>
 #include <chrono>
 #include <filesystem>
@@ -13,6 +14,7 @@
 #include <iomanip>
 #include <matio.h>
 #include <limits>
+#include <Eigen/Dense>
 #include <cctype>
 #include <cmath>
 #include <fstream>
@@ -69,15 +71,28 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                         auto s_in = strain_analysis_input(dic_input, dic_output, SUBREGION::CIRCLE, config_.subregion_radius);
                         auto s_out = strain_analysis(s_in);
 
-                        // Accumulate strain data (NO per-frame .bin files)
-                        // Will be written to single .mat file below
+                        // Accumulate strain data
                         DIC3DPPresults ppresults;
                         ppresults.deftype = "cum";  // cumulative deformation
                         
-                        // TODO: Populate ppresults.Deform with strain data
-                        // For now, just note the data structure
                         const auto& strains = s_out.strains;
                         std::cout << "  Computed " << strains.size() << " frames of strain data" << std::endl;
+                        
+                        // NOTE: Full 3D strain computation requires:
+                        // 1. 3D reconstructed points from dic3DReconstruction
+                        // 2. Triangle faces from formatOutput
+                        // 3. Integration with computeTriSurfaceDeformation()
+                        //
+                        // The ncorr strain_analysis provides 2D strains (exx, eyy, exy)
+                        // which are stored in s_out.strains but need 3D geometry for
+                        // full deformation gradient tensors and principal strains.
+                        //
+                        // For now, we store the availability of strain data.
+                        // Full implementation requires coordination with 3D reconstruction
+                        // to pass Points3D and Faces to computeTriSurfaceDeformation().
+                        
+                        // Store frame count for later processing
+                        ppresults.n_frames = strains.size();
 
                         // Optionally write DIC3DPPresults to single .mat file
                         if (config_.generate_mat_files) {

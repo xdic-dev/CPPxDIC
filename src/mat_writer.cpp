@@ -26,15 +26,57 @@ bool MatWriter::writeMatchingFile(const std::string& filename,
         return false;
     }
     
-    // TODO: Implement full structure creation
-    // This is a simplified stub - full implementation requires:
-    // 1. Create reference_save struct with gs, name, path, roi, type
-    // 2. Create current_save struct with same fields
-    // 3. Create data_dic_save struct with dispinfo and displacements
+    // Create reference_save struct
+    std::vector<std::string> ref_fields = {"gs", "name", "path", "roi", "type"};
+    matvar_t* reference_save = createStructVariable("reference_save", ref_fields);
+    
+    // Add ref image
+    writeMatVariable(matfp, "ref_gs_temp", ref_img);
+    matvar_t* ref_gs = Mat_VarRead(matfp, "ref_gs_temp");
+    addFieldToStruct(reference_save, "gs", ref_gs, 0);
+    
+    // Add ref ROI
+    std::vector<std::string> roi_fields = {"mask"};
+    matvar_t* ref_roi_struct = createStructVariable("roi", roi_fields);
+    writeMatVariable(matfp, "ref_roi_temp", ref_roi);
+    matvar_t* ref_roi_mask = Mat_VarRead(matfp, "ref_roi_temp");
+    addFieldToStruct(ref_roi_struct, "mask", ref_roi_mask, 0);
+    addFieldToStruct(reference_save, "roi", ref_roi_struct, 0);
+    
+    // Create current_save struct
+    matvar_t* current_save = createStructVariable("current_save", ref_fields);
+    writeMatVariable(matfp, "cur_gs_temp", cur_img);
+    matvar_t* cur_gs = Mat_VarRead(matfp, "cur_gs_temp");
+    addFieldToStruct(current_save, "gs", cur_gs, 0);
+    
+    matvar_t* cur_roi_struct = createStructVariable("roi", roi_fields);
+    writeMatVariable(matfp, "cur_roi_temp", cur_roi);
+    matvar_t* cur_roi_mask = Mat_VarRead(matfp, "cur_roi_temp");
+    addFieldToStruct(cur_roi_struct, "mask", cur_roi_mask, 0);
+    addFieldToStruct(current_save, "roi", cur_roi_struct, 0);
+    
+    // Create data_dic_save struct
+    std::vector<std::string> data_fields = {"dispinfo", "displacements"};
+    matvar_t* data_dic_save = createStructVariable("data_dic_save", data_fields);
+    
+    matvar_t* dispinfo_var = formatDispInfo(dispinfo);
+    matvar_t* displacements_var = formatDisplacements(dic_output);
+    
+    addFieldToStruct(data_dic_save, "dispinfo", dispinfo_var, 0);
+    addFieldToStruct(data_dic_save, "displacements", displacements_var, 0);
+    
+    // Write all structs to file
+    Mat_VarWrite(matfp, reference_save, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, current_save, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, data_dic_save, MAT_COMPRESSION_NONE);
+    
+    Mat_VarFree(reference_save);
+    Mat_VarFree(current_save);
+    Mat_VarFree(data_dic_save);
     
     Mat_Close(matfp);
     
-    std::cout << "Warning: writeMatchingFile stub - not fully implemented" << std::endl;
+    std::cout << "Wrote MATCHING file: " << filename << std::endl;
     return true;
 }
 
@@ -276,18 +318,23 @@ bool MatWriter::addFieldToStruct(matvar_t* struct_var,
                                 matvar_t* field_var,
                                 size_t index) {
     if (!struct_var || struct_var->class_type != MAT_C_STRUCT) {
-        std::cerr << "Not a valid struct variable" << std::endl;
+        std::cerr << "Error: Not a struct variable" << std::endl;
         return false;
     }
     
-    // For now, use a simpler approach - this is a stub anyway
-    // Full implementation would properly set struct fields using matio API
-    // The correct matio function varies by version
-    (void)field_name;
-    (void)field_var;
-    (void)index;
+    if (!field_var) {
+        std::cerr << "Error: Null field variable" << std::endl;
+        return false;
+    }
     
-    std::cout << "Warning: addFieldToStruct is a stub" << std::endl;
+    // Use matio API to set struct field
+    int result = Mat_VarSetStructFieldByName(struct_var, field_name.c_str(), index, field_var);
+    
+    if (result != 0) {
+        std::cerr << "Error: Failed to add field '" << field_name << "' to struct" << std::endl;
+        return false;
+    }
+    
     return true;
 }
 
@@ -331,24 +378,119 @@ matvar_t* MatWriter::formatDispInfo(const std::map<std::string, double>& params)
     };
     
     matvar_t* dispinfo = createStructVariable("dispinfo", field_names);
+    if (!dispinfo) return nullptr;
     
-    // TODO: Populate fields from params map
+    // Helper to write scalar field
+    auto writeField = [&](const std::string& field_name, double value) {
+        size_t dims[2] = {1, 1};
+        double* data = new double[1];
+        data[0] = value;
+        matvar_t* field_var = Mat_VarCreate(field_name.c_str(), MAT_C_DOUBLE, MAT_T_DOUBLE, 
+                                           2, dims, data, MAT_F_DONT_COPY_DATA);
+        if (field_var) {
+            Mat_VarSetStructFieldByName(dispinfo, field_name.c_str(), 0, field_var);
+        }
+    };
+    
+    // Populate numeric fields from params map
+    for (const auto& p : params) {
+        if (p.first == "type" || p.first == "units") continue;  // Skip string fields
+        writeField(p.first, p.second);
+    }
+    
+    // Write string fields
+    std::string type_str = "Regular";
+    size_t type_dims[2] = {1, type_str.length()};
+    matvar_t* type_var = Mat_VarCreate("type", MAT_C_CHAR, MAT_T_UTF8, 2, type_dims, 
+                                       (void*)type_str.c_str(), 0);
+    Mat_VarSetStructFieldByName(dispinfo, "type", 0, type_var);
+    
+    std::string units_str = "pixels";
+    size_t units_dims[2] = {1, units_str.length()};
+    matvar_t* units_var = Mat_VarCreate("units", MAT_C_CHAR, MAT_T_UTF8, 2, units_dims,
+                                        (void*)units_str.c_str(), 0);
+    Mat_VarSetStructFieldByName(dispinfo, "units", 0, units_var);
     
     return dispinfo;
 }
 
 matvar_t* MatWriter::formatDisplacements(const ncorr::DIC_analysis_output& dic_output) {
-    // Create displacements struct
+    size_t n_frames = dic_output.disps.size();
+    if (n_frames == 0) return nullptr;
+    
+    // Create cell arrays for each field
+    size_t frame_dims[2] = {n_frames, 1};
+    
+    matvar_t* plot_u_dic = Mat_VarCreate("plot_u_dic", MAT_C_CELL, MAT_T_CELL, 2, frame_dims, nullptr, 0);
+    matvar_t* plot_v_dic = Mat_VarCreate("plot_v_dic", MAT_C_CELL, MAT_T_CELL, 2, frame_dims, nullptr, 0);
+    matvar_t* plot_u_ref = Mat_VarCreate("plot_u_ref_formatted", MAT_C_CELL, MAT_T_CELL, 2, frame_dims, nullptr, 0);
+    matvar_t* plot_v_ref = Mat_VarCreate("plot_v_ref_formatted", MAT_C_CELL, MAT_T_CELL, 2, frame_dims, nullptr, 0);
+    matvar_t* roi_dic = Mat_VarCreate("roi_dic", MAT_C_CELL, MAT_T_CELL, 2, frame_dims, nullptr, 0);
+    matvar_t* plot_corrcoef = Mat_VarCreate("plot_corrcoef_dic", MAT_C_CELL, MAT_T_CELL, 2, frame_dims, nullptr, 0);
+    
+    // Fill cells with data from each frame
+    for (size_t i = 0; i < n_frames; ++i) {
+        const auto& disp = dic_output.disps[i];
+        const auto& u_array = disp.get_u().get_array();
+        const auto& v_array = disp.get_v().get_array();
+        const auto& roi_mask = disp.get_roi().get_mask().get_array();
+        
+        size_t height = u_array.height();
+        size_t width = u_array.width();
+        size_t data_dims[2] = {height, width};
+        
+        // Create u displacement matrix (column-major for MATLAB)
+        double* u_data = new double[height * width];
+        for (size_t y = 0; y < height; ++y) {
+            for (size_t x = 0; x < width; ++x) {
+                u_data[x * height + y] = u_array(y, x);
+            }
+        }
+        matvar_t* u_mat = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, data_dims, u_data, MAT_F_DONT_COPY_DATA);
+        Mat_VarSetCell(plot_u_dic, i, u_mat);
+        Mat_VarSetCell(plot_u_ref, i, Mat_VarDuplicate(u_mat, 1));
+        
+        // Create v displacement matrix
+        double* v_data = new double[height * width];
+        for (size_t y = 0; y < height; ++y) {
+            for (size_t x = 0; x < width; ++x) {
+                v_data[x * height + y] = v_array(y, x);
+            }
+        }
+        matvar_t* v_mat = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, data_dims, v_data, MAT_F_DONT_COPY_DATA);
+        Mat_VarSetCell(plot_v_dic, i, v_mat);
+        Mat_VarSetCell(plot_v_ref, i, Mat_VarDuplicate(v_mat, 1));
+        
+        // Create ROI mask matrix
+        uint8_t* roi_data = new uint8_t[height * width];
+        for (size_t y = 0; y < height; ++y) {
+            for (size_t x = 0; x < width; ++x) {
+                roi_data[x * height + y] = roi_mask(y, x) ? 1 : 0;
+            }
+        }
+        matvar_t* roi_mat = Mat_VarCreate("", MAT_C_UINT8, MAT_T_UINT8, 2, data_dims, roi_data, MAT_F_DONT_COPY_DATA);
+        Mat_VarSetCell(roi_dic, i, roi_mat);
+        
+        // Correlation coefficient (placeholder - all ones for now)
+        double* cc_data = new double[height * width];
+        std::fill_n(cc_data, height * width, 1.0);
+        matvar_t* cc_mat = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, data_dims, cc_data, MAT_F_DONT_COPY_DATA);
+        Mat_VarSetCell(plot_corrcoef, i, cc_mat);
+    }
+    
+    // Create struct and populate
     std::vector<std::string> field_names = {
         "plot_corrcoef_dic", "plot_u_dic", "plot_v_dic",
-        "plot_u_cur_formatted", "plot_v_cur_formatted",
-        "plot_u_ref_formatted", "plot_v_ref_formatted",
-        "roi_dic", "roi_cur_formatted", "roi_ref_formatted"
+        "plot_u_ref_formatted", "plot_v_ref_formatted", "roi_dic"
     };
     
     matvar_t* displacements = createStructVariable("displacements", field_names);
-    
-    // TODO: Populate fields from dic_output
+    Mat_VarSetStructFieldByName(displacements, "plot_corrcoef_dic", 0, plot_corrcoef);
+    Mat_VarSetStructFieldByName(displacements, "plot_u_dic", 0, plot_u_dic);
+    Mat_VarSetStructFieldByName(displacements, "plot_v_dic", 0, plot_v_dic);
+    Mat_VarSetStructFieldByName(displacements, "plot_u_ref_formatted", 0, plot_u_ref);
+    Mat_VarSetStructFieldByName(displacements, "plot_v_ref_formatted", 0, plot_v_ref);
+    Mat_VarSetStructFieldByName(displacements, "roi_dic", 0, roi_dic);
     
     return displacements;
 }
