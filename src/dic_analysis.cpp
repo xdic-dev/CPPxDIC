@@ -7,6 +7,7 @@
 #include "step_d_workflow.h"
 #include "mat_writer.h"
 #include "strain_computation.h"
+#include "surface_stitching.h"
 #include <iostream>
 #include <chrono>
 #include <filesystem>
@@ -246,7 +247,12 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
         };
 
         for (int trial : trial_target) {
+            // Collect all pairs for this trial before stitching
+            std::vector<DIC3Dcombined> all_pairs;
+            
             for (int pair = 1; pair <= config_.num_pair; ++pair) {
+                std::cout << "\n=== Processing Pair " << pair << " ===" << std::endl;
+                
                 // Load DIC 2D outputs from .cache directory (internal .bin format)
                 std::string output_dir = config_.dic_path + "/" + config_.subject_id + "/" + config_.material;
                 std::string cam1_bin = output_dir + "/.cache/ncorr1.mat.bin";
@@ -452,31 +458,49 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     combined.Disp.DispMgn.push_back(dispmgn);
                 }
 
-                // Finalize combined structure
+                // Finalize combined structure for this pair
                 combined.Faces = faces;
                 combined.calibration.DLT_paths = {calib_cam1, calib_cam2};
                 combined.calibration.DLT_params = {L1, L2};
+                combined.pairIndices = {pair * 2 - 1, pair * 2};  // Camera indices for this pair
                 
-                // Optionally write single DIC3Dcombined .mat file
-                if (config_.generate_mat_files) {
-                    std::ostringstream matout;
-                    matout << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
-                           << "/DIC3Dcombined_" << config_.num_pair << "Pairs_stitched.mat";
-                    
-                    // Check if already exists (checkpoint)
-                    if (std::filesystem::exists(matout.str())) {
-                        std::cout << "Checkpoint found: " << matout.str() << " (skipping)" << std::endl;
-                    } else {
-                        bool success = MatWriter::write3DCombinedResults(matout.str(), combined);
-                        if (success) {
-                            std::cout << "Generated MATLAB .mat file: " << matout.str() << std::endl;
-                        } else {
-                            std::cerr << "Failed to write DIC3Dcombined .mat" << std::endl;
-                        }
-                    }
+                // Store this pair's result
+                all_pairs.push_back(combined);
+                
+                std::cout << "✓ Pair " << pair << " complete: " 
+                          << combined.Points3D[0].x.size() << " points, "
+                          << faces.size() / 3 << " faces" << std::endl;
+            }
+            
+            // Stitch all pairs together
+            std::cout << "\n=== Stitching " << all_pairs.size() << " pairs ===" << std::endl;
+            DIC3Dcombined stitched;
+            if (all_pairs.empty()) {
+                std::cerr << "No pairs successfully reconstructed for trial " << trial << std::endl;
+                continue;
+            } else {
+                stitched = stitchPairsSimple(all_pairs);
+            }
+            
+            // Write stitched result
+            if (config_.generate_mat_files) {
+                std::ostringstream matout;
+                matout << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
+                       << "/DIC3Dcombined_" << config_.num_pair << "Pairs_stitched.mat";
+                
+                // Check if already exists (checkpoint)
+                if (std::filesystem::exists(matout.str())) {
+                    std::cout << "Checkpoint found: " << matout.str() << " (skipping)" << std::endl;
                 } else {
-                    std::cout << "3D reconstruction complete (generate_mat_files=false, no .mat output)" << std::endl;
+                    bool success = MatWriter::write3DCombinedResults(matout.str(), stitched);
+                    if (success) {
+                        std::cout << "✓ Generated MATLAB .mat file: " << matout.str() << std::endl;
+                    } else {
+                        std::cerr << "Failed to write DIC3Dcombined .mat" << std::endl;
+                    }
                 }
+            } else {
+                std::cout << "3D reconstruction complete (generate_mat_files=false, no .mat output)" << std::endl;
             }
         }
         return true;
