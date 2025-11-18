@@ -26,6 +26,8 @@ add_executable(cppxdic
     src/mat_reader.cpp
     src/delaunay_triangulation.cpp
     src/surface_stitching.cpp
+    src/temporal_filter.cpp
+    src/face_isotropy.cpp
 )
 
 # Find OpenCV (following ncorr pattern)

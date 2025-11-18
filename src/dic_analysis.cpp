@@ -9,6 +9,8 @@
 #include "mat_reader.h"
 #include "strain_computation.h"
 #include "surface_stitching.h"
+#include "temporal_filter.h"
+#include "face_isotropy.h"
 #include <iostream>
 #include <chrono>
 #include <filesystem>
@@ -102,6 +104,46 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
             
             std::cout << "  Converted " << vertices_all_frames.size() << " frames" << std::endl;
             
+            // Apply temporal filtering to displacement fields (optional but recommended)
+            bool apply_temporal_filtering = true;  // Can be made configurable
+            if (apply_temporal_filtering && vertices_all_frames.size() > 3) {
+                std::cout << "\nApplying temporal filtering..." << std::endl;
+                
+                // Organize data for filtering: nPoints x nFrames
+                size_t nFrames = vertices_all_frames.size();
+                std::vector<std::vector<double>> disp_x(nPoints, std::vector<double>(nFrames));
+                std::vector<std::vector<double>> disp_y(nPoints, std::vector<double>(nFrames));
+                std::vector<std::vector<double>> disp_z(nPoints, std::vector<double>(nFrames));
+                
+                for (size_t iframe = 0; iframe < nFrames; ++iframe) {
+                    for (size_t ipt = 0; ipt < nPoints; ++ipt) {
+                        disp_x[ipt][iframe] = vertices_all_frames[iframe][ipt].x() - vertices_ref[ipt].x();
+                        disp_y[ipt][iframe] = vertices_all_frames[iframe][ipt].y() - vertices_ref[ipt].y();
+                        disp_z[ipt][iframe] = vertices_all_frames[iframe][ipt].z() - vertices_ref[ipt].z();
+                    }
+                }
+                
+                // Filter displacement components
+                double freq_filt = 10.0;  // Low-pass cutoff frequency (Hz)
+                double freq_acq = 50.0;   // Acquisition frequency (Hz) - adjust based on your data
+                auto [filt_x, filt_y, filt_z] = filterTime3D(disp_x, disp_y, disp_z, freq_filt, freq_acq);
+                
+                // Reconstruct filtered vertex positions
+                for (size_t iframe = 0; iframe < nFrames; ++iframe) {
+                    for (size_t ipt = 0; ipt < nPoints; ++ipt) {
+                        vertices_all_frames[iframe][ipt].x() = vertices_ref[ipt].x() + filt_x[ipt][iframe];
+                        vertices_all_frames[iframe][ipt].y() = vertices_ref[ipt].y() + filt_y[ipt][iframe];
+                        vertices_all_frames[iframe][ipt].z() = vertices_ref[ipt].z() + filt_z[ipt][iframe];
+                    }
+                }
+                
+                std::cout << "  ✓ Temporal filtering applied (freqFilt=" << freq_filt 
+                          << " Hz, freqAcq=" << freq_acq << " Hz)" << std::endl;
+            } else if (apply_temporal_filtering) {
+                std::cout << "\nSkipping temporal filtering (too few frames: " 
+                          << vertices_all_frames.size() << ")" << std::endl;
+            }
+            
             // Compute 3D deformation and strain
             std::cout << "\nComputing 3D surface deformation..." << std::endl;
             std::cout << "  Method: Triangular Cosserat Point Elements (TCPE)" << std::endl;
@@ -117,17 +159,20 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
             std::cout << "\n✓ Deformation computation complete!" << std::endl;
             std::cout << "  Computed: Deformation gradient F, strain tensors E/e, principal strains" << std::endl;
             
-            // TODO: Apply temporal filtering if needed (port myfilterTime.m)
-            // This would smooth displacement fields before deformation computation
-            // For now, skip temporal filtering
-            
-            // TODO: Compute face isotropy index (port faceIsotropyIndex.m)
-            // This is a quality metric for mesh elements
-            // For now, skip this
-            
             // Build DIC3DPPresults structure
             std::cout << "\nBuilding DIC3DPPresults structure..." << std::endl;
             DIC3DPPresults ppresults;
+            
+            // Compute face isotropy index for each frame
+            std::cout << "\nComputing face isotropy index..." << std::endl;
+            ppresults.FaceIsoInd.resize(vertices_all_frames.size());
+            for (size_t iframe = 0; iframe < vertices_all_frames.size(); ++iframe) {
+                ppresults.FaceIsoInd[iframe] = computeFaceIsotropyIndex(
+                    dic3d.Faces,
+                    vertices_all_frames[iframe]
+                );
+            }
+            std::cout << "  ✓ Face isotropy index computed for " << vertices_all_frames.size() << " frames" << std::endl;
             
             // Copy all fields from DIC3Dcombined (inheritance)
             ppresults.pairIndices = dic3d.pairIndices;
