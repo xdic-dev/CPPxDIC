@@ -267,7 +267,118 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                 maxShear = frame.EShearMax;
             }
             
-            std::cout << "  Populated deformation data for " << ppresults.n_frames << " frames" << std::endl;
+            std::cout << "  Populated deformation data (with RBM) for " << ppresults.n_frames << " frames" << std::endl;
+            
+            // Populate ARBM deformation data (after rigid body motion removal)
+            std::cout << "  Populating ARBM deformation data..." << std::endl;
+            ppresults.Deform_ARBM.F.resize(deform_result_ARBM.n_frames);
+            ppresults.Deform_ARBM.strain.resize(deform_result_ARBM.n_frames);
+            ppresults.Deform_ARBM.princStrain.resize(deform_result_ARBM.n_frames);
+            ppresults.Deform_ARBM.maxShearStrain.resize(deform_result_ARBM.n_frames);
+            
+            for (size_t iframe = 0; iframe < deform_result_ARBM.n_frames; ++iframe) {
+                const auto& frame = deform_result_ARBM.frames[iframe];
+                
+                // Deformation gradient F_ARBM
+                DeformGradient& F = ppresults.Deform_ARBM.F[iframe];
+                F.F11.resize(nFaces);
+                F.F12.resize(nFaces);
+                F.F13.resize(nFaces);
+                F.F21.resize(nFaces);
+                F.F22.resize(nFaces);
+                F.F23.resize(nFaces);
+                F.F31.resize(nFaces);
+                F.F32.resize(nFaces);
+                F.F33.resize(nFaces);
+                
+                for (size_t iface = 0; iface < nFaces; ++iface) {
+                    F.F11[iface] = frame.Fmat[iface](0, 0);
+                    F.F12[iface] = frame.Fmat[iface](0, 1);
+                    F.F13[iface] = frame.Fmat[iface](0, 2);
+                    F.F21[iface] = frame.Fmat[iface](1, 0);
+                    F.F22[iface] = frame.Fmat[iface](1, 1);
+                    F.F23[iface] = frame.Fmat[iface](1, 2);
+                    F.F31[iface] = frame.Fmat[iface](2, 0);
+                    F.F32[iface] = frame.Fmat[iface](2, 1);
+                    F.F33[iface] = frame.Fmat[iface](2, 2);
+                }
+                
+                // Strain tensor E_ARBM
+                StrainTensor& E = ppresults.Deform_ARBM.strain[iframe];
+                E.E11.resize(nFaces);
+                E.E12.resize(nFaces);
+                E.E13.resize(nFaces);
+                E.E21.resize(nFaces);
+                E.E22.resize(nFaces);
+                E.E23.resize(nFaces);
+                E.E31.resize(nFaces);
+                E.E32.resize(nFaces);
+                E.E33.resize(nFaces);
+                
+                for (size_t iface = 0; iface < nFaces; ++iface) {
+                    E.E11[iface] = frame.Emat[iface](0, 0);
+                    E.E12[iface] = frame.Emat[iface](0, 1);
+                    E.E13[iface] = frame.Emat[iface](0, 2);
+                    E.E21[iface] = frame.Emat[iface](1, 0);
+                    E.E22[iface] = frame.Emat[iface](1, 1);
+                    E.E23[iface] = frame.Emat[iface](1, 2);
+                    E.E31[iface] = frame.Emat[iface](2, 0);
+                    E.E32[iface] = frame.Emat[iface](2, 1);
+                    E.E33[iface] = frame.Emat[iface](2, 2);
+                }
+                
+                // Principal strains
+                std::vector<double>& princStrain = ppresults.Deform_ARBM.princStrain[iframe];
+                princStrain.resize(nFaces * 2);
+                for (size_t iface = 0; iface < nFaces; ++iface) {
+                    princStrain[iface * 2 + 0] = frame.Epc1[iface];
+                    princStrain[iface * 2 + 1] = frame.Epc2[iface];
+                }
+                
+                // Max shear strain
+                ppresults.Deform_ARBM.maxShearStrain[iframe] = frame.EShearMax;
+            }
+            
+            // Populate RBM transformation matrices
+            ppresults.RBM.RotMat.resize(rbm_transforms.size());
+            ppresults.RBM.TransVec.resize(rbm_transforms.size());
+            for (size_t iframe = 0; iframe < rbm_transforms.size(); ++iframe) {
+                const auto& transform = rbm_transforms[iframe];
+                
+                // Rotation matrix (row-major 9 values)
+                ppresults.RBM.RotMat[iframe].resize(9);
+                for (int i = 0; i < 3; ++i) {
+                    for (int j = 0; j < 3; ++j) {
+                        ppresults.RBM.RotMat[iframe][i * 3 + j] = transform.R(i, j);
+                    }
+                }
+                
+                // Translation vector (3 values)
+                ppresults.RBM.TransVec[iframe].resize(3);
+                ppresults.RBM.TransVec[iframe][0] = transform.t(0);
+                ppresults.RBM.TransVec[iframe][1] = transform.t(1);
+                ppresults.RBM.TransVec[iframe][2] = transform.t(2);
+            }
+            
+            // Populate Points3D_ARBM
+            ppresults.Points3D_ARBM_x.resize(vertices_all_frames_ARBM.size());
+            ppresults.Points3D_ARBM_y.resize(vertices_all_frames_ARBM.size());
+            ppresults.Points3D_ARBM_z.resize(vertices_all_frames_ARBM.size());
+            
+            for (size_t iframe = 0; iframe < vertices_all_frames_ARBM.size(); ++iframe) {
+                const auto& verts = vertices_all_frames_ARBM[iframe];
+                ppresults.Points3D_ARBM_x[iframe].resize(verts.size());
+                ppresults.Points3D_ARBM_y[iframe].resize(verts.size());
+                ppresults.Points3D_ARBM_z[iframe].resize(verts.size());
+                
+                for (size_t i = 0; i < verts.size(); ++i) {
+                    ppresults.Points3D_ARBM_x[iframe][i] = verts[i].x();
+                    ppresults.Points3D_ARBM_y[iframe][i] = verts[i].y();
+                    ppresults.Points3D_ARBM_z[iframe][i] = verts[i].z();
+                }
+            }
+            
+            std::cout << "  ✓ Populated all deformation data (with RBM and ARBM) for " << ppresults.n_frames << " frames" << std::endl;
             
             // Write DIC3DPPresults to .mat file
             if (config_.generate_mat_files) {
@@ -448,6 +559,45 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
 
                 std::vector<double> L1 = read_dltparams(calib_cam1);
                 std::vector<double> L2 = read_dltparams(calib_cam2);
+                
+                // Load distortion parameters (if available)
+                Utils::CameraParameters distortion_cam1, distortion_cam2;
+                bool use_distortion_removal = false;
+                
+                // Look for distortion parameter files in calibration directory
+                if (std::filesystem::exists(calib_dir)) {
+                    std::string distortion_cam1_path, distortion_cam2_path;
+                    for (const auto& entry : std::filesystem::directory_iterator(calib_dir)) {
+                        if (!entry.is_regular_file()) continue;
+                        auto name = entry.path().filename().string();
+                        std::string lower = name;
+                        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                        // Look for cameraCBparameters files
+                        if (lower.find("cameracbparameters") != std::string::npos) {
+                            if (lower.find("cam_1") != std::string::npos || lower.find("camera_1") != std::string::npos) {
+                                distortion_cam1_path = entry.path().string();
+                            }
+                            if (lower.find("cam_2") != std::string::npos || lower.find("camera_2") != std::string::npos) {
+                                distortion_cam2_path = entry.path().string();
+                            }
+                        }
+                    }
+                    
+                    // Load distortion parameters if found
+                    if (!distortion_cam1_path.empty() && !distortion_cam2_path.empty()) {
+                        bool cam1_loaded = Utils::loadCameraParameters(distortion_cam1_path, distortion_cam1);
+                        bool cam2_loaded = Utils::loadCameraParameters(distortion_cam2_path, distortion_cam2);
+                        if (cam1_loaded && cam2_loaded) {
+                            use_distortion_removal = true;
+                            std::cout << "  ✓ Distortion removal enabled" << std::endl;
+                        } else {
+                            std::cout << "  ! Distortion parameters found but failed to load" << std::endl;
+                        }
+                    } else {
+                        std::cout << "  ! No distortion parameters found (undistorted points will be used as-is)" << std::endl;
+                    }
+                }
+                
                 // Persist a calibration.json for traceability
                 try {
                     std::ostringstream cjson;
@@ -524,6 +674,38 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     std::vector<double> pts1, pts2;
                     extract_points2D(d1, pts1, indexLUT, W, H);
                     extract_points2D(d2, pts2, indexLUT, W, H);
+                    
+                    // Apply distortion removal if enabled (matching MATLAB STEP3 lines 128-161)
+                    if (use_distortion_removal) {
+                        size_t N = pts1.size() / 2;
+                        
+                        // Convert to cv::Point2d format for undistortion
+                        std::vector<cv::Point2d> pts1_cv, pts2_cv;
+                        pts1_cv.reserve(N);
+                        pts2_cv.reserve(N);
+                        
+                        for (size_t k = 0; k < N; ++k) {
+                            pts1_cv.emplace_back(pts1[k*2+0], pts1[k*2+1]);
+                            pts2_cv.emplace_back(pts2[k*2+0], pts2[k*2+1]);
+                        }
+                        
+                        // Undistort points
+                        std::vector<cv::Point2d> pts1_undist, pts2_undist;
+                        Utils::undistortPoints(pts1_cv, distortion_cam1, pts1_undist);
+                        Utils::undistortPoints(pts2_cv, distortion_cam2, pts2_undist);
+                        
+                        // Convert back to flat array
+                        for (size_t k = 0; k < N; ++k) {
+                            pts1[k*2+0] = pts1_undist[k].x;
+                            pts1[k*2+1] = pts1_undist[k].y;
+                            pts2[k*2+0] = pts2_undist[k].x;
+                            pts2[k*2+1] = pts2_undist[k].y;
+                        }
+                        
+                        if (fi == 0) {
+                            std::cout << "  ✓ Applied distortion removal to 2D points (frame 1)" << std::endl;
+                        }
+                    }
                     size_t N = pts1.size()/2;
                     std::vector<double> pts3d; pts3d.resize(N*3, std::numeric_limits<double>::quiet_NaN());
                     for (size_t k=0; k<N; ++k){

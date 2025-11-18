@@ -587,3 +587,301 @@ bool Utils::loadSeedFromMat(const Config& config,
         return false;
     }
 }
+
+// ============================================================================
+// Camera Calibration and Distortion Removal
+// ============================================================================
+
+bool Utils::loadCameraParameters(const std::string& mat_path, CameraParameters& params) {
+    params.is_valid = false;
+    
+    if (!fileExists(mat_path)) {
+        std::cerr << "Camera parameters file not found: " << mat_path << std::endl;
+        return false;
+    }
+    
+    try {
+        mat_t* mat_file = Mat_Open(mat_path.c_str(), MAT_ACC_RDONLY);
+        if (!mat_file) {
+            std::cerr << "Failed to open MAT file: " << mat_path << std::endl;
+            return false;
+        }
+        
+        // Read 'cameraCBparameters' structure
+        matvar_t* cb_struct = Mat_VarRead(mat_file, "cameraCBparameters");
+        if (!cb_struct || cb_struct->class_type != MAT_C_STRUCT) {
+            std::cerr << "Variable 'cameraCBparameters' not found or not a struct" << std::endl;
+            Mat_Close(mat_file);
+            return false;
+        }
+        
+        // Get 'cameraParameters' field
+        matvar_t* cam_params = Mat_VarGetStructFieldByName(cb_struct, "cameraParameters", 0);
+        if (!cam_params || cam_params->class_type != MAT_C_STRUCT) {
+            std::cerr << "Field 'cameraParameters' not found or not a struct" << std::endl;
+            Mat_VarFree(cb_struct);
+            Mat_Close(mat_file);
+            return false;
+        }
+        
+        // Read IntrinsicMatrix (3x3)
+        matvar_t* intrinsic = Mat_VarGetStructFieldByName(cam_params, "IntrinsicMatrix", 0);
+        if (intrinsic && intrinsic->data && intrinsic->class_type == MAT_C_DOUBLE) {
+            double* data = static_cast<double*>(intrinsic->data);
+            // MATLAB stores in column-major, OpenCV uses row-major
+            // IntrinsicMatrix in MATLAB: [fx 0 0; 0 fy 0; cx cy 1]
+            params.camera_matrix = cv::Mat(3, 3, CV_64F);
+            params.camera_matrix.at<double>(0, 0) = data[0];  // fx
+            params.camera_matrix.at<double>(0, 1) = data[3];  // skew (usually 0)
+            params.camera_matrix.at<double>(0, 2) = data[6];  // cx
+            params.camera_matrix.at<double>(1, 0) = data[1];  // 0
+            params.camera_matrix.at<double>(1, 1) = data[4];  // fy
+            params.camera_matrix.at<double>(1, 2) = data[7];  // cy
+            params.camera_matrix.at<double>(2, 0) = data[2];  // 0
+            params.camera_matrix.at<double>(2, 1) = data[5];  // 0
+            params.camera_matrix.at<double>(2, 2) = data[8];  // 1
+        } else {
+            std::cerr << "IntrinsicMatrix not found or invalid" << std::endl;
+            Mat_VarFree(cb_struct);
+            Mat_Close(mat_file);
+            return false;
+        }
+        
+        // Read RadialDistortion (1x2 or 1x3)
+        matvar_t* radial = Mat_VarGetStructFieldByName(cam_params, "RadialDistortion", 0);
+        std::vector<double> dist_coeffs;
+        if (radial && radial->data && radial->class_type == MAT_C_DOUBLE) {
+            double* data = static_cast<double*>(radial->data);
+            size_t n = 1;
+            for (int i = 0; i < radial->rank; i++) n *= radial->dims[i];
+            for (size_t i = 0; i < n && i < 3; ++i) {
+                dist_coeffs.push_back(data[i]);
+            }
+        }
+        
+        // Read TangentialDistortion (1x2)
+        matvar_t* tangential = Mat_VarGetStructFieldByName(cam_params, "TangentialDistortion", 0);
+        std::vector<double> tan_coeffs;
+        if (tangential && tangential->data && tangential->class_type == MAT_C_DOUBLE) {
+            double* data = static_cast<double*>(tangential->data);
+            size_t n = 1;
+            for (int i = 0; i < tangential->rank; i++) n *= tangential->dims[i];
+            for (size_t i = 0; i < n && i < 2; ++i) {
+                tan_coeffs.push_back(data[i]);
+            }
+        }
+        
+        // OpenCV distortion format: [k1, k2, p1, p2, k3, k4, k5, k6]
+        // MATLAB: RadialDistortion=[k1, k2, k3], TangentialDistortion=[p1, p2]
+        params.distortion_coeffs = cv::Mat::zeros(1, 5, CV_64F);
+        if (dist_coeffs.size() >= 1) params.distortion_coeffs.at<double>(0, 0) = dist_coeffs[0];  // k1
+        if (dist_coeffs.size() >= 2) params.distortion_coeffs.at<double>(0, 1) = dist_coeffs[1];  // k2
+        if (tan_coeffs.size() >= 1)  params.distortion_coeffs.at<double>(0, 2) = tan_coeffs[0];   // p1
+        if (tan_coeffs.size() >= 2)  params.distortion_coeffs.at<double>(0, 3) = tan_coeffs[1];   // p2
+        if (dist_coeffs.size() >= 3) params.distortion_coeffs.at<double>(0, 4) = dist_coeffs[2];  // k3
+        
+        Mat_VarFree(cb_struct);
+        Mat_Close(mat_file);
+        
+        params.is_valid = true;
+        std::cout << "Loaded camera parameters from: " << mat_path << std::endl;
+        std::cout << "  Intrinsic matrix: " << params.camera_matrix << std::endl;
+        std::cout << "  Distortion coeffs: " << params.distortion_coeffs << std::endl;
+        
+        return true;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Exception loading camera parameters: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+void Utils::undistortPoints(const std::vector<cv::Point2d>& points_in,
+                           const CameraParameters& params,
+                           std::vector<cv::Point2d>& points_out) {
+    if (!params.is_valid) {
+        std::cerr << "Warning: Invalid camera parameters, cannot undistort points" << std::endl;
+        points_out = points_in;
+        return;
+    }
+    
+    if (points_in.empty()) {
+        points_out.clear();
+        return;
+    }
+    
+    // OpenCV's undistortPoints outputs normalized coordinates, we need pixel coordinates
+    // Use undistortImagePoints or manual approach
+    
+    points_out.resize(points_in.size());
+    
+    for (size_t i = 0; i < points_in.size(); ++i) {
+        points_out[i] = undistortPoint(points_in[i], params);
+    }
+}
+
+cv::Point2d Utils::undistortPoint(const cv::Point2d& point_in,
+                                  const CameraParameters& params) {
+    if (!params.is_valid) {
+        return point_in;
+    }
+    
+    // Extract camera parameters
+    double fx = params.camera_matrix.at<double>(0, 0);
+    double fy = params.camera_matrix.at<double>(1, 1);
+    double cx = params.camera_matrix.at<double>(0, 2);
+    double cy = params.camera_matrix.at<double>(1, 2);
+    
+    double k1 = params.distortion_coeffs.at<double>(0, 0);
+    double k2 = params.distortion_coeffs.at<double>(0, 1);
+    double p1 = params.distortion_coeffs.at<double>(0, 2);
+    double p2 = params.distortion_coeffs.at<double>(0, 3);
+    double k3 = params.distortion_coeffs.at<double>(0, 4);
+    
+    // Convert to normalized coordinates
+    double x = (point_in.x - cx) / fx;
+    double y = (point_in.y - cy) / fy;
+    
+    // Iterative undistortion (Newton-Raphson)
+    double x_u = x;
+    double y_u = y;
+    
+    for (int iter = 0; iter < 10; ++iter) {
+        double r2 = x_u * x_u + y_u * y_u;
+        double r4 = r2 * r2;
+        double r6 = r4 * r2;
+        
+        // Radial distortion
+        double radial = 1.0 + k1 * r2 + k2 * r4 + k3 * r6;
+        
+        // Tangential distortion
+        double dx_tan = 2.0 * p1 * x_u * y_u + p2 * (r2 + 2.0 * x_u * x_u);
+        double dy_tan = p1 * (r2 + 2.0 * y_u * y_u) + 2.0 * p2 * x_u * y_u;
+        
+        // Distorted coordinates
+        double x_d = x_u * radial + dx_tan;
+        double y_d = y_u * radial + dy_tan;
+        
+        // Update undistorted estimate
+        double error_x = x_d - x;
+        double error_y = y_d - y;
+        
+        if (std::abs(error_x) < 1e-10 && std::abs(error_y) < 1e-10) {
+            break;
+        }
+        
+        // Jacobian-based update (simplified)
+        x_u -= error_x * 0.9;
+        y_u -= error_y * 0.9;
+    }
+    
+    // Convert back to pixel coordinates
+    double x_out = x_u * fx + cx;
+    double y_out = y_u * fy + cy;
+    
+    return cv::Point2d(x_out, y_out);
+}
+
+// ============================================================================
+// Rigid Body Motion (RBM) Transformation
+// ============================================================================
+
+bool Utils::computeRigidTransform(const std::vector<Eigen::Vector3d>& points_from,
+                                  const std::vector<Eigen::Vector3d>& points_to,
+                                  RigidTransform& transform) {
+    transform.is_valid = false;
+    
+    if (points_from.size() != points_to.size()) {
+        std::cerr << "Error: Point clouds must have same size for rigid transformation" << std::endl;
+        return false;
+    }
+    
+    if (points_from.size() < 3) {
+        std::cerr << "Error: Need at least 3 points for rigid transformation" << std::endl;
+        return false;
+    }
+    
+    // Filter out NaN points (matching MATLAB lines 34-42)
+    std::vector<Eigen::Vector3d> from_no_nan, to_no_nan;
+    for (size_t i = 0; i < points_from.size(); ++i) {
+        if (!points_from[i].hasNaN() && !points_to[i].hasNaN()) {
+            from_no_nan.push_back(points_from[i]);
+            to_no_nan.push_back(points_to[i]);
+        }
+    }
+    
+    if (from_no_nan.size() < 3) {
+        std::cerr << "Error: Too few valid points after removing NaNs" << std::endl;
+        return false;
+    }
+    
+    // Compute centroids (MATLAB lines 44-45)
+    Eigen::Vector3d centroid_from = Eigen::Vector3d::Zero();
+    Eigen::Vector3d centroid_to = Eigen::Vector3d::Zero();
+    
+    for (const auto& p : from_no_nan) {
+        centroid_from += p;
+    }
+    for (const auto& p : to_no_nan) {
+        centroid_to += p;
+    }
+    
+    centroid_from /= from_no_nan.size();
+    centroid_to /= to_no_nan.size();
+    
+    // Center point clouds (MATLAB lines 47-48)
+    std::vector<Eigen::Vector3d> da, db;
+    for (const auto& p : from_no_nan) {
+        da.push_back(p - centroid_from);
+    }
+    for (const auto& p : to_no_nan) {
+        db.push_back(p - centroid_to);
+    }
+    
+    // Compute cross-correlation matrix M = db^T * da (MATLAB line 53)
+    Eigen::Matrix3d M = Eigen::Matrix3d::Zero();
+    for (size_t i = 0; i < da.size(); ++i) {
+        M += db[i] * da[i].transpose();
+    }
+    
+    // SVD decomposition (MATLAB line 54)
+    Eigen::JacobiSVD<Eigen::Matrix3d> svd(M, Eigen::ComputeFullU | Eigen::ComputeFullV);
+    Eigen::Matrix3d U = svd.matrixU();
+    Eigen::Matrix3d V = svd.matrixV();
+    
+    // Compute rotation ensuring it's a proper rotation (det = +1) (MATLAB lines 55-56)
+    double det_UV = (U * V.transpose()).determinant();
+    Eigen::Matrix3d S = Eigen::Matrix3d::Identity();
+    S(2, 2) = det_UV;  // Set diagonal element to det(U*V') to ensure proper rotation
+    
+    transform.R = U * S * V.transpose();
+    
+    // Compute translation (MATLAB line 57)
+    transform.t = centroid_to - transform.R * centroid_from;
+    
+    transform.is_valid = true;
+    
+    return true;
+}
+
+std::vector<Eigen::Vector3d> Utils::applyRigidTransform(const std::vector<Eigen::Vector3d>& points_in,
+                                                         const RigidTransform& transform) {
+    std::vector<Eigen::Vector3d> points_out;
+    points_out.reserve(points_in.size());
+    
+    if (!transform.is_valid) {
+        std::cerr << "Warning: Invalid transform, returning original points" << std::endl;
+        return points_in;
+    }
+    
+    // Apply transformation: p_out = R * p_in + t (MATLAB line 71)
+    for (const auto& p : points_in) {
+        if (p.hasNaN()) {
+            points_out.push_back(p);  // Keep NaN points as is
+        } else {
+            points_out.push_back(transform.R * p + transform.t);
+        }
+    }
+    
+    return points_out;
+}

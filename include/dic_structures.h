@@ -136,11 +136,24 @@ struct DeformData {
 };
 
 /**
+ * Rigid Body Motion (RBM) data
+ */
+struct RBMData {
+    std::vector<std::vector<double>> RotMat;   // Rotation matrices per frame (9 values each)
+    std::vector<std::vector<double>> TransVec; // Translation vectors per frame (3 values each)
+};
+
+/**
  * DIC 3D Post-Processing Results
  * Equivalent to MATLAB's DIC3DPPresults
  */
 struct DIC3DPPresults : DIC3Dcombined {
-    DeformData Deform;  // Deformation and strain data
+    DeformData Deform;         // Deformation and strain data (with RBM)
+    DeformData Deform_ARBM;    // Deformation and strain data after RBM removal
+    RBMData RBM;               // Rigid body motion transformation data
+    std::vector<std::vector<double>> Points3D_ARBM_x;  // 3D points after RBM per frame
+    std::vector<std::vector<double>> Points3D_ARBM_y;
+    std::vector<std::vector<double>> Points3D_ARBM_z;
     std::vector<std::vector<double>> FaceIsoInd;  // Face isotropy index per frame
     std::string deftype;  // "cum" (cumulative) or "rate"
     size_t n_frames;  // Number of frames processed
