@@ -332,15 +332,39 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 
                 // Extract correlation coefficients from both cameras (for combined corr)
                 std::vector<std::vector<double>> corrCam1, corrCam2;
+                
+                // Lambda to extract correlation data using indexLUT
+                auto extract_correlation = [](const ncorr::Disp2D& disp, std::vector<double>& corr_out, 
+                                            const std::vector<int>& indexLUT, int W, int H) {
+                    const auto& cc_array = disp.get_cc().get_array();
+                    const auto& roi_mask = disp.get_roi().get_mask();
+                    size_t num_points = std::count_if(indexLUT.begin(), indexLUT.end(), [](int v){return v>=0;});
+                    corr_out.clear();
+                    corr_out.resize(num_points, 0.0);
+                    for (int y=0; y<H; ++y) {
+                        for (int x=0; x<W; ++x) {
+                            int idx = indexLUT[y*W+x];
+                            if (idx < 0) continue;
+                            double cc = (roi_mask(y, x)) ? cc_array(y, x) : 0.0;
+                            corr_out[idx] = cc;
+                        }
+                    }
+                };
+                
+                // Extract real correlation data for each frame
                 for (size_t fi=0; fi<dic1.disps.size(); ++fi) {
                     std::vector<double> corr1, corr2;
-                    // Note: ncorr doesn't store correlation directly in Disp2D, 
-                    // we use placeholder values (0.95 as in formatOutput)
-                    size_t N = indexLUT.size();
-                    corr1.resize(N, 0.95);
-                    corr2.resize(N, 0.95);
+                    extract_correlation(dic1.disps[fi], corr1, indexLUT, W, H);
+                    extract_correlation(dic2.disps[fi], corr2, indexLUT, W, H);
                     corrCam1.push_back(corr1);
                     corrCam2.push_back(corr2);
+                    if (fi == 0 && !corr1.empty()) {
+                        double avg1 = std::accumulate(corr1.begin(), corr1.end(), 0.0) / corr1.size();
+                        double avg2 = std::accumulate(corr2.begin(), corr2.end(), 0.0) / corr2.size();
+                        std::cout << "  Using real correlation data - Frame 1: Cam1 avg=" 
+                                  << std::fixed << std::setprecision(3) << avg1 
+                                  << ", Cam2 avg=" << avg2 << std::endl;
+                    }
                 }
 
                 for (size_t fi=0; fi<dic1.disps.size(); ++fi) {

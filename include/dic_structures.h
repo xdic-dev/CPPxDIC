@@ -96,6 +96,10 @@ struct DIC3Dcombined {
     CalibrationData calibration;  // Calibration info
     std::map<std::string, std::string> distortion;  // Distortion model
     
+    // Multi-pair stitching metadata
+    std::vector<int> FacePairInds;  // Which stereo pair each face belongs to (1-indexed)
+    std::vector<int> PointPairInds; // Which stereo pair each point belongs to (1-indexed)
+    
     // Original DIC 2D info
     std::vector<DIC2DPairResults> DIC2Dinfo;
     

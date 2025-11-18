@@ -776,16 +776,27 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
         config_.debug_mode
     );
     
-    // Run DIC analysis
-    ncorr::DIC_analysis_output dic_output = ncorr::DIC_analysis(dic_input);
+    // Run DIC analysis (returns Lagrangian perspective in pixels)
+    ncorr::DIC_analysis_output dic_output_raw = ncorr::DIC_analysis(dic_input);
     
-    // Post-process
-    // NOTE: change_perspective converts from Lagrangian to Eulerian perspective
-    // Currently commented out due to segfault - investigating root cause
-    // This may be related to scalefactor=11 causing memory issues in interpolation
-    // dic_output = ncorr::change_perspective(dic_output, ncorr::INTERP::QUINTIC_BSPLINE_PRECOMPUTE);
+    // Post-process with both perspectives
+    std::cout << "Post-processing displacements..." << std::endl;
     
-    dic_output = ncorr::set_units(dic_output, "mm", config_.units_per_pixel);
+    // Step 1: Apply correlation filtering (optional, controlled by config)
+    double correlation_cutoff = 0.3;  // TODO: make this configurable
+    ncorr::DIC_analysis_output dic_filtered = ncorr::filter_by_correlation(dic_output_raw, correlation_cutoff);
+    
+    // Step 2: Convert to Eulerian perspective with sign inversion (still in pixels)
+    ncorr::DIC_analysis_output dic_eulerian_pixels = ncorr::change_perspective_with_inversion(
+        dic_filtered, 
+        ncorr::INTERP::CUBIC_KEYS  // Use cubic interpolation for perspective change
+    );
+    
+    // Step 3: Apply units to BOTH perspectives
+    ncorr::DIC_analysis_output dic_lagrangian = ncorr::set_units(dic_filtered, "mm", config_.units_per_pixel);
+    ncorr::DIC_analysis_output dic_eulerian = ncorr::set_units(dic_eulerian_pixels, "mm", config_.units_per_pixel);
+    
+    std::cout << "  Created both Lagrangian and Eulerian perspectives" << std::endl;
     
     // Strategy: Always save .bin to .cache/ subdirectory (for C++ internal use)
     //           Optionally generate .mat files (for MATLAB compatibility)
@@ -795,26 +806,62 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     std::filesystem::path cache_dir = output_dir / ".cache";
     std::filesystem::create_directories(cache_dir);
     
-    // Save .bin to cache directory (internal format for C++)
+    // Save Lagrangian .bin to cache directory (internal format for C++)
     std::string cache_bin = (cache_dir / std::filesystem::path(output_path).filename()).string() + ".bin";
-    save(dic_output, cache_bin);
+    save(dic_lagrangian, cache_bin);
     std::cout << "DIC analysis saved to cache: " << cache_bin << std::endl;
     
-    // Optionally generate .mat file (for MATLAB users)
+    // Optionally generate .mat file with BOTH perspectives (for MATLAB users)
     if (config_.generate_mat_files) {
-        bool success = MatWriter::convertBinToMat(cache_bin, output_path, dic_input);
-        if (success) {
-            std::cout << "MATLAB .mat file generated: " << output_path << std::endl;
+        // For MATCHING files, write with both perspectives
+        if (output_path.find("MATCHING") != std::string::npos) {
+            // Extract necessary data for writeMatchingFile
+            cv::Mat ref_img_out = ref_img.clone();
+            cv::Mat cur_img_out = cur_imgs[0].clone();  // First current image
+            cv::Mat ref_roi_out = roi_mask.clone();
+            cv::Mat cur_roi_out = roi_mask.clone();  // Will be updated inside writeMatchingFile
             
-            // Optionally cleanup cache .bin after .mat generation
-            if (config_.cleanup_cache_bins) {
-                std::filesystem::remove(cache_bin);
-                std::cout << "Cache .bin cleaned up: " << cache_bin << std::endl;
+            // Prepare dispinfo
+            std::map<std::string, double> dispinfo;
+            dispinfo["radius"] = step_params.radius;
+            dispinfo["spacing"] = step_params.spacing;
+            dispinfo["cutoff_corrcoef"] = correlation_cutoff;
+            dispinfo["units_per_pixel"] = config_.units_per_pixel;
+            
+            // Write with both perspectives
+            bool success = MatWriter::writeMatchingFile(
+                output_path,
+                ref_img_out, cur_img_out,
+                ref_roi_out, cur_roi_out,
+                dic_lagrangian,   // _ref_formatted
+                dic_eulerian,     // _cur_formatted
+                dispinfo
+            );
+            
+            if (success) {
+                std::cout << "MATLAB .mat file with both perspectives generated: " << output_path << std::endl;
+            } else {
+                std::cerr << "Warning: Failed to generate .mat file" << std::endl;
             }
         } else {
-            std::cerr << "Warning: Failed to generate .mat file" << std::endl;
+            // For tracking files (ncorr1.mat, ncorr2.mat), use legacy method
+            bool success = MatWriter::convertBinToMat(cache_bin, output_path, dic_input);
+            if (success) {
+                std::cout << "MATLAB .mat file generated: " << output_path << std::endl;
+            } else {
+                std::cerr << "Warning: Failed to generate .mat file" << std::endl;
+            }
+        }
+        
+        // Optionally cleanup cache .bin after .mat generation
+        if (config_.cleanup_cache_bins) {
+            std::filesystem::remove(cache_bin);
+            std::cout << "Cache .bin cleaned up: " << cache_bin << std::endl;
         }
     }
+    
+    // Return Lagrangian output for further processing
+    ncorr::DIC_analysis_output dic_output = dic_lagrangian;
     
     return dic_output;
 }

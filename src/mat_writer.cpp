@@ -107,6 +107,100 @@ bool MatWriter::writeMatchingFile(const std::string& filename,
     return true;
 }
 
+bool MatWriter::writeMatchingFile(const std::string& filename,
+                                 const cv::Mat& ref_img,
+                                 const cv::Mat& cur_img,
+                                 const cv::Mat& ref_roi,
+                                 const cv::Mat& cur_roi,
+                                 const ncorr::DIC_analysis_output& dic_lagrangian,
+                                 const ncorr::DIC_analysis_output& dic_eulerian,
+                                 const std::map<std::string, double>& dispinfo) {
+    
+    // Create MAT file (v7.3 HDF5 format for xDIC compatibility)
+    mat_t* matfp = createMatFileHDF5(filename);
+    if (!matfp) {
+        std::cerr << "Failed to create MAT file: " << filename << std::endl;
+        return false;
+    }
+    
+    // Create reference_save struct
+    std::vector<std::string> ref_fields = {"gs", "name", "path", "roi", "type"};
+    matvar_t* reference_save = createStructVariable("reference_save", ref_fields);
+    
+    // Add ref image
+    writeMatVariable(matfp, "ref_gs_temp", ref_img);
+    matvar_t* ref_gs = Mat_VarRead(matfp, "ref_gs_temp");
+    addFieldToStruct(reference_save, "gs", ref_gs, 0);
+    
+    // Add ref ROI
+    std::vector<std::string> roi_fields = {"mask"};
+    matvar_t* ref_roi_struct = createStructVariable("roi", roi_fields);
+    writeMatVariable(matfp, "ref_roi_temp", ref_roi);
+    matvar_t* ref_roi_mask = Mat_VarRead(matfp, "ref_roi_temp");
+    addFieldToStruct(ref_roi_struct, "mask", ref_roi_mask, 0);
+    addFieldToStruct(reference_save, "roi", ref_roi_struct, 0);
+    
+    // Update current ROI with displacement field before saving
+    cv::Mat cur_roi_updated = cur_roi.clone();  // Default to original
+    if (!dic_lagrangian.disps.empty()) {
+        try {
+            // Convert cv::Mat to ncorr::ROI2D
+            ncorr::ROI2D roi_current = convertMatToROI2D(cur_roi);
+            
+            // Apply ROI update using first displacement field
+            ncorr::ROI2D roi_updated = ncorr::update(
+                roi_current, 
+                dic_lagrangian.disps[0],
+                ncorr::INTERP::CUBIC_KEYS
+            );
+            
+            // Convert back to cv::Mat
+            cur_roi_updated = convertROI2DToMat(roi_updated);
+            
+            std::cout << "  Applied ROI update with displacement field" << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "  Warning: ROI update failed: " << e.what() << std::endl;
+            std::cerr << "  Using original ROI instead" << std::endl;
+        }
+    }
+    
+    // Create current_save struct with updated ROI
+    matvar_t* current_save = createStructVariable("current_save", ref_fields);
+    writeMatVariable(matfp, "cur_gs_temp", cur_img);
+    matvar_t* cur_gs = Mat_VarRead(matfp, "cur_gs_temp");
+    addFieldToStruct(current_save, "gs", cur_gs, 0);
+    
+    matvar_t* cur_roi_struct = createStructVariable("roi", roi_fields);
+    writeMatVariable(matfp, "cur_roi_temp", cur_roi_updated);
+    matvar_t* cur_roi_mask = Mat_VarRead(matfp, "cur_roi_temp");
+    addFieldToStruct(cur_roi_struct, "mask", cur_roi_mask, 0);
+    addFieldToStruct(current_save, "roi", cur_roi_struct, 0);
+    
+    // Create data_dic_save struct with BOTH perspectives
+    std::vector<std::string> data_fields = {"dispinfo", "displacements"};
+    matvar_t* data_dic_save = createStructVariable("data_dic_save", data_fields);
+    
+    matvar_t* dispinfo_var = formatDispInfo(dispinfo);
+    matvar_t* displacements_var = formatDisplacements(dic_lagrangian, dic_eulerian);
+    
+    addFieldToStruct(data_dic_save, "dispinfo", dispinfo_var, 0);
+    addFieldToStruct(data_dic_save, "displacements", displacements_var, 0);
+    
+    // Write all structs to file
+    Mat_VarWrite(matfp, reference_save, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, current_save, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, data_dic_save, MAT_COMPRESSION_NONE);
+    
+    Mat_VarFree(reference_save);
+    Mat_VarFree(current_save);
+    Mat_VarFree(data_dic_save);
+    
+    Mat_Close(matfp);
+    
+    std::cout << "Wrote MATCHING file with both perspectives: " << filename << std::endl;
+    return true;
+}
+
 bool MatWriter::writeROIMaskFile(const std::string& filename,
                                 const cv::Mat& mask) {
     mat_t* matfp = createMatFileV5(filename);
@@ -512,6 +606,182 @@ matvar_t* MatWriter::formatDisplacements(const ncorr::DIC_analysis_output& dic_o
     Mat_VarSetStructFieldByName(displacements, "plot_u_ref_formatted", 0, plot_u_ref);
     Mat_VarSetStructFieldByName(displacements, "plot_v_ref_formatted", 0, plot_v_ref);
     Mat_VarSetStructFieldByName(displacements, "roi_dic", 0, roi_dic);
+    
+    return displacements;
+}
+
+matvar_t* MatWriter::formatDisplacements(const ncorr::DIC_analysis_output& dic_lagrangian,
+                                        const ncorr::DIC_analysis_output& dic_eulerian) {
+    size_t n_frames = dic_lagrangian.disps.size();
+    if (n_frames == 0) return nullptr;
+    
+    // Verify both outputs have same number of frames
+    if (dic_eulerian.disps.size() != n_frames) {
+        throw std::runtime_error("Lagrangian and Eulerian outputs must have same number of frames");
+    }
+    
+    // Create cell arrays for each field
+    size_t frame_dims[2] = {n_frames, 1};
+    
+    matvar_t* plot_u_dic = Mat_VarCreate("plot_u_dic", MAT_C_CELL, MAT_T_CELL, 2, frame_dims, nullptr, 0);
+    matvar_t* plot_v_dic = Mat_VarCreate("plot_v_dic", MAT_C_CELL, MAT_T_CELL, 2, frame_dims, nullptr, 0);
+    matvar_t* plot_u_ref = Mat_VarCreate("plot_u_ref_formatted", MAT_C_CELL, MAT_T_CELL, 2, frame_dims, nullptr, 0);
+    matvar_t* plot_v_ref = Mat_VarCreate("plot_v_ref_formatted", MAT_C_CELL, MAT_T_CELL, 2, frame_dims, nullptr, 0);
+    matvar_t* plot_u_cur = Mat_VarCreate("plot_u_cur_formatted", MAT_C_CELL, MAT_T_CELL, 2, frame_dims, nullptr, 0);
+    matvar_t* plot_v_cur = Mat_VarCreate("plot_v_cur_formatted", MAT_C_CELL, MAT_T_CELL, 2, frame_dims, nullptr, 0);
+    matvar_t* roi_dic = Mat_VarCreate("roi_dic", MAT_C_CELL, MAT_T_CELL, 2, frame_dims, nullptr, 0);
+    matvar_t* roi_ref = Mat_VarCreate("roi_ref_formatted", MAT_C_CELL, MAT_T_CELL, 2, frame_dims, nullptr, 0);
+    matvar_t* roi_cur = Mat_VarCreate("roi_cur_formatted", MAT_C_CELL, MAT_T_CELL, 2, frame_dims, nullptr, 0);
+    matvar_t* plot_corrcoef = Mat_VarCreate("plot_corrcoef_dic", MAT_C_CELL, MAT_T_CELL, 2, frame_dims, nullptr, 0);
+    
+    // Fill cells with data from each frame
+    for (size_t i = 0; i < n_frames; ++i) {
+        const auto& disp_lag = dic_lagrangian.disps[i];
+        const auto& disp_eul = dic_eulerian.disps[i];
+        
+        // Get arrays from Lagrangian
+        const auto& u_lag_array = disp_lag.get_u().get_array();
+        const auto& v_lag_array = disp_lag.get_v().get_array();
+        const auto& cc_lag_array = disp_lag.get_cc().get_array();
+        const auto& roi_lag_mask = disp_lag.get_roi().get_mask();
+        
+        // Get arrays from Eulerian  
+        const auto& u_eul_array = disp_eul.get_u().get_array();
+        const auto& v_eul_array = disp_eul.get_v().get_array();
+        const auto& roi_eul_mask = disp_eul.get_roi().get_mask();
+        
+        size_t height = u_lag_array.height();
+        size_t width = u_lag_array.width();
+        size_t data_dims[2] = {height, width};
+        
+        // Create u displacement matrices (column-major for MATLAB)
+        
+        // Raw DIC (plot_u_dic) - from Lagrangian
+        double* u_dic_data = new double[height * width];
+        for (size_t y = 0; y < height; ++y) {
+            for (size_t x = 0; x < width; ++x) {
+                u_dic_data[x * height + y] = u_lag_array(y, x);
+            }
+        }
+        matvar_t* u_dic_mat = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, data_dims, u_dic_data, MAT_F_DONT_COPY_DATA);
+        Mat_VarSetCell(plot_u_dic, i, u_dic_mat);
+        
+        // Lagrangian formatted (plot_u_ref_formatted)
+        double* u_ref_data = new double[height * width];
+        for (size_t y = 0; y < height; ++y) {
+            for (size_t x = 0; x < width; ++x) {
+                u_ref_data[x * height + y] = u_lag_array(y, x);
+            }
+        }
+        matvar_t* u_ref_mat = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, data_dims, u_ref_data, MAT_F_DONT_COPY_DATA);
+        Mat_VarSetCell(plot_u_ref, i, u_ref_mat);
+        
+        // Eulerian formatted (plot_u_cur_formatted)
+        double* u_cur_data = new double[height * width];
+        for (size_t y = 0; y < height; ++y) {
+            for (size_t x = 0; x < width; ++x) {
+                u_cur_data[x * height + y] = u_eul_array(y, x);
+            }
+        }
+        matvar_t* u_cur_mat = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, data_dims, u_cur_data, MAT_F_DONT_COPY_DATA);
+        Mat_VarSetCell(plot_u_cur, i, u_cur_mat);
+        
+        // Create v displacement matrices
+        
+        // Raw DIC (plot_v_dic) - from Lagrangian
+        double* v_dic_data = new double[height * width];
+        for (size_t y = 0; y < height; ++y) {
+            for (size_t x = 0; x < width; ++x) {
+                v_dic_data[x * height + y] = v_lag_array(y, x);
+            }
+        }
+        matvar_t* v_dic_mat = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, data_dims, v_dic_data, MAT_F_DONT_COPY_DATA);
+        Mat_VarSetCell(plot_v_dic, i, v_dic_mat);
+        
+        // Lagrangian formatted (plot_v_ref_formatted)
+        double* v_ref_data = new double[height * width];
+        for (size_t y = 0; y < height; ++y) {
+            for (size_t x = 0; x < width; ++x) {
+                v_ref_data[x * height + y] = v_lag_array(y, x);
+            }
+        }
+        matvar_t* v_ref_mat = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, data_dims, v_ref_data, MAT_F_DONT_COPY_DATA);
+        Mat_VarSetCell(plot_v_ref, i, v_ref_mat);
+        
+        // Eulerian formatted (plot_v_cur_formatted)
+        double* v_cur_data = new double[height * width];
+        for (size_t y = 0; y < height; ++y) {
+            for (size_t x = 0; x < width; ++x) {
+                v_cur_data[x * height + y] = v_eul_array(y, x);
+            }
+        }
+        matvar_t* v_cur_mat = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, data_dims, v_cur_data, MAT_F_DONT_COPY_DATA);
+        Mat_VarSetCell(plot_v_cur, i, v_cur_mat);
+        
+        // Create ROI mask matrices
+        
+        // Raw ROI (roi_dic) - from Lagrangian
+        uint8_t* roi_dic_data = new uint8_t[height * width];
+        for (size_t y = 0; y < height; ++y) {
+            for (size_t x = 0; x < width; ++x) {
+                roi_dic_data[x * height + y] = roi_lag_mask(y, x) ? 1 : 0;
+            }
+        }
+        matvar_t* roi_dic_mat = Mat_VarCreate("", MAT_C_UINT8, MAT_T_UINT8, 2, data_dims, roi_dic_data, MAT_F_DONT_COPY_DATA);
+        Mat_VarSetCell(roi_dic, i, roi_dic_mat);
+        
+        // Lagrangian ROI (roi_ref_formatted)
+        uint8_t* roi_ref_data = new uint8_t[height * width];
+        for (size_t y = 0; y < height; ++y) {
+            for (size_t x = 0; x < width; ++x) {
+                roi_ref_data[x * height + y] = roi_lag_mask(y, x) ? 1 : 0;
+            }
+        }
+        matvar_t* roi_ref_mat = Mat_VarCreate("", MAT_C_UINT8, MAT_T_UINT8, 2, data_dims, roi_ref_data, MAT_F_DONT_COPY_DATA);
+        Mat_VarSetCell(roi_ref, i, roi_ref_mat);
+        
+        // Eulerian ROI (roi_cur_formatted)
+        uint8_t* roi_cur_data = new uint8_t[height * width];
+        for (size_t y = 0; y < height; ++y) {
+            for (size_t x = 0; x < width; ++x) {
+                roi_cur_data[x * height + y] = roi_eul_mask(y, x) ? 1 : 0;
+            }
+        }
+        matvar_t* roi_cur_mat = Mat_VarCreate("", MAT_C_UINT8, MAT_T_UINT8, 2, data_dims, roi_cur_data, MAT_F_DONT_COPY_DATA);
+        Mat_VarSetCell(roi_cur, i, roi_cur_mat);
+        
+        // Correlation coefficient from Lagrangian
+        double* cc_data = new double[height * width];
+        for (size_t y = 0; y < height; ++y) {
+            for (size_t x = 0; x < width; ++x) {
+                cc_data[x * height + y] = cc_lag_array(y, x);
+            }
+        }
+        matvar_t* cc_mat = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, data_dims, cc_data, MAT_F_DONT_COPY_DATA);
+        Mat_VarSetCell(plot_corrcoef, i, cc_mat);
+    }
+    
+    // Create struct and populate with all fields
+    std::vector<std::string> field_names = {
+        "plot_corrcoef_dic", 
+        "plot_u_dic", "plot_v_dic",
+        "plot_u_ref_formatted", "plot_v_ref_formatted", 
+        "plot_u_cur_formatted", "plot_v_cur_formatted",
+        "roi_dic",
+        "roi_ref_formatted", "roi_cur_formatted"
+    };
+    
+    matvar_t* displacements = createStructVariable("displacements", field_names);
+    Mat_VarSetStructFieldByName(displacements, "plot_corrcoef_dic", 0, plot_corrcoef);
+    Mat_VarSetStructFieldByName(displacements, "plot_u_dic", 0, plot_u_dic);
+    Mat_VarSetStructFieldByName(displacements, "plot_v_dic", 0, plot_v_dic);
+    Mat_VarSetStructFieldByName(displacements, "plot_u_ref_formatted", 0, plot_u_ref);
+    Mat_VarSetStructFieldByName(displacements, "plot_v_ref_formatted", 0, plot_v_ref);
+    Mat_VarSetStructFieldByName(displacements, "plot_u_cur_formatted", 0, plot_u_cur);
+    Mat_VarSetStructFieldByName(displacements, "plot_v_cur_formatted", 0, plot_v_cur);
+    Mat_VarSetStructFieldByName(displacements, "roi_dic", 0, roi_dic);
+    Mat_VarSetStructFieldByName(displacements, "roi_ref_formatted", 0, roi_ref);
+    Mat_VarSetStructFieldByName(displacements, "roi_cur_formatted", 0, roi_cur);
     
     return displacements;
 }

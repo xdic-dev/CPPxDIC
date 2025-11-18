@@ -51,6 +51,28 @@ public:
                                  const std::map<std::string, double>& dispinfo);
     
     /**
+     * Write MATCHING2xxx_pair.mat file with both Lagrangian and Eulerian perspectives
+     * 
+     * @param filename Output MAT filename
+     * @param ref_img Reference image
+     * @param cur_img Current image
+     * @param ref_roi Reference ROI
+     * @param cur_roi Current ROI
+     * @param dic_lagrangian Lagrangian (reference) DIC output
+     * @param dic_eulerian Eulerian (current) DIC output
+     * @param dispinfo DIC parameters
+     * @return Success status
+     */
+    static bool writeMatchingFile(const std::string& filename,
+                                 const cv::Mat& ref_img,
+                                 const cv::Mat& cur_img,
+                                 const cv::Mat& ref_roi,
+                                 const cv::Mat& cur_roi,
+                                 const ncorr::DIC_analysis_output& dic_lagrangian,
+                                 const ncorr::DIC_analysis_output& dic_eulerian,
+                                 const std::map<std::string, double>& dispinfo);
+    
+    /**
      * Write REF_MASK_xxx_phase_pairX.mat file
      * Simple structure: refmask (uint8 2D array)
      * 
@@ -275,6 +297,17 @@ private:
      * @return displacements struct variable
      */
     static matvar_t* formatDisplacements(const ncorr::DIC_analysis_output& dic_output);
+    
+    /**
+     * Format displacements structure with both Lagrangian and Eulerian perspectives
+     * Creates displacements struct with _ref_formatted and _cur_formatted fields
+     * 
+     * @param dic_lagrangian Lagrangian (reference) DIC output
+     * @param dic_eulerian Eulerian (current) DIC output
+     * @return displacements struct variable
+     */
+    static matvar_t* formatDisplacements(const ncorr::DIC_analysis_output& dic_lagrangian,
+                                        const ncorr::DIC_analysis_output& dic_eulerian);
     
     /**
      * Convert cv::Mat ROI mask to ncorr::ROI2D
