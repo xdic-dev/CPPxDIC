@@ -6,6 +6,7 @@
 #include "utils.h"
 #include "step_d_workflow.h"
 #include "mat_writer.h"
+#include "mat_reader.h"
 #include "strain_computation.h"
 #include "surface_stitching.h"
 #include <iostream>
@@ -33,127 +34,226 @@ DicAnalysis::DicAnalysis(const Config& config) : config_(config) {
 
 bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
     std::cout << "Starting Deformation/Strain Analysis (Step F)..." << std::endl;
-    std::cout << "NOTE: Saving results as .mat files (not .bin)" << std::endl;
+    std::cout << "NOTE: This requires DIC3Dcombined from Step E" << std::endl;
+    
     try {
-
         for (int trial : trial_target) {
-            for (int pair = 1; pair <= config_.num_pair; ++pair) {
-                // Recreate inputs (images + ROI) and load outputs per camera
-                std::vector<std::string> cam1Frames; std::vector<std::string> cam2Frames;
-                if (!Utils::importVid(config_, trial, pair, cam1Frames, cam2Frames) || cam1Frames.empty()) {
-                    std::cerr << "No frames for strain analysis: trial " << trial << " pair " << pair << std::endl;
-                    continue;
+            // Step F works on combined 3D reconstruction, not per-pair
+            std::string output_dir = config_.dic_path + "/" + config_.subject_id + "/" + config_.material;
+            
+            // Load DIC3Dcombined from Step E output
+            std::ostringstream dic3d_path;
+            dic3d_path << output_dir << "/DIC3Dcombined_" << config_.num_pair << "Pairs_stitched.mat";
+            
+            if (!std::filesystem::exists(dic3d_path.str())) {
+                std::cerr << "ERROR: DIC3Dcombined file not found: " << dic3d_path.str() << std::endl;
+                std::cerr << "You must run Step E (dic3DReconstruction) first!" << std::endl;
+                return false;
+            }
+            
+            std::cout << "Loading DIC3Dcombined from: " << dic3d_path.str() << std::endl;
+            
+            // Load DIC3Dcombined structure
+            DIC3Dcombined dic3d;
+            if (!MatReader::readDIC3Dcombined(dic3d_path.str(), dic3d)) {
+                std::cerr << "Failed to load DIC3Dcombined structure" << std::endl;
+                return false;
+            }
+            
+            if (dic3d.Points3D.empty() || dic3d.Faces.empty()) {
+                std::cerr << "DIC3Dcombined has no 3D data" << std::endl;
+                return false;
+            }
+            
+            std::cout << "  Loaded: " << dic3d.Points3D.size() << " frames, "
+                      << dic3d.Points3D[0].x.size() << " points, "
+                      << dic3d.Faces.size() / 3 << " faces" << std::endl;
+            
+            // Convert Points3D to Eigen::Vector3d format for deformation computation
+            std::cout << "\nConverting data to Eigen format..." << std::endl;
+            
+            // Reference frame (frame 0)
+            std::vector<Eigen::Vector3d> vertices_ref;
+            size_t nPoints = dic3d.Points3D[0].x.size();
+            vertices_ref.reserve(nPoints);
+            for (size_t i = 0; i < nPoints; ++i) {
+                vertices_ref.emplace_back(
+                    dic3d.Points3D[0].x[i],
+                    dic3d.Points3D[0].y[i],
+                    dic3d.Points3D[0].z[i]
+                );
+            }
+            
+            // All frames
+            std::vector<std::vector<Eigen::Vector3d>> vertices_all_frames;
+            vertices_all_frames.reserve(dic3d.Points3D.size());
+            for (const auto& frame_pts : dic3d.Points3D) {
+                std::vector<Eigen::Vector3d> frame_verts;
+                frame_verts.reserve(frame_pts.x.size());
+                for (size_t i = 0; i < frame_pts.x.size(); ++i) {
+                    frame_verts.emplace_back(
+                        frame_pts.x[i],
+                        frame_pts.y[i],
+                        frame_pts.z[i]
+                    );
                 }
-                std::string roiJsonPath, roiMaskImagePath;
-                Utils::loadROIFromMat(config_, trial, pair, roiJsonPath, roiMaskImagePath);
-
-                // Helper to process a camera
-                auto process_cam = [&](int cam_index, const std::vector<std::string>& frames){
-                    try {
-                        // Setup DIC input with ROI if available
-                        DIC_analysis_input dic_input;
-                        if (!roiMaskImagePath.empty()) {
-                            if (!setupNcorrAnalysis(frames, roiMaskImagePath, dic_input)) return false;
-                        } else {
-                            if (!setupNcorrAnalysis(frames, dic_input)) return false;
-                        }
-                        // Load DIC output from .cache directory (internal .bin format)
-                        std::string output_dir = config_.dic_path + "/" + config_.subject_id + "/" + config_.material;
-                        std::string cache_bin = output_dir + "/.cache/ncorr" + std::to_string(cam_index) + ".mat.bin";
-                        
-                        ncorr::DIC_analysis_output dic_output;
-                        if (std::filesystem::exists(cache_bin)) {
-                            dic_output = DIC_analysis_output::load(cache_bin);
-                        } else {
-                            std::cerr << "Warning: Could not find cached DIC output for cam" << cam_index << std::endl;
-                            std::cerr << "  Expected: " << cache_bin << std::endl;
-                            return false;
-                        }
-
-                        // Run strain
-                        auto s_in = strain_analysis_input(dic_input, dic_output, SUBREGION::CIRCLE, config_.subregion_radius);
-                        auto s_out = strain_analysis(s_in);
-
-                        // Load 3D reconstruction results
-                        // First try to load from .mat file if it exists
-                        std::ostringstream dic3d_path;
-                        dic3d_path << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
-                                  << "/DIC3Dcombined_" << config_.num_pair << "Pairs_stitched.mat";
-                        
-                        // For now, we need to have run dic3DReconstruction first
-                        // In a real workflow, we would load the DIC3Dcombined structure here
-                        // TODO: Implement MAT file reader for DIC3Dcombined
-                        
-                        std::cout << "  Note: Full 3D deformation requires DIC3Dcombined from dic3DReconstruction" << std::endl;
-                        std::cout << "  Expected file: " << dic3d_path.str() << std::endl;
-                        
-                        // For now, create a minimal ppresults with ncorr 2D strain data
-                        DIC3DPPresults ppresults;
-                        ppresults.deftype = "cum";  // cumulative deformation
-                        
-                        const auto& strains = s_out.strains;
-                        ppresults.n_frames = strains.size();
-                        std::cout << "  Computed " << strains.size() << " frames of 2D strain data" << std::endl;
-                        
-                        // NOTE: Complete 3D deformation workflow:
-                        // 1. Run dic3DReconstruction to create DIC3Dcombined structure
-                        // 2. Load DIC3Dcombined.Points3D and DIC3Dcombined.Faces
-                        // 3. Convert to Eigen::Vector3d format
-                        // 4. Call: computeTriSurfaceDeformation(Faces, Points3D{1}, Points3D, cum=1)
-                        // 5. Store FrameDeformationResult in ppresults.Deform
-                        //
-                        // The result would populate:
-                        //   - Deformation gradient F
-                        //   - Strain tensors (Lagrangian E, Eulerian e)
-                        //   - Principal strains (Epc1, Epc2)
-                        //   - Max shear strain
-                        //   - Equivalent strain (von Mises)
-                        //
-                        // This matches MATLAB step4_dic_rewrited.m line 106:
-                        //   deformationStruct = triSurfaceDeformation_rewrited(F, Points3D{1}, Points3D, cum)
-
-                        // Optionally write DIC3DPPresults to single .mat file
-                        if (config_.generate_mat_files) {
-                            std::ostringstream matout;
-                            matout << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
-                                   << "/DIC3DPPresults_" << config_.num_pair << "Pairs_cum_v1.mat";
-                            
-                            // Check if already exists (checkpoint)
-                            if (std::filesystem::exists(matout.str())) {
-                                std::cout << "Checkpoint found: " << matout.str() << " (skipping)" << std::endl;
-                            } else {
-                                bool success = MatWriter::write3DPPresults(matout.str(), ppresults);
-                                if (success) {
-                                    std::cout << "Generated MATLAB .mat file: " << matout.str() << std::endl;
-                                } else {
-                                    std::cerr << "Failed to save DIC3DPPresults .mat" << std::endl;
-                                }
-                            }
-                        } else {
-                            std::cout << "Strain analysis complete (generate_mat_files=false, no .mat output)" << std::endl;
-                        }
-
-                        // Success
-                        return true;
-                    } catch (...) { return false; }
-                };
-
-                if (!process_cam(1, cam1Frames)) {
-                    std::cerr << "Strain analysis failed for cam1 T" << trial << " pair " << pair << std::endl;
-                    return false;
+                vertices_all_frames.push_back(std::move(frame_verts));
+            }
+            
+            std::cout << "  Converted " << vertices_all_frames.size() << " frames" << std::endl;
+            
+            // Compute 3D deformation and strain
+            std::cout << "\nComputing 3D surface deformation..." << std::endl;
+            std::cout << "  Method: Triangular Cosserat Point Elements (TCPE)" << std::endl;
+            std::cout << "  Deformation type: Cumulative (reference = frame 1)" << std::endl;
+            
+            FrameDeformationResult deform_result = computeTriSurfaceDeformation(
+                dic3d.Faces,
+                vertices_ref,
+                vertices_all_frames,
+                true  // cumulative: use frame 1 as reference for all frames
+            );
+            
+            std::cout << "\n✓ Deformation computation complete!" << std::endl;
+            std::cout << "  Computed: Deformation gradient F, strain tensors E/e, principal strains" << std::endl;
+            
+            // TODO: Apply temporal filtering if needed (port myfilterTime.m)
+            // This would smooth displacement fields before deformation computation
+            // For now, skip temporal filtering
+            
+            // TODO: Compute face isotropy index (port faceIsotropyIndex.m)
+            // This is a quality metric for mesh elements
+            // For now, skip this
+            
+            // Build DIC3DPPresults structure
+            std::cout << "\nBuilding DIC3DPPresults structure..." << std::endl;
+            DIC3DPPresults ppresults;
+            
+            // Copy all fields from DIC3Dcombined (inheritance)
+            ppresults.pairIndices = dic3d.pairIndices;
+            ppresults.Points3D = dic3d.Points3D;
+            ppresults.Faces = dic3d.Faces;
+            ppresults.FaceColors = dic3d.FaceColors;
+            ppresults.corrComb = dic3d.corrComb;
+            ppresults.FaceCorrComb = dic3d.FaceCorrComb;
+            ppresults.FaceCentroids = dic3d.FaceCentroids;
+            ppresults.Disp = dic3d.Disp;
+            ppresults.calibration = dic3d.calibration;
+            ppresults.distortion = dic3d.distortion;
+            ppresults.FacePairInds = dic3d.FacePairInds;
+            ppresults.PointPairInds = dic3d.PointPairInds;
+            ppresults.DIC2Dinfo = dic3d.DIC2Dinfo;
+            ppresults.AllPairsResults = dic3d.AllPairsResults;
+            
+            // Set deformation type and frame count
+            ppresults.deftype = "cum";  // cumulative deformation
+            ppresults.n_frames = deform_result.n_frames;
+            
+            // Convert FrameDeformationResult to DeformData
+            // This extracts the key fields needed for MATLAB compatibility
+            ppresults.Deform.F.resize(deform_result.n_frames);
+            ppresults.Deform.strain.resize(deform_result.n_frames);
+            ppresults.Deform.princStrain.resize(deform_result.n_frames);
+            ppresults.Deform.maxShearStrain.resize(deform_result.n_frames);
+            
+            size_t nFaces = dic3d.Faces.size() / 3;
+            
+            for (size_t iframe = 0; iframe < deform_result.n_frames; ++iframe) {
+                const auto& frame = deform_result.frames[iframe];
+                
+                // Deformation gradient F (3x3 per face)
+                DeformGradient& F = ppresults.Deform.F[iframe];
+                F.F11.resize(nFaces);
+                F.F12.resize(nFaces);
+                F.F13.resize(nFaces);
+                F.F21.resize(nFaces);
+                F.F22.resize(nFaces);
+                F.F23.resize(nFaces);
+                F.F31.resize(nFaces);
+                F.F32.resize(nFaces);
+                F.F33.resize(nFaces);
+                
+                for (size_t iface = 0; iface < nFaces; ++iface) {
+                    F.F11[iface] = frame.Fmat[iface](0, 0);
+                    F.F12[iface] = frame.Fmat[iface](0, 1);
+                    F.F13[iface] = frame.Fmat[iface](0, 2);
+                    F.F21[iface] = frame.Fmat[iface](1, 0);
+                    F.F22[iface] = frame.Fmat[iface](1, 1);
+                    F.F23[iface] = frame.Fmat[iface](1, 2);
+                    F.F31[iface] = frame.Fmat[iface](2, 0);
+                    F.F32[iface] = frame.Fmat[iface](2, 1);
+                    F.F33[iface] = frame.Fmat[iface](2, 2);
                 }
-                if (!cam2Frames.empty()) {
-                    if (!process_cam(2, cam2Frames)) {
-                        std::cerr << "Strain analysis failed for cam2 T" << trial << " pair " << pair << std::endl;
+                
+                // Green-Lagrangian strain tensor E (3x3 per face)
+                StrainTensor& E = ppresults.Deform.strain[iframe];
+                E.E11.resize(nFaces);
+                E.E12.resize(nFaces);
+                E.E13.resize(nFaces);
+                E.E21.resize(nFaces);
+                E.E22.resize(nFaces);
+                E.E23.resize(nFaces);
+                E.E31.resize(nFaces);
+                E.E32.resize(nFaces);
+                E.E33.resize(nFaces);
+                
+                for (size_t iface = 0; iface < nFaces; ++iface) {
+                    E.E11[iface] = frame.Emat[iface](0, 0);
+                    E.E12[iface] = frame.Emat[iface](0, 1);
+                    E.E13[iface] = frame.Emat[iface](0, 2);
+                    E.E21[iface] = frame.Emat[iface](1, 0);
+                    E.E22[iface] = frame.Emat[iface](1, 1);
+                    E.E23[iface] = frame.Emat[iface](1, 2);
+                    E.E31[iface] = frame.Emat[iface](2, 0);
+                    E.E32[iface] = frame.Emat[iface](2, 1);
+                    E.E33[iface] = frame.Emat[iface](2, 2);
+                }
+                
+                // Principal strains (2 per face: Epc1, Epc2)
+                std::vector<double>& princStrain = ppresults.Deform.princStrain[iframe];
+                princStrain.resize(nFaces * 2);
+                for (size_t iface = 0; iface < nFaces; ++iface) {
+                    princStrain[iface * 2 + 0] = frame.Epc1[iface];
+                    princStrain[iface * 2 + 1] = frame.Epc2[iface];
+                }
+                
+                // Max shear strain (1 per face)
+                std::vector<double>& maxShear = ppresults.Deform.maxShearStrain[iframe];
+                maxShear = frame.EShearMax;
+            }
+            
+            std::cout << "  Populated deformation data for " << ppresults.n_frames << " frames" << std::endl;
+            
+            // Write DIC3DPPresults to .mat file
+            if (config_.generate_mat_files) {
+                std::ostringstream matout;
+                matout << output_dir << "/DIC3DPPresults_" << config_.num_pair << "Pairs_cum_v1.mat";
+                
+                // Check if already exists (checkpoint)
+                if (std::filesystem::exists(matout.str())) {
+                    std::cout << "\nCheckpoint found: " << matout.str() << " (skipping)" << std::endl;
+                } else {
+                    std::cout << "\nWriting results to: " << matout.str() << std::endl;
+                    bool success = MatWriter::write3DPPresults(matout.str(), ppresults);
+                    if (success) {
+                        std::cout << "✓ Generated MATLAB .mat file successfully" << std::endl;
+                    } else {
+                        std::cerr << "ERROR: Failed to write DIC3DPPresults .mat" << std::endl;
                         return false;
                     }
                 }
-                std::cout << "Strain analysis completed for trial " << trial << ", pair " << pair << std::endl;
+            } else {
+                std::cout << "\nDeformation analysis complete (generate_mat_files=false, no .mat output)" << std::endl;
             }
+            
+            std::cout << "\n=== Step F Complete ==="  << std::endl;
+            std::cout << "✓ 3D deformation and strain analysis finished for trial " << trial << std::endl;
         }
+        
         return true;
+        
     } catch (const std::exception& e) {
-        std::cerr << "Error in Deformation/Strain Analysis: " << e.what() << std::endl;
+        std::cerr << "ERROR in Deformation/Strain Analysis: " << e.what() << std::endl;
         return false;
     }
 }
