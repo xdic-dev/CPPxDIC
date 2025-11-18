@@ -1,3 +1,6 @@
 [submodule "Tools/CppNCorr"]
 	path = Tools/CppNCorr
 	url = https://github.com/xdic-dev/CppNCorr.git
+[submodule "Tools/MultiDIC"]
+	path = Tools/MultiDIC
+	url = git@github.com:donatiendoumont/fingertip_3dreconstruction.git
