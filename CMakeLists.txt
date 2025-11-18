@@ -25,6 +25,7 @@ add_executable(cppxdic
     src/strain_computation.cpp
     src/mat_reader.cpp
     src/delaunay_triangulation.cpp
+    src/surface_stitching.cpp
 )
 
 # Find OpenCV (following ncorr pattern)

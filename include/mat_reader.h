@@ -126,6 +126,16 @@ public:
      */
     static cv::Mat readROIMask(const std::string& mat_path, 
                                const std::string& var_name = "refmask");
+    
+    /**
+     * Read DIC3Dcombined structure from MAT file
+     * 
+     * @param mat_path Path to MAT file containing DIC3Dcombined
+     * @param combined Output: DIC3Dcombined structure
+     * @return True if successful
+     */
+    static bool readDIC3Dcombined(const std::string& mat_path, 
+                                  struct DIC3Dcombined& combined);
 };
 
 } // namespace cppxdic

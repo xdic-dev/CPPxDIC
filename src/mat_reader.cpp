@@ -3,6 +3,7 @@
  */
 
 #include "mat_reader.h"
+#include "dic_structures.h"
 #include <iostream>
 #include <sstream>
 #include <cstring>
@@ -287,6 +288,94 @@ cv::Mat MatReader::readROIMask(const std::string& mat_path, const std::string& v
     
     Mat_Close(matfp);
     return mask;
+}
+
+bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& combined) {
+    mat_t* matfp = Mat_Open(mat_path.c_str(), MAT_ACC_RDONLY);
+    if (!matfp) {
+        std::cerr << "Failed to open MAT file: " << mat_path << std::endl;
+        return false;
+    }
+    
+    // Read the main structure (usually just the variable itself, not nested)
+    matvar_t* dic3d_var = Mat_VarRead(matfp, nullptr);  // Read first variable
+    if (!dic3d_var) {
+        // Try common variable names
+        const char* var_names[] = {"DIC3Dcombined", "DIC3D", "data"};
+        for (const char* name : var_names) {
+            dic3d_var = Mat_VarRead(matfp, name);
+            if (dic3d_var) break;
+        }
+    }
+    
+    if (!dic3d_var || dic3d_var->class_type != MAT_C_STRUCT) {
+        std::cerr << "DIC3Dcombined structure not found in " << mat_path << std::endl;
+        if (dic3d_var) Mat_VarFree(dic3d_var);
+        Mat_Close(matfp);
+        return false;
+    }
+    
+    // Read Faces (Nx3 matrix)
+    matvar_t* faces_var = Mat_VarGetStructFieldByName(dic3d_var, "Faces", 0);
+    if (faces_var && faces_var->class_type == MAT_C_DOUBLE) {
+        size_t nFaces = faces_var->dims[0];
+        const double* faces_data = static_cast<const double*>(faces_var->data);
+        combined.Faces.clear();
+        combined.Faces.reserve(nFaces * 3);
+        for (size_t i = 0; i < nFaces * 3; ++i) {
+            combined.Faces.push_back(static_cast<int>(faces_data[i]) - 1);  // MATLAB 1-indexed to C++ 0-indexed
+        }
+    }
+    
+    // Read Points3D (cell array of frames)
+    matvar_t* points3d_var = Mat_VarGetStructFieldByName(dic3d_var, "Points3D", 0);
+    if (points3d_var && points3d_var->class_type == MAT_C_CELL) {
+        size_t nFrames = points3d_var->dims[0] * points3d_var->dims[1];
+        combined.Points3D.resize(nFrames);
+        
+        for (size_t frame = 0; frame < nFrames; ++frame) {
+            matvar_t* frame_var = Mat_VarGetCell(points3d_var, frame);
+            if (frame_var && frame_var->class_type == MAT_C_DOUBLE) {
+                size_t nPoints = frame_var->dims[0];
+                const double* pts_data = static_cast<const double*>(frame_var->data);
+                
+                combined.Points3D[frame].x.resize(nPoints);
+                combined.Points3D[frame].y.resize(nPoints);
+                combined.Points3D[frame].z.resize(nPoints);
+                
+                for (size_t i = 0; i < nPoints; ++i) {
+                    combined.Points3D[frame].x[i] = pts_data[i];
+                    combined.Points3D[frame].y[i] = pts_data[i + nPoints];
+                    combined.Points3D[frame].z[i] = pts_data[i + 2 * nPoints];
+                }
+            }
+        }
+    }
+    
+    // Read FacePairInds
+    matvar_t* facepair_var = Mat_VarGetStructFieldByName(dic3d_var, "FacePairInds", 0);
+    if (facepair_var && facepair_var->class_type == MAT_C_DOUBLE) {
+        size_t n = facepair_var->dims[0];
+        const double* data = static_cast<const double*>(facepair_var->data);
+        combined.FacePairInds.assign(data, data + n);
+    }
+    
+    // Read PointPairInds
+    matvar_t* pointpair_var = Mat_VarGetStructFieldByName(dic3d_var, "PointPairInds", 0);
+    if (pointpair_var && pointpair_var->class_type == MAT_C_DOUBLE) {
+        size_t n = pointpair_var->dims[0];
+        const double* data = static_cast<const double*>(pointpair_var->data);
+        combined.PointPairInds.assign(data, data + n);
+    }
+    
+    std::cout << "Loaded DIC3Dcombined: " 
+              << combined.Points3D.size() << " frames, "
+              << (combined.Points3D.empty() ? 0 : combined.Points3D[0].x.size()) << " points, "
+              << combined.Faces.size() / 3 << " faces" << std::endl;
+    
+    Mat_VarFree(dic3d_var);
+    Mat_Close(matfp);
+    return true;
 }
 
 } // namespace cppxdic
