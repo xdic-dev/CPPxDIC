@@ -208,7 +208,7 @@ std::vector<int> computeMeshBoundary(const std::vector<int>& faces,
         int v2 = faces[i * 3 + 2];
         
         // Check if vertices are valid (not NaN)
-        if (v0 >= vertices.size() || v1 >= vertices.size() || v2 >= vertices.size()) {
+        if (static_cast<size_t>(v0) >= vertices.size() || static_cast<size_t>(v1) >= vertices.size() || static_cast<size_t>(v2) >= vertices.size()) {
             continue;
         }
         if (vertices[v0].hasNaN() || vertices[v1].hasNaN() || vertices[v2].hasNaN()) {
@@ -255,7 +255,7 @@ std::vector<double> computeEdgeLengths(const std::vector<int>& faces,
         int v1 = faces[i * 3 + 1];
         int v2 = faces[i * 3 + 2];
         
-        if (v0 >= vertices.size() || v1 >= vertices.size() || v2 >= vertices.size()) {
+        if (static_cast<size_t>(v0) >= vertices.size() || static_cast<size_t>(v1) >= vertices.size() || static_cast<size_t>(v2) >= vertices.size()) {
             edge_lengths.push_back(std::nan(""));
             edge_lengths.push_back(std::nan(""));
             edge_lengths.push_back(std::nan(""));
@@ -301,7 +301,7 @@ std::pair<std::vector<bool>, std::vector<bool>> removeOverlapSurfaces(
         int v1 = faces1[i * 3 + 1];
         int v2 = faces1[i * 3 + 2];
         
-        if (v0 < vertices1.size() && v1 < vertices1.size() && v2 < vertices1.size()) {
+        if (static_cast<size_t>(v0) < vertices1.size() && static_cast<size_t>(v1) < vertices1.size() && static_cast<size_t>(v2) < vertices1.size()) {
             Eigen::Vector3d centroid = (vertices1[v0] + vertices1[v1] + vertices1[v2]) / 3.0;
             centroids1.push_back(centroid);
         } else {
@@ -314,7 +314,7 @@ std::pair<std::vector<bool>, std::vector<bool>> removeOverlapSurfaces(
         int v1 = faces2[i * 3 + 1];
         int v2 = faces2[i * 3 + 2];
         
-        if (v0 < vertices2.size() && v1 < vertices2.size() && v2 < vertices2.size()) {
+        if (static_cast<size_t>(v0) < vertices2.size() && static_cast<size_t>(v1) < vertices2.size() && static_cast<size_t>(v2) < vertices2.size()) {
             Eigen::Vector3d centroid = (vertices2[v0] + vertices2[v1] + vertices2[v2]) / 3.0;
             centroids2.push_back(centroid);
         } else {

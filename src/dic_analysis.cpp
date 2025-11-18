@@ -144,8 +144,35 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                           << vertices_all_frames.size() << ")" << std::endl;
             }
             
-            // Compute 3D deformation and strain
-            std::cout << "\nComputing 3D surface deformation..." << std::endl;
+            // Compute rigid body motion (RBM) removal (matching MATLAB STEP4 lines 61-70)
+            std::cout << "\nComputing rigid body motion (RBM) transformations..." << std::endl;
+            std::vector<Utils::RigidTransform> rbm_transforms(vertices_all_frames.size());
+            std::vector<std::vector<Eigen::Vector3d>> vertices_all_frames_ARBM;
+            vertices_all_frames_ARBM.reserve(vertices_all_frames.size());
+            
+            for (size_t iframe = 0; iframe < vertices_all_frames.size(); ++iframe) {
+                Utils::RigidTransform transform;
+                bool success = Utils::computeRigidTransform(
+                    vertices_all_frames[iframe],  // from
+                    vertices_ref,                  // to (reference frame)
+                    transform
+                );
+                
+                rbm_transforms[iframe] = transform;
+                
+                if (success) {
+                    // Apply RBM transformation to get ARBM (After RBM) coordinates
+                    auto verts_arbm = Utils::applyRigidTransform(vertices_all_frames[iframe], transform);
+                    vertices_all_frames_ARBM.push_back(verts_arbm);
+                } else {
+                    std::cerr << "  Warning: RBM computation failed for frame " << iframe << std::endl;
+                    vertices_all_frames_ARBM.push_back(vertices_all_frames[iframe]);
+                }
+            }
+            std::cout << "  ✓ RBM transformations computed for " << vertices_all_frames.size() << " frames" << std::endl;
+            
+            // Compute 3D deformation and strain (with original coordinates)
+            std::cout << "\nComputing 3D surface deformation (with RBM)..." << std::endl;
             std::cout << "  Method: Triangular Cosserat Point Elements (TCPE)" << std::endl;
             std::cout << "  Deformation type: Cumulative (reference = frame 1)" << std::endl;
             
@@ -156,8 +183,21 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                 true  // cumulative: use frame 1 as reference for all frames
             );
             
-            std::cout << "\n✓ Deformation computation complete!" << std::endl;
-            std::cout << "  Computed: Deformation gradient F, strain tensors E/e, principal strains" << std::endl;
+            std::cout << "  ✓ Deformation computation complete (with RBM)" << std::endl;
+            
+            // Compute deformation after RBM removal (matching MATLAB STEP4 lines 84-85)
+            std::cout << "\nComputing 3D surface deformation (after RBM removal)..." << std::endl;
+            FrameDeformationResult deform_result_ARBM = computeTriSurfaceDeformation(
+                dic3d.Faces,
+                vertices_all_frames_ARBM[0],  // reference frame after RBM
+                vertices_all_frames_ARBM,
+                true  // cumulative
+            );
+            
+            std::cout << "  ✓ Deformation computation complete (ARBM)" << std::endl;
+            std::cout << "\n✓ Both deformation analyses complete!" << std::endl;
+            std::cout << "  - With RBM: Deformation gradient F, strain tensors E/e" << std::endl;
+            std::cout << "  - After RBM: Deformation gradient F_ARBM, strain tensors E_ARBM/e_ARBM" << std::endl;
             
             // Build DIC3DPPresults structure
             std::cout << "\nBuilding DIC3DPPresults structure..." << std::endl;
