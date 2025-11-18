@@ -275,6 +275,22 @@ private:
      * @return displacements struct variable
      */
     static matvar_t* formatDisplacements(const ncorr::DIC_analysis_output& dic_output);
+    
+    /**
+     * Convert cv::Mat ROI mask to ncorr::ROI2D
+     * 
+     * @param mask OpenCV binary mask (CV_8U)
+     * @return ROI2D object
+     */
+    static ncorr::ROI2D convertMatToROI2D(const cv::Mat& mask);
+    
+    /**
+     * Convert ncorr::ROI2D to cv::Mat ROI mask
+     * 
+     * @param roi ROI2D object
+     * @return OpenCV binary mask (CV_8U)
+     */
+    static cv::Mat convertROI2DToMat(const ncorr::ROI2D& roi);
 };
 
 } // namespace cppxdic

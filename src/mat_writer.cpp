@@ -44,14 +44,40 @@ bool MatWriter::writeMatchingFile(const std::string& filename,
     addFieldToStruct(ref_roi_struct, "mask", ref_roi_mask, 0);
     addFieldToStruct(reference_save, "roi", ref_roi_struct, 0);
     
-    // Create current_save struct
+    // Update current ROI with displacement field before saving
+    cv::Mat cur_roi_updated = cur_roi.clone();  // Default to original
+    if (!dic_output.disps.empty()) {
+        try {
+            // Convert cv::Mat to ncorr::ROI2D
+            ncorr::ROI2D roi_current = convertMatToROI2D(cur_roi);
+            
+            // Apply ROI update using first displacement field
+            // This updates the ROI boundary based on displacement interpolation
+            ncorr::ROI2D roi_updated = ncorr::update(
+                roi_current, 
+                dic_output.disps[0],           // First displacement field
+                ncorr::INTERP::CUBIC_KEYS      // Cubic interpolation for smooth boundaries
+            );
+            
+            // Convert back to cv::Mat
+            cur_roi_updated = convertROI2DToMat(roi_updated);
+            
+            std::cout << "  Applied ROI update with displacement field" << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "  Warning: ROI update failed: " << e.what() << std::endl;
+            std::cerr << "  Using original ROI instead" << std::endl;
+            // cur_roi_updated remains as clone of cur_roi
+        }
+    }
+    
+    // Create current_save struct with updated ROI
     matvar_t* current_save = createStructVariable("current_save", ref_fields);
     writeMatVariable(matfp, "cur_gs_temp", cur_img);
     matvar_t* cur_gs = Mat_VarRead(matfp, "cur_gs_temp");
     addFieldToStruct(current_save, "gs", cur_gs, 0);
     
     matvar_t* cur_roi_struct = createStructVariable("roi", roi_fields);
-    writeMatVariable(matfp, "cur_roi_temp", cur_roi);
+    writeMatVariable(matfp, "cur_roi_temp", cur_roi_updated);  // Write UPDATED ROI
     matvar_t* cur_roi_mask = Mat_VarRead(matfp, "cur_roi_temp");
     addFieldToStruct(cur_roi_struct, "mask", cur_roi_mask, 0);
     addFieldToStruct(current_save, "roi", cur_roi_struct, 0);
@@ -671,6 +697,38 @@ bool MatWriter::write3DPPresults(const std::string& filename,
     Mat_Close(matfp);
     std::cout << "Wrote DIC3DPPresults: " << filename << std::endl;
     return true;
+}
+
+// Helper function implementations ============================================
+
+ncorr::ROI2D MatWriter::convertMatToROI2D(const cv::Mat& mask) {
+    // Convert cv::Mat (CV_8U) to ncorr::Array2D<bool>
+    ncorr::Array2D<bool> mask_array(mask.rows, mask.cols);
+    
+    for (int i = 0; i < mask.rows; ++i) {
+        for (int j = 0; j < mask.cols; ++j) {
+            mask_array(i, j) = (mask.at<uint8_t>(i, j) > 0);
+        }
+    }
+    
+    // Create ROI2D from mask array
+    return ncorr::ROI2D(std::move(mask_array));
+}
+
+cv::Mat MatWriter::convertROI2DToMat(const ncorr::ROI2D& roi) {
+    // Extract mask from ROI2D
+    const auto& mask_array = roi.get_mask();
+    
+    // Create cv::Mat (CV_8U)
+    cv::Mat mask(mask_array.height(), mask_array.width(), CV_8UC1);
+    
+    for (ncorr::ROI2D::difference_type i = 0; i < mask_array.height(); ++i) {
+        for (ncorr::ROI2D::difference_type j = 0; j < mask_array.width(); ++j) {
+            mask.at<uint8_t>(i, j) = mask_array(i, j) ? 255 : 0;
+        }
+    }
+    
+    return mask;
 }
 
 } // namespace cppxdic
