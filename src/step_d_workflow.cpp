@@ -591,7 +591,7 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
     results.nImages = n_frames;
     
     const auto& roi1 = dic1.disps[0].get_roi();
-    const auto& roi_mask = roi1.get_mask().get_array();
+    const auto& roi_mask = roi1.get_mask();
     results.ROImask = cv::Mat(roi_mask.height(), roi_mask.width(), CV_8U);
     for (size_t y = 0; y < roi_mask.height(); ++y) {
         for (size_t x = 0; x < roi_mask.width(); ++x) {
@@ -640,8 +640,25 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
                 }
             }
         }
-        results.Points[ii] = points;
-        results.CorCoeffVec[ii] = corrcoef;
+        // Convert to Points2D structure
+        Points2D pts2d;
+        pts2d.x.reserve(points.size());
+        pts2d.y.reserve(points.size());
+        for (const auto& p : points) {
+            pts2d.x.push_back(static_cast<double>(p.x));
+            pts2d.y.push_back(static_cast<double>(p.y));
+        }
+        results.Points[ii] = std::move(pts2d);
+        // Store average corrcoef as a scalar per frame
+        double avg_corr = 0.0;
+        if (!corrcoef.empty()) {
+            double sum = 0.0; size_t cnt = 0;
+            for (double c : corrcoef) { if (!std::isnan(c)) { sum += c; ++cnt; } }
+            avg_corr = (cnt>0) ? (sum / static_cast<double>(cnt)) : std::numeric_limits<double>::quiet_NaN();
+        } else {
+            avg_corr = std::numeric_limits<double>::quiet_NaN();
+        }
+        results.CorCoeffVec[ii] = avg_corr;
     }
     
     std::cout << "  Processing cam2 frames..." << std::endl;
@@ -665,8 +682,23 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
                 }
             }
         }
-        results.Points[n_frames + ii] = points;
-        results.CorCoeffVec[n_frames + ii] = corrcoef;
+        Points2D pts2d2;
+        pts2d2.x.reserve(points.size());
+        pts2d2.y.reserve(points.size());
+        for (const auto& p : points) {
+            pts2d2.x.push_back(static_cast<double>(p.x));
+            pts2d2.y.push_back(static_cast<double>(p.y));
+        }
+        results.Points[n_frames + ii] = std::move(pts2d2);
+        double avg_corr2 = 0.0;
+        if (!corrcoef.empty()) {
+            double sum2 = 0.0; size_t cnt2 = 0;
+            for (double c : corrcoef) { if (!std::isnan(c)) { sum2 += c; ++cnt2; } }
+            avg_corr2 = (cnt2>0) ? (sum2 / static_cast<double>(cnt2)) : std::numeric_limits<double>::quiet_NaN();
+        } else {
+            avg_corr2 = std::numeric_limits<double>::quiet_NaN();
+        }
+        results.CorCoeffVec[n_frames + ii] = avg_corr2;
     }
     
     std::cout << "  Creating Delaunay triangulation..." << std::endl;

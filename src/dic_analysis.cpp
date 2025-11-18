@@ -21,6 +21,8 @@
 // JSON
 #include <nlohmann/json.hpp>
 #include <unordered_map>
+#include <algorithm>
+#include <array>
 
 using namespace ncorr;
 using namespace cppxdic;

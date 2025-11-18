@@ -8,6 +8,7 @@
 #include <iostream>
 #include <cstring>
 #include <filesystem>
+#include <algorithm>
 
 namespace cppxdic {
 
@@ -328,13 +329,7 @@ bool MatWriter::addFieldToStruct(matvar_t* struct_var,
     }
     
     // Use matio API to set struct field
-    int result = Mat_VarSetStructFieldByName(struct_var, field_name.c_str(), index, field_var);
-    
-    if (result != 0) {
-        std::cerr << "Error: Failed to add field '" << field_name << "' to struct" << std::endl;
-        return false;
-    }
-    
+    Mat_VarSetStructFieldByName(struct_var, field_name.c_str(), index, field_var);
     return true;
 }
 
@@ -433,7 +428,7 @@ matvar_t* MatWriter::formatDisplacements(const ncorr::DIC_analysis_output& dic_o
         const auto& disp = dic_output.disps[i];
         const auto& u_array = disp.get_u().get_array();
         const auto& v_array = disp.get_v().get_array();
-        const auto& roi_mask = disp.get_roi().get_mask().get_array();
+        const auto& roi_mask = disp.get_roi().get_mask();
         
         size_t height = u_array.height();
         size_t width = u_array.width();
