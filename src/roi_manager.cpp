@@ -71,7 +71,7 @@ SeedPoint ROIManager::loadSeedFromMat(const std::string& seed_file) {
         return seed;
     }
     
-    // Read 'seed_point' variable (uint16 1D array [x, y])
+    // Read 'seed_point' variable (can be uint16 or double array [x, y])
     matvar_t* seed_var = Mat_VarRead(matfp, "seed_point");
     if (!seed_var) {
         std::cerr << "Variable 'seed_point' not found in " << seed_file << std::endl;
@@ -79,9 +79,32 @@ SeedPoint ROIManager::loadSeedFromMat(const std::string& seed_file) {
         return seed;
     }
     
-    if (seed_var->rank >= 1 && seed_var->nbytes >= 2 * sizeof(uint16_t)) {
-        const uint16_t* data = static_cast<const uint16_t*>(seed_var->data);
-        seed.pw = {static_cast<double>(data[0]), static_cast<double>(data[1])};
+    // Handle different data types
+    if (seed_var->rank >= 1 && seed_var->data) {
+        size_t num_elements = 1;
+        for (int i = 0; i < seed_var->rank; i++) {
+            num_elements *= seed_var->dims[i];
+        }
+        
+        if (num_elements >= 2) {
+            // Try different data types
+            if (seed_var->data_type == MAT_T_UINT16 || seed_var->data_type == MAT_T_INT16) {
+                const uint16_t* data = static_cast<const uint16_t*>(seed_var->data);
+                seed.pw = {static_cast<double>(data[0]), static_cast<double>(data[1])};
+            } else if (seed_var->data_type == MAT_T_DOUBLE) {
+                const double* data = static_cast<const double*>(seed_var->data);
+                seed.pw = {data[0], data[1]};
+            } else if (seed_var->data_type == MAT_T_SINGLE) {
+                const float* data = static_cast<const float*>(seed_var->data);
+                seed.pw = {static_cast<double>(data[0]), static_cast<double>(data[1])};
+            } else {
+                std::cerr << "Warning: Unexpected seed_point data type: " << seed_var->data_type << std::endl;
+                // Try to read as uint16 anyway
+                const uint16_t* data = static_cast<const uint16_t*>(seed_var->data);
+                seed.pw = {static_cast<double>(data[0]), static_cast<double>(data[1])};
+            }
+            std::cout << "  Loaded seed point: (" << seed.pw[0] << ", " << seed.pw[1] << ")" << std::endl;
+        }
     }
     
     Mat_VarFree(seed_var);

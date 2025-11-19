@@ -828,7 +828,10 @@ bool Utils::computeRigidTransform(const std::vector<Eigen::Vector3d>& points_fro
     }
     
     if (from_no_nan.size() < 3) {
-        std::cerr << "Error: Too few valid points after removing NaNs" << std::endl;
+        std::cerr << "Error: Too few valid points after removing NaNs (" 
+                  << from_no_nan.size() << " of " << points_from.size() 
+                  << " points valid, need at least 3)" << std::endl;
+        std::cerr << "       This usually indicates poor correlation/tracking in the DIC analysis" << std::endl;
         return false;
     }
     

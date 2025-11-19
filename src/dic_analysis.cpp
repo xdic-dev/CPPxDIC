@@ -11,6 +11,7 @@
 #include "surface_stitching.h"
 #include "temporal_filter.h"
 #include "face_isotropy.h"
+#include "visualization.h"
 #include <iostream>
 #include <chrono>
 #include <filesystem>
@@ -453,6 +454,59 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                 }
             } else {
                 std::cout << "\nDeformation analysis complete (generate_mat_files=false, no .mat output)" << std::endl;
+            }
+            
+            // Save binary cache file
+            std::ostringstream binout;
+            binout << output_dir << "/DIC3DPPresults_" << config_.num_pair 
+                   << "Pairs_cum_" << config_.fileversion << ".bin";
+            
+            try {
+                ppresults.saveBinary(binout.str());
+                std::cout << "✓ Saved DIC3DPPresults binary cache: " << binout.str() << std::endl;
+            } catch (const std::exception& e) {
+                std::cerr << "Warning: Failed to write DIC3DPPresults binary: " << e.what() << std::endl;
+            }
+            
+            // Generate visualization exports if enabled
+            if (config_.mapLogic) {
+                std::cout << "\n=== Generating Visualization Exports ===" << std::endl;
+                try {
+                    cppxdic::Visualization viz(config_);
+                    
+                    // Print trial info
+                    viz.printTrialInfo(ppresults);
+                    
+                    // Apply filtering if enabled
+                    viz.applyTemporalFilter(ppresults);
+                    
+                    // Prepare visualization data
+                    auto vis_data = viz.prepareVisualizationData(ppresults);
+                    
+                    // Export visualization data
+                    std::ostringstream viz_path;
+                    viz_path << output_dir << "/viz/trial_" 
+                             << std::setfill('0') << std::setw(3) << trial 
+                             << "_" << config_.phase_id;
+                    
+                    // Create viz directory if needed
+                    std::filesystem::create_directories(output_dir + "/viz");
+                    
+                    viz.exportData(vis_data, viz_path.str());
+                    
+                    // Generate summary statistics
+                    std::ostringstream stats_path;
+                    stats_path << output_dir << "/viz/trial_" 
+                               << std::setfill('0') << std::setw(3) << trial 
+                               << "_summary.txt";
+                    viz.generateSummaryStats(ppresults, stats_path.str());
+                    
+                    std::cout << "✓ Visualization exports complete" << std::endl;
+                    
+                } catch (const std::exception& e) {
+                    std::cerr << "Warning: Visualization export failed: " << e.what() << std::endl;
+                    std::cerr << "  (Continuing anyway...)" << std::endl;
+                }
             }
             
             std::cout << "\n=== Step F Complete ==="  << std::endl;

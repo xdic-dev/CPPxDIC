@@ -402,7 +402,7 @@ bool StepDWorkflow::performMatching(const std::vector<cv::Mat>& cam_first_satur,
     
     // Check cache to avoid redundant computation
     std::filesystem::path cache_bin = std::filesystem::path(ncorr_matching_path).parent_path() / 
-        ".cache" / ("ncorr" + std::to_string(cam_1) + "_" + std::to_string(cam_2) + ".mat.bin");
+        ".cache" / ("ncorr" + std::to_string(cam_1) + std::to_string(cam_2) + ".mat.bin");
     
     if (std::filesystem::exists(cache_bin)) {
         std::cout << "Checkpoint found: \"" << cache_bin.string() << "\"" << std::endl;
@@ -611,9 +611,9 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
     // Use actual camera numbers (e.g., ncorr1.mat.bin, ncorr2.mat.bin for pair 1; ncorr3.mat.bin, ncorr4.mat.bin for pair 2)
     std::string ncorr1_bin = (cache_dir / ("ncorr" + std::to_string(cam_1) + ".mat.bin")).string();
     std::string ncorr2_bin = (cache_dir / ("ncorr" + std::to_string(cam_2) + ".mat.bin")).string();
-    // For stereo pair 1: cameras 1,2 -> ncorr1_2.mat.bin
-    // For stereo pair 2: cameras 3,4 -> ncorr3_4.mat.bin
-    std::string ncorr12_bin = (cache_dir / ("ncorr" + std::to_string(cam_1) + "_" + std::to_string(cam_2) + ".mat.bin")).string();
+    // For stereo pair 1: cameras 1,2 -> ncorr12.mat.bin (no underscore to match save format)
+    // For stereo pair 2: cameras 3,4 -> ncorr34.mat.bin
+    std::string ncorr12_bin = (cache_dir / ("ncorr" + std::to_string(cam_1) + std::to_string(cam_2) + ".mat.bin")).string();
     
     if (!std::filesystem::exists(ncorr1_bin) || !std::filesystem::exists(ncorr2_bin) || !std::filesystem::exists(ncorr12_bin)) {
         std::cerr << "Warning: cached ncorr result files not found" << std::endl;
