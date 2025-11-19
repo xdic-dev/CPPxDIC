@@ -58,20 +58,40 @@ bool Utils::checkCalibrationFiles(const Config& config) {
             std::cerr << "Calibration directory not found: " << calib_dir << std::endl;
             return false;
         }
-        bool cam1=false, cam2=false;
+        
+        // Check for all camera pairs based on config.num_pair
+        std::vector<bool> cam_found(config.num_pair * 2, false);
+        
         for (const auto& entry : std::filesystem::directory_iterator(calib_dir)) {
             if (!entry.is_regular_file()) continue;
             auto name = entry.path().filename().string();
             std::string lower = name; std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-            if (lower.find("cam_1.mat") != std::string::npos || lower.find("camera1.mat") != std::string::npos) cam1 = true;
-            if (lower.find("cam_2.mat") != std::string::npos || lower.find("camera2.mat") != std::string::npos) cam2 = true;
+            
+            // Check for each camera (1 through num_pair*2)
+            for (int cam_id = 1; cam_id <= config.num_pair * 2; ++cam_id) {
+                std::string cam_str = "cam_" + std::to_string(cam_id);
+                std::string camera_str = "camera" + std::to_string(cam_id);
+                if (lower.find(cam_str) != std::string::npos || lower.find(camera_str) != std::string::npos) {
+                    cam_found[cam_id - 1] = true;
+                }
+            }
         }
-        if (!cam1 || !cam2) {
-            std::cerr << "Calibration files missing in " << calib_dir << ": cam_1.mat=" << (cam1?"ok":"missing")
-                      << ", cam_2.mat=" << (cam2?"ok":"missing") << std::endl;
+        
+        // Check if all cameras were found
+        bool all_found = true;
+        for (int cam_id = 1; cam_id <= config.num_pair * 2; ++cam_id) {
+            if (!cam_found[cam_id - 1]) {
+                std::cerr << "Camera " << cam_id << " calibration file missing" << std::endl;
+                all_found = false;
+            }
+        }
+        
+        if (!all_found) {
+            std::cerr << "Some calibration files missing in " << calib_dir << std::endl;
             return false;
         }
-        std::cout << "Calibration files found in " << calib_dir << std::endl;
+        
+        std::cout << "Calibration files found for all " << (config.num_pair * 2) << " cameras in " << calib_dir << std::endl;
         return true;
     } catch (...) {
         std::cerr << "Error while checking calibration files" << std::endl;
@@ -194,18 +214,15 @@ std::vector<std::string> Utils::split(const std::string& str, char delimiter) {
 }
 
 void Utils::getCamerasForPair(int stereopair, int& cam_first, int& cam_second) {
-    switch (stereopair) {
-        case 1:
-            cam_first = 1;
-            cam_second = 2;
-            break;
-        case 2:
-            cam_first = 4;
-            cam_second = 3;
-            break;
-        default:
-            throw std::runtime_error("Unrecognized stereopair value");
+    // Standard mapping: pair N -> cameras (2N-1, 2N)
+    // Pair 1 -> cameras 1, 2
+    // Pair 2 -> cameras 3, 4
+    // Pair 3 -> cameras 5, 6, etc.
+    if (stereopair < 1) {
+        throw std::runtime_error("Invalid stereopair value: must be >= 1");
     }
+    cam_first = (stereopair - 1) * 2 + 1;
+    cam_second = (stereopair - 1) * 2 + 2;
 }
 
 static bool ensure_dir(const std::string& path) {
