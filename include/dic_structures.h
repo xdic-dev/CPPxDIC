@@ -105,6 +105,10 @@ struct DIC3Dcombined {
     
     // Individual pair results (for multiple pairs)
     std::vector<DIC3Dcombined> AllPairsResults;
+    
+    // Binary serialization methods
+    void saveBinary(const std::string& filepath) const;
+    static DIC3Dcombined loadBinary(const std::string& filepath);
 };
 
 /**

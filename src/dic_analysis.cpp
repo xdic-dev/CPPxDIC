@@ -43,9 +43,9 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
             // Step F works on combined 3D reconstruction, not per-pair
             std::string output_dir = config_.dic_path + "/" + config_.subject_id + "/" + config_.material;
             
-            // Load DIC3Dcombined from Step E output
+            // Load DIC3Dcombined from Step E output (binary format)
             std::ostringstream dic3d_path;
-            dic3d_path << output_dir << "/DIC3Dcombined_" << config_.num_pair << "Pairs_stitched.mat";
+            dic3d_path << output_dir << "/DIC3Dcombined_" << config_.num_pair << "Pairs_stitched.bin";
             
             if (!std::filesystem::exists(dic3d_path.str())) {
                 std::cerr << "ERROR: DIC3Dcombined file not found: " << dic3d_path.str() << std::endl;
@@ -53,12 +53,18 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                 return false;
             }
             
-            std::cout << "Loading DIC3Dcombined from: " << dic3d_path.str() << std::endl;
+            if (config_.debug_mode) {
+                std::cout << "[DEBUG] Loading DIC3Dcombined from: " << dic3d_path.str() << std::endl;
+            } else {
+                std::cout << "Loading DIC3Dcombined from: " << dic3d_path.str() << std::endl;
+            }
             
-            // Load DIC3Dcombined structure
+            // Load DIC3Dcombined structure from binary file
             DIC3Dcombined dic3d;
-            if (!MatReader::readDIC3Dcombined(dic3d_path.str(), dic3d)) {
-                std::cerr << "Failed to load DIC3Dcombined structure" << std::endl;
+            try {
+                dic3d = DIC3Dcombined::loadBinary(dic3d_path.str());
+            } catch (const std::exception& e) {
+                std::cerr << "Failed to load DIC3Dcombined structure: " << e.what() << std::endl;
                 return false;
             }
             
@@ -428,8 +434,15 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                 // Check if already exists (checkpoint)
                 if (std::filesystem::exists(matout.str())) {
                     std::cout << "\nCheckpoint found: " << matout.str() << " (skipping)" << std::endl;
+                    if (config_.debug_mode) {
+                        std::cout << "[DEBUG] DIC3DPPresults .mat file: " << matout.str() << std::endl;
+                    }
                 } else {
-                    std::cout << "\nWriting results to: " << matout.str() << std::endl;
+                    if (config_.debug_mode) {
+                        std::cout << "\n[DEBUG] Writing DIC3DPPresults to: " << matout.str() << std::endl;
+                    } else {
+                        std::cout << "\nWriting results to: " << matout.str() << std::endl;
+                    }
                     bool success = MatWriter::write3DPPresults(matout.str(), ppresults);
                     if (success) {
                         std::cout << "✓ Generated MATLAB .mat file successfully" << std::endl;
@@ -568,6 +581,12 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     std::cerr << "  Expected: " << cam1_bin << std::endl;
                     std::cerr << "  Expected: " << cam2_bin << std::endl;
                     continue;
+                }
+                
+                if (config_.debug_mode) {
+                    std::cout << "[DEBUG] Loading 2D DIC data from:" << std::endl;
+                    std::cout << "[DEBUG]   Cam" << cam_1 << ": " << cam1_bin << std::endl;
+                    std::cout << "[DEBUG]   Cam" << cam_2 << ": " << cam2_bin << std::endl;
                 }
 
                 // Locate calibration .mat files for this camera pair
@@ -869,7 +888,27 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 stitched = stitchPairsSimple(all_pairs);
             }
             
-            // Write stitched result
+            // Write stitched result to binary file (always saved for Step F)
+            std::ostringstream binout;
+            binout << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
+                   << "/DIC3Dcombined_" << config_.num_pair << "Pairs_stitched.bin";
+            
+            // Check if already exists (checkpoint)
+            if (std::filesystem::exists(binout.str())) {
+                std::cout << "Checkpoint found: " << binout.str() << " (skipping)" << std::endl;
+                if (config_.debug_mode) {
+                    std::cout << "[DEBUG] DIC3Dcombined binary file: " << binout.str() << std::endl;
+                }
+            } else {
+                try {
+                    stitched.saveBinary(binout.str());
+                    std::cout << "✓ Saved DIC3Dcombined binary file: " << binout.str() << std::endl;
+                } catch (const std::exception& e) {
+                    std::cerr << "Failed to write DIC3Dcombined binary: " << e.what() << std::endl;
+                }
+            }
+            
+            // Optionally generate MATLAB .mat file
             if (config_.generate_mat_files) {
                 std::ostringstream matout;
                 matout << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
@@ -878,6 +917,9 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 // Check if already exists (checkpoint)
                 if (std::filesystem::exists(matout.str())) {
                     std::cout << "Checkpoint found: " << matout.str() << " (skipping)" << std::endl;
+                    if (config_.debug_mode) {
+                        std::cout << "[DEBUG] DIC3Dcombined .mat file: " << matout.str() << std::endl;
+                    }
                 } else {
                     bool success = MatWriter::write3DCombinedResults(matout.str(), stitched);
                     if (success) {
@@ -886,8 +928,6 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                         std::cerr << "Failed to write DIC3Dcombined .mat" << std::endl;
                     }
                 }
-            } else {
-                std::cout << "3D reconstruction complete (generate_mat_files=false, no .mat output)" << std::endl;
             }
         }
         return true;

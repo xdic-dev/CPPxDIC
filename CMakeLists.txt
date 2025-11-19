@@ -17,6 +17,7 @@ add_executable(cppxdic
     src/main.cpp
     src/config.cpp
     src/dic_analysis.cpp
+    src/dic_structures.cpp
     src/utils.cpp
     src/image_processor.cpp
     src/roi_manager.cpp
