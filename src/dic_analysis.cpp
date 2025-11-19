@@ -926,44 +926,119 @@ bool DicAnalysis::run() {
     }
     std::cout << "]" << std::endl;
     
+    // Helper lambda: Check if 2D DIC outputs exist for all trials/pairs
+    auto check_2d_outputs_exist = [&]() -> bool {
+        for (int trial : trial_target) {
+            for (int pair = 1; pair <= config_.num_pair; ++pair) {
+                for (int cam = 1; cam <= 2; ++cam) {
+                    std::ostringstream cam_bin_path;
+                    cam_bin_path << config_.dic_path << "/" << config_.subject_id << "/" << config_.material 
+                                 << "/cam_" << cam << "_trial_" << std::setfill('0') << std::setw(3) << trial 
+                                 << "_pair" << pair << ".bin";
+                    if (!std::filesystem::exists(cam_bin_path.str())) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    };
+    
+    // Helper lambda: Check if 3D reconstruction outputs exist for all trials
+    auto check_3d_outputs_exist = [&]() -> bool {
+        for (int trial : trial_target) {
+            std::ostringstream dic3d_path;
+            dic3d_path << config_.dic_path << "/" << config_.subject_id << "/" << config_.material 
+                      << "/DIC3Dcombined_" << config_.num_pair << "Pairs_trial_" 
+                      << std::setfill('0') << std::setw(3) << trial << ".bin";
+            if (!std::filesystem::exists(dic3d_path.str())) {
+                return false;
+            }
+        }
+        return true;
+    };
+    
+    // Helper lambda: Check if deformation analysis outputs exist
+    auto check_deformation_outputs_exist = [&]() -> bool {
+        std::ostringstream ppresults_path;
+        ppresults_path << config_.dic_path << "/" << config_.subject_id << "/" << config_.material 
+                      << "/DIC3DPPresults_" << config_.num_pair << "Pairs_cum_v1.mat";
+        return std::filesystem::exists(ppresults_path.str());
+    };
+    
     // STEP D: 2D-DIC
-    auto start = std::chrono::high_resolution_clock::now();
-    bool success = dic2DAnalysis(trial_target);
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-    
-    if (!success) {
-        std::cerr << "2D DIC Analysis failed!" << std::endl;
-        return false;
+    bool step_d_complete = check_2d_outputs_exist();
+    if (step_d_complete) {
+        std::cout << "\n=== STEP D: 2D-DIC ===" << std::endl;
+        std::cout << "✓ Checkpoint detected: All 2D DIC output files exist" << std::endl;
+        std::cout << "  Skipping 2D analysis (use existing results)" << std::endl;
+    } else {
+        std::cout << "\n=== STEP D: 2D-DIC ===" << std::endl;
+        std::cout << "Running 2D DIC analysis..." << std::endl;
+        auto start = std::chrono::high_resolution_clock::now();
+        bool success = dic2DAnalysis(trial_target);
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        
+        if (!success) {
+            std::cerr << "2D DIC Analysis failed!" << std::endl;
+            return false;
+        }
+        
+        std::cout << "✓ DIC 2D Analysis done in " << duration.count() / 1000.0 << " s" << std::endl;
     }
-    
-    std::cout << "DIC 2D Analysis done in " << duration.count() / 1000.0 << " s" << std::endl;
     
     // STEP E: 3D Reconstruction
-    start = std::chrono::high_resolution_clock::now();
-    success = dic3DReconstruction(trial_target);
-    end = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-    
-    if (!success) {
-        std::cerr << "3D Reconstruction failed!" << std::endl;
-        return false;
+    bool step_e_complete = check_3d_outputs_exist();
+    if (step_e_complete) {
+        std::cout << "\n=== STEP E: 3D Reconstruction ===" << std::endl;
+        std::cout << "✓ Checkpoint detected: All 3D reconstruction output files exist" << std::endl;
+        std::cout << "  Skipping 3D reconstruction (use existing results)" << std::endl;
+    } else {
+        if (!step_d_complete) {
+            std::cout << "\n=== STEP E: 3D Reconstruction ===" << std::endl;
+        }
+        std::cout << "Running 3D reconstruction..." << std::endl;
+        auto start = std::chrono::high_resolution_clock::now();
+        bool success = dic3DReconstruction(trial_target);
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        
+        if (!success) {
+            std::cerr << "3D Reconstruction failed!" << std::endl;
+            return false;
+        }
+        
+        std::cout << "✓ DIC 3D Reconstruction done in " << duration.count() / 1000.0 << " s" << std::endl;
     }
-    
-    std::cout << "DIC 3D Reconstruction done in " << duration.count() / 1000.0 << " s" << std::endl;
     
     // STEP F: Deformation analysis
-    start = std::chrono::high_resolution_clock::now();
-    success = dicDeformationAnalysis(trial_target);
-    end = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-    
-    if (!success) {
-        std::cerr << "Deformation Analysis failed!" << std::endl;
-        return false;
+    bool step_f_complete = check_deformation_outputs_exist();
+    if (step_f_complete) {
+        std::cout << "\n=== STEP F: Deformation Analysis ===" << std::endl;
+        std::cout << "✓ Checkpoint detected: Deformation analysis output exists" << std::endl;
+        std::cout << "  Skipping deformation analysis (use existing results)" << std::endl;
+    } else {
+        if (!step_e_complete) {
+            std::cout << "\n=== STEP F: Deformation Analysis ===" << std::endl;
+        }
+        std::cout << "Running deformation analysis..." << std::endl;
+        auto start = std::chrono::high_resolution_clock::now();
+        bool success = dicDeformationAnalysis(trial_target);
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        
+        if (!success) {
+            std::cerr << "Deformation Analysis failed!" << std::endl;
+            return false;
+        }
+        
+        std::cout << "✓ DIC Deformation Analysis done in " << duration.count() / 1000.0 << " s" << std::endl;
     }
     
-    std::cout << "DIC Deformation Analysis done in " << duration.count() / 1000.0 << " s" << std::endl;
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "✓ All DIC analysis steps complete!" << std::endl;
+    std::cout << "========================================" << std::endl;
     
     return true;
 }
