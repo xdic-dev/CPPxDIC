@@ -546,13 +546,22 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
             // Collect all pairs for this trial before stitching
             std::vector<DIC3Dcombined> all_pairs;
             
+            // Format trial as 3-digit string (e.g., "005")
+            std::ostringstream trial_str;
+            trial_str << std::setw(3) << std::setfill('0') << trial;
+            
             for (int pair = 1; pair <= config_.num_pair; ++pair) {
                 std::cout << "\n=== Processing Pair " << pair << " ===" << std::endl;
                 
+                // Get camera numbers for this pair (pair 1 -> cams 1,2; pair 2 -> cams 3,4)
+                int cam_1 = (pair - 1) * 2 + 1;
+                int cam_2 = (pair - 1) * 2 + 2;
+                
                 // Load DIC 2D outputs from .cache directory (internal .bin format)
-                std::string output_dir = config_.dic_path + "/" + config_.subject_id + "/" + config_.material;
-                std::string cam1_bin = output_dir + "/.cache/ncorr1.mat.bin";
-                std::string cam2_bin = output_dir + "/.cache/ncorr2.mat.bin";
+                // Path must match where Step D saves files: subject/material/trial/phase/.cache/
+                std::string output_dir = config_.dic_path + "/" + config_.subject_id + "/" + config_.material + "/" + trial_str.str() + "/" + config_.phase_id;
+                std::string cam1_bin = output_dir + "/.cache/ncorr" + std::to_string(cam_1) + ".mat.bin";
+                std::string cam2_bin = output_dir + "/.cache/ncorr" + std::to_string(cam_2) + ".mat.bin";
                 
                 if (!std::filesystem::exists(cam1_bin) || !std::filesystem::exists(cam2_bin)) {
                     std::cerr << "Missing cached 2D outputs for trial " << trial << ", pair " << pair << ". Skipping." << std::endl;
@@ -561,16 +570,21 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     continue;
                 }
 
-                // Locate calibration .mat files
+                // Locate calibration .mat files for this camera pair
                 std::string calib_dir = config_.data_path + "/rawdata/" + config_.subject_id + "/speckles/" + config_.material + "/calibration/";
                 std::string calib_cam1, calib_cam2;
+                std::string cam1_str = "cam" + std::to_string(cam_1);
+                std::string cam2_str = "cam" + std::to_string(cam_2);
+                std::string camera1_str = "camera" + std::to_string(cam_1);
+                std::string camera2_str = "camera" + std::to_string(cam_2);
+                
                 if (std::filesystem::exists(calib_dir)) {
                     for (const auto& entry : std::filesystem::directory_iterator(calib_dir)) {
                         if (!entry.is_regular_file()) continue;
                         auto name = entry.path().filename().string();
                         std::string lower = name; std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-                        if (lower.find("cam1") != std::string::npos || lower.find("camera1") != std::string::npos) calib_cam1 = entry.path().string();
-                        if (lower.find("cam2") != std::string::npos || lower.find("camera2") != std::string::npos) calib_cam2 = entry.path().string();
+                        if (lower.find(cam1_str) != std::string::npos || lower.find(camera1_str) != std::string::npos) calib_cam1 = entry.path().string();
+                        if (lower.find(cam2_str) != std::string::npos || lower.find(camera2_str) != std::string::npos) calib_cam2 = entry.path().string();
                         if (!calib_cam1.empty() && !calib_cam2.empty()) break;
                     }
                 }
@@ -607,6 +621,12 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 // Look for distortion parameter files in calibration directory
                 if (std::filesystem::exists(calib_dir)) {
                     std::string distortion_cam1_path, distortion_cam2_path;
+                    // Build search strings for this camera pair
+                    std::string cam_1_search = "cam_" + std::to_string(cam_1);
+                    std::string cam_2_search = "cam_" + std::to_string(cam_2);
+                    std::string camera_1_search = "camera_" + std::to_string(cam_1);
+                    std::string camera_2_search = "camera_" + std::to_string(cam_2);
+                    
                     for (const auto& entry : std::filesystem::directory_iterator(calib_dir)) {
                         if (!entry.is_regular_file()) continue;
                         auto name = entry.path().filename().string();
@@ -614,10 +634,10 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
                         // Look for cameraCBparameters files
                         if (lower.find("cameracbparameters") != std::string::npos) {
-                            if (lower.find("cam_1") != std::string::npos || lower.find("camera_1") != std::string::npos) {
+                            if (lower.find(cam_1_search) != std::string::npos || lower.find(camera_1_search) != std::string::npos) {
                                 distortion_cam1_path = entry.path().string();
                             }
-                            if (lower.find("cam_2") != std::string::npos || lower.find("camera_2") != std::string::npos) {
+                            if (lower.find(cam_2_search) != std::string::npos || lower.find(camera_2_search) != std::string::npos) {
                                 distortion_cam2_path = entry.path().string();
                             }
                         }
@@ -917,7 +937,7 @@ bool DicAnalysis::setupNcorrAnalysis(const std::vector<std::string>& images,
 
 bool DicAnalysis::run() {
     // Search for trial targets (equivalent to search_trial2target)
-    std::vector<int> trial_target = searchTrialTarget();
+    std::vector<int> trial_target = {7, 12, 25};//#searchTrialTarget();
     
     std::cout << "Trial target set: [";
     for (size_t i = 0; i < trial_target.size(); ++i) {

@@ -392,9 +392,54 @@ bool StepDWorkflow::performMatching(const std::vector<cv::Mat>& cam_first_satur,
                                    SeedPoint& initial_seed_point_set2) {
     std::cout << "MATCHING STEP - RUN #1" << std::endl;
     
-    // Note: Matching checkpoint is saved but not loaded for simplicity
-    // Matching is fast (only 2 frames) so re-running it is acceptable
-    // The expensive tracking steps (ncorr1.mat, ncorr2.mat) are checkpointed
+    // Get camera numbers
+    int cam_1, cam_2;
+    getCameraNumbers(base_params_.stereopair, cam_1, cam_2);
+    
+    // Build cache-compatible filename (e.g., ncorr12.mat for cameras 1,2)
+    std::string ncorr_matching_path = base_params_.outputPath + "/ncorr" + 
+        std::to_string(cam_1) + std::to_string(cam_2) + ".mat";
+    
+    // Check cache to avoid redundant computation
+    std::filesystem::path cache_bin = std::filesystem::path(ncorr_matching_path).parent_path() / 
+        ".cache" / ("ncorr" + std::to_string(cam_1) + "_" + std::to_string(cam_2) + ".mat.bin");
+    
+    if (std::filesystem::exists(cache_bin)) {
+        std::cout << "Checkpoint found: \"" << cache_bin.string() << "\"" << std::endl;
+        std::cout << "--> STEP: Ncorr matching 1-2 loaded from checkpoint (skipped computation)" << std::endl;
+        
+        // Still need to load the displacement fields to compute seed mapping
+        auto dic_output = ncorr::DIC_analysis_output::load(cache_bin.string());
+        
+        if (!dic_output.disps.empty()) {
+            refmask_trial_matched = refmask_trial.clone();
+            
+            const auto& disp = dic_output.disps[0];
+            const auto& u_array = disp.get_u().get_array();
+            const auto& v_array = disp.get_v().get_array();
+            
+            cv::Mat U_mapped(disp.get_u().data_height(), disp.get_u().data_width(), CV_64F);
+            cv::Mat V_mapped(disp.get_v().data_height(), disp.get_v().data_width(), CV_64F);
+            
+            for (size_t y = 0; y < static_cast<size_t>(disp.get_u().data_height()); ++y) {
+                for (size_t x = 0; x < static_cast<size_t>(disp.get_u().data_width()); ++x) {
+                    U_mapped.at<double>(y, x) = u_array(y, x);
+                    V_mapped.at<double>(y, x) = v_array(y, x);
+                }
+            }
+            
+            initial_seed_point_set2.sw = ROIManager::mapPointCoordinate(
+                initial_seed_point_set1.sw, U_mapped, V_mapped);
+            initial_seed_point_set2.pw = ROIManager::mapSubset2Pixel(
+                initial_seed_point_set2.sw, step1_2_params_.spacing);
+            
+            std::cout << "--> STEP: Ncorr matching 1-2 done" << std::endl;
+            return true;
+        } else {
+            std::cerr << "Warning: Cached matching file has no displacements, re-running..." << std::endl;
+        }
+    }
+    
     std::cout << "Running camera matching analysis..." << std::endl;
     
     // Prepare images: ref = cam1[0], cur = [cam2[0], cam1[0]] (second to avoid bug)
@@ -406,10 +451,10 @@ bool StepDWorkflow::performMatching(const std::vector<cv::Mat>& cam_first_satur,
         static_cast<int>(initial_seed_point_set1.pw[1])
     };
     
-    // Run ncorr analysis and save to matching file
+    // Run ncorr analysis and save to cache-compatible path (for formatOutput to find)
     auto dic_output = runNcorrAnalysis(cam_first_satur[0], cur_imgs, refmask_trial,
                                       initial_seed_point_set1, step1_2_params_,
-                                      base_params_.matchingfile);
+                                      ncorr_matching_path);
     
     // Extract matched ROI and displacement fields
     if (!dic_output.disps.empty()) {
@@ -457,10 +502,14 @@ bool StepDWorkflow::performTracking1(const std::vector<cv::Mat>& cam_first,
                                     const SeedPoint& initial_seed_point_set1) {
     std::cout << "TRACKING STEP 1" << std::endl;
     
-    std::string output_path = base_params_.outputPath + "/ncorr1.mat";
+    // Get actual camera number for this pair
+    int cam_1, cam_2;
+    getCameraNumbers(base_params_.stereopair, cam_1, cam_2);
+    
+    std::string output_path = base_params_.outputPath + "/ncorr" + std::to_string(cam_1) + ".mat";
     
     // Checkpoint: Check if cached .bin file already exists
-    std::filesystem::path cache_bin = std::filesystem::path(output_path).parent_path() / ".cache" / "ncorr1.mat.bin";
+    std::filesystem::path cache_bin = std::filesystem::path(output_path).parent_path() / ".cache" / ("ncorr" + std::to_string(cam_1) + ".mat.bin");
     if (std::filesystem::exists(cache_bin)) {
         std::cout << "Checkpoint found: " << cache_bin << std::endl;
         std::cout << "--> STEP: Ncorr 1 loaded from checkpoint (skipped computation)" << std::endl;
@@ -476,7 +525,7 @@ bool StepDWorkflow::performTracking1(const std::vector<cv::Mat>& cam_first,
                                       initial_seed_point_set1, step1_params_,
                                       output_path);
     
-    std::cout << "--> STEP: Ncorr 1 done and saved to " << output_path << std::endl;
+    std::cout << "--> STEP: Ncorr " << cam_1 << " done and saved to " << output_path << std::endl;
     return true;
 }
 
@@ -485,10 +534,14 @@ bool StepDWorkflow::performTracking2(const std::vector<cv::Mat>& cam_second,
                                     const SeedPoint& initial_seed_point_set2) {
     std::cout << "TRACKING STEP 2" << std::endl;
     
-    std::string output_path = base_params_.outputPath + "/ncorr2.mat";
+    // Get actual camera number for this pair
+    int cam_1, cam_2;
+    getCameraNumbers(base_params_.stereopair, cam_1, cam_2);
+    
+    std::string output_path = base_params_.outputPath + "/ncorr" + std::to_string(cam_2) + ".mat";
     
     // Checkpoint: Check if cached .bin file already exists
-    std::filesystem::path cache_bin = std::filesystem::path(output_path).parent_path() / ".cache" / "ncorr2.mat.bin";
+    std::filesystem::path cache_bin = std::filesystem::path(output_path).parent_path() / ".cache" / ("ncorr" + std::to_string(cam_2) + ".mat.bin");
     if (std::filesystem::exists(cache_bin)) {
         std::cout << "Checkpoint found: " << cache_bin << std::endl;
         std::cout << "--> STEP: Ncorr 2 loaded from checkpoint (skipped computation)" << std::endl;
@@ -504,7 +557,7 @@ bool StepDWorkflow::performTracking2(const std::vector<cv::Mat>& cam_second,
                                       initial_seed_point_set2, step2_params_,
                                       output_path);
     
-    std::cout << "--> STEP: Ncorr 2 done and saved to " << output_path << std::endl;
+    std::cout << "--> STEP: Ncorr " << cam_2 << " done and saved to " << output_path << std::endl;
     return true;
 }
 
@@ -555,12 +608,18 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
     getCameraNumbers(stereopair, cam_1, cam_2);
     
     std::filesystem::path cache_dir = std::filesystem::path(base_params_.outputPath) / ".cache";
-    std::string ncorr1_bin = (cache_dir / "ncorr1.mat.bin").string();
-    std::string ncorr2_bin = (cache_dir / "ncorr2.mat.bin").string();
-    std::string ncorr12_bin = (cache_dir / "ncorr1_2.mat.bin").string();
+    // Use actual camera numbers (e.g., ncorr1.mat.bin, ncorr2.mat.bin for pair 1; ncorr3.mat.bin, ncorr4.mat.bin for pair 2)
+    std::string ncorr1_bin = (cache_dir / ("ncorr" + std::to_string(cam_1) + ".mat.bin")).string();
+    std::string ncorr2_bin = (cache_dir / ("ncorr" + std::to_string(cam_2) + ".mat.bin")).string();
+    // For stereo pair 1: cameras 1,2 -> ncorr1_2.mat.bin
+    // For stereo pair 2: cameras 3,4 -> ncorr3_4.mat.bin
+    std::string ncorr12_bin = (cache_dir / ("ncorr" + std::to_string(cam_1) + "_" + std::to_string(cam_2) + ".mat.bin")).string();
     
-    if (!std::filesystem::exists(ncorr1_bin) || !std::filesystem::exists(ncorr2_bin)) {
+    if (!std::filesystem::exists(ncorr1_bin) || !std::filesystem::exists(ncorr2_bin) || !std::filesystem::exists(ncorr12_bin)) {
         std::cerr << "Warning: cached ncorr result files not found" << std::endl;
+        if (!std::filesystem::exists(ncorr1_bin)) std::cerr << "  Missing: " << ncorr1_bin << std::endl;
+        if (!std::filesystem::exists(ncorr2_bin)) std::cerr << "  Missing: " << ncorr2_bin << std::endl;
+        if (!std::filesystem::exists(ncorr12_bin)) std::cerr << "  Missing: " << ncorr12_bin << std::endl;
         return;
     }
     
