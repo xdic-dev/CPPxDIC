@@ -836,7 +836,24 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     );
     
     // Run DIC analysis (returns Lagrangian perspective in pixels)
-    ncorr::DIC_analysis_output dic_output_raw = ncorr::DIC_analysis(dic_input);
+    ncorr::DIC_analysis_output dic_output_raw;
+    
+    if (config_.parallel_processing) {
+        std::cout << "  Using parallel DIC processing..." << std::endl;
+        
+        // Create seed parameters from the seed point
+        std::vector<ncorr::SeedParams> seeds;
+        seeds.push_back(ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1]));
+        
+        // Create parallel input structure
+        ncorr::DIC_analysis_parallel_input dic_parallel_input(dic_input, seeds);
+        
+        // Run parallel DIC analysis
+        dic_output_raw = ncorr::DIC_analysis_parallel(dic_parallel_input);
+    } else {
+        std::cout << "  Using sequential DIC processing..." << std::endl;
+        dic_output_raw = ncorr::DIC_analysis(dic_input);
+    }
     
     // Post-process with both perspectives
     std::cout << "Post-processing displacements..." << std::endl;
