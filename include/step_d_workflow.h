@@ -144,6 +144,20 @@ private:
                         cv::Mat& refmask_trial_matched,
                         SeedPoint& initial_seed_point_set2);
     
+                        /**
+     * Perform tracking for a camera
+     * 
+     * @param tracking_number Tracking number (1 or 2)
+     * @param cam_frames Filtered camera frames
+     * @param refmask Trial ROI mask
+     * @param initial_seed_point Initial seed point
+     * @return Success status
+     */
+    bool performTracking(const int tracking_number,
+                         const std::vector<cv::Mat>& cam_frames,
+                         const cv::Mat& refmask,
+                         const SeedPoint& initial_seed_point);
+
     /**
      * Perform tracking for camera 1
      * 
@@ -209,6 +223,7 @@ private:
      * @param seed_point Seed point
      * @param step_params Step parameters
      * @param output_path Output file path
+     * @param go_parallel Whether to use parallel processing
      * @return DIC analysis output
      */
     ncorr::DIC_analysis_output runNcorrAnalysis(const cv::Mat& ref_img,
@@ -216,7 +231,8 @@ private:
                                                 const cv::Mat& roi_mask,
                                                 const SeedPoint& seed_point,
                                                 const StepParameters& step_params,
-                                                const std::string& output_path);
+                                                const std::string& output_path,
+                                                const bool go_parallel);
     
     /**
      * Get camera numbers for stereo pair

@@ -24,7 +24,7 @@ public:
     
     // Processing flags
     bool automatic_process = true;       // automatic processing flag
-    bool parallel_processing = true;     // parallel processing flag
+    bool parallel_processing = false;     // parallel processing flag
     
     // DIC parameters (from dic_param.m)
     std::string subject_id = "S09";      // Subject identifier
@@ -46,7 +46,7 @@ public:
     
     // Visualization settings (equivalent to MATLAB optStructPlot)
     bool showvisu = false;               // Boolean for visualization
-    bool debug_mode = false;             // Debug mode flag
+    bool debug_mode = true;             // Debug mode flag
     
     // Plot map settings
     bool mapLogic = true;                // Enable 3D map plotting
@@ -85,7 +85,7 @@ public:
     std::string fileversion = "v2";      // Deformation file version
     
     // Output format control
-    bool generate_mat_files = false;     // Generate MATLAB .mat files (default: false, true if debug_mode)
+    bool generate_mat_files = true;     // Generate MATLAB .mat files (default: false, true if debug_mode)
     bool cleanup_cache_bins = false;     // Delete cached .bin files after use (default: false)
     
     // Units and subregion (from dic_param.m or config)

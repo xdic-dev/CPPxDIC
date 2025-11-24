@@ -454,7 +454,7 @@ bool StepDWorkflow::performMatching(const std::vector<cv::Mat>& cam_first_satur,
     // Run ncorr analysis and save to cache-compatible path (for formatOutput to find)
     auto dic_output = runNcorrAnalysis(cam_first_satur[0], cur_imgs, refmask_trial,
                                       initial_seed_point_set1, step1_2_params_,
-                                      ncorr_matching_path);
+                                      ncorr_matching_path, false); // false for parallel processing
     
     // Extract matched ROI and displacement fields
     if (!dic_output.disps.empty()) {
@@ -497,68 +497,60 @@ bool StepDWorkflow::performMatching(const std::vector<cv::Mat>& cam_first_satur,
     return true;
 }
 
-bool StepDWorkflow::performTracking1(const std::vector<cv::Mat>& cam_first,
-                                    const cv::Mat& refmask_trial,
-                                    const SeedPoint& initial_seed_point_set1) {
-    std::cout << "TRACKING STEP 1" << std::endl;
-    
+bool StepDWorkflow::performTracking(const int tracking_number,
+                         const std::vector<cv::Mat>& cam_frames,
+                         const cv::Mat& refmask,
+                         const SeedPoint& initial_seed_point) {
     // Get actual camera number for this pair
     int cam_1, cam_2;
     getCameraNumbers(base_params_.stereopair, cam_1, cam_2);
+
+    auto cam_number = tracking_number == 1 ? cam_1 : cam_2;
+
+    std::cout << "TRACKING STEP " << tracking_number << std::endl;
     
-    std::string output_path = base_params_.outputPath + "/ncorr" + std::to_string(cam_1) + ".mat";
+    std::string output_path = base_params_.outputPath + "/ncorr" + std::to_string(cam_number) + ".mat";
     
     // Checkpoint: Check if cached .bin file already exists
-    std::filesystem::path cache_bin = std::filesystem::path(output_path).parent_path() / ".cache" / ("ncorr" + std::to_string(cam_1) + ".mat.bin");
+    std::filesystem::path cache_bin = std::filesystem::path(output_path).parent_path() / ".cache" / ("ncorr" + std::to_string(cam_number) + ".mat.bin");
     if (std::filesystem::exists(cache_bin)) {
         std::cout << "Checkpoint found: " << cache_bin << std::endl;
-        std::cout << "--> STEP: Ncorr 1 loaded from checkpoint (skipped computation)" << std::endl;
+        std::cout << "--> STEP: Ncorr " << cam_number << " loaded from checkpoint (skipped computation)" << std::endl;
         return true;
     }
     
-    step1_params_.initial_seed = {
-        static_cast<int>(initial_seed_point_set1.pw[0]),
-        static_cast<int>(initial_seed_point_set1.pw[1])
-    };
+    auto step_params_ = step2_params_;
+    if (tracking_number == 1) {
+        step_params_ = step1_params_;
+        step1_params_.initial_seed = {
+            static_cast<int>(initial_seed_point.pw[0]),
+            static_cast<int>(initial_seed_point.pw[1])
+        };
+    } else {
+        step2_params_.initial_seed = {
+            static_cast<int>(initial_seed_point.pw[0]),
+            static_cast<int>(initial_seed_point.pw[1])
+        };
+    }
     
-    auto dic_output = runNcorrAnalysis(cam_first[0], cam_first, refmask_trial,
-                                      initial_seed_point_set1, step1_params_,
-                                      output_path);
+    auto dic_output = runNcorrAnalysis(cam_frames[0], cam_frames, refmask,
+                                      initial_seed_point, step_params_,
+                                      output_path, config_.parallel_processing);
     
-    std::cout << "--> STEP: Ncorr " << cam_1 << " done and saved to " << output_path << std::endl;
+    std::cout << "--> STEP: Ncorr " << cam_number << " done and saved to " << output_path << std::endl;
     return true;
+}
+
+bool StepDWorkflow::performTracking1(const std::vector<cv::Mat>& cam_first,
+                                    const cv::Mat& refmask_trial,
+                                    const SeedPoint& initial_seed_point_set1) {
+    return performTracking(1, cam_first, refmask_trial, initial_seed_point_set1);
 }
 
 bool StepDWorkflow::performTracking2(const std::vector<cv::Mat>& cam_second,
                                     const cv::Mat& refmask_trial_matched,
                                     const SeedPoint& initial_seed_point_set2) {
-    std::cout << "TRACKING STEP 2" << std::endl;
-    
-    // Get actual camera number for this pair
-    int cam_1, cam_2;
-    getCameraNumbers(base_params_.stereopair, cam_1, cam_2);
-    
-    std::string output_path = base_params_.outputPath + "/ncorr" + std::to_string(cam_2) + ".mat";
-    
-    // Checkpoint: Check if cached .bin file already exists
-    std::filesystem::path cache_bin = std::filesystem::path(output_path).parent_path() / ".cache" / ("ncorr" + std::to_string(cam_2) + ".mat.bin");
-    if (std::filesystem::exists(cache_bin)) {
-        std::cout << "Checkpoint found: " << cache_bin << std::endl;
-        std::cout << "--> STEP: Ncorr 2 loaded from checkpoint (skipped computation)" << std::endl;
-        return true;
-    }
-    
-    step2_params_.initial_seed = {
-        static_cast<int>(initial_seed_point_set2.pw[0]),
-        static_cast<int>(initial_seed_point_set2.pw[1])
-    };
-    
-    auto dic_output = runNcorrAnalysis(cam_second[0], cam_second, refmask_trial_matched,
-                                      initial_seed_point_set2, step2_params_,
-                                      output_path);
-    
-    std::cout << "--> STEP: Ncorr " << cam_2 << " done and saved to " << output_path << std::endl;
-    return true;
+    return performTracking(2, cam_second, refmask_trial_matched, initial_seed_point_set2);
 }
 
 void StepDWorkflow::applyImageFiltering(const std::vector<cv::Mat>& cam_first_satur,
@@ -784,7 +776,8 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     const cv::Mat& roi_mask,
     const SeedPoint& seed_point,
     const StepParameters& step_params,
-    const std::string& output_path) {
+    const std::string& output_path,
+    const bool go_parallel) {
     
     std::cout << "Running ncorr DIC analysis..." << std::endl;
     std::cout << "  Radius: " << step_params.radius << ", Spacing: " << step_params.spacing << std::endl;
@@ -838,7 +831,7 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     // Run DIC analysis (returns Lagrangian perspective in pixels)
     ncorr::DIC_analysis_output dic_output_raw;
     
-    if (config_.parallel_processing) {
+    if (go_parallel) {
         std::cout << "  Using parallel DIC processing..." << std::endl;
         
         // Create seed parameters from the seed point

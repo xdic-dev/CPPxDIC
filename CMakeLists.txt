@@ -5,6 +5,9 @@ project(cppxdic)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Export compile commands for IDE support
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Set include directories (following ncorr pattern)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -isystem /opt/homebrew/include")
 
@@ -60,6 +63,17 @@ target_link_libraries(cppxdic ${OPENCV_LIBRARY5})
 # Add fftw library
 find_library(FFTW_LIBRARY NAMES fftw3)
 target_link_libraries(cppxdic ${FFTW_LIBRARY})
+
+# Add FFTW include directory for IDE support
+find_path(FFTW_INCLUDE_DIR fftw3.h
+  HINTS /opt/homebrew/include /usr/local/include /usr/include
+)
+if(FFTW_INCLUDE_DIR)
+    target_include_directories(cppxdic PRIVATE ${FFTW_INCLUDE_DIR})
+    message(STATUS "Found FFTW include: ${FFTW_INCLUDE_DIR}")
+else()
+    message(WARNING "FFTW include directory not found")
+endif()
 
 # Add matio library for reading/writing MATLAB .mat files
 find_library(MATIO_LIBRARY NAMES matio)
