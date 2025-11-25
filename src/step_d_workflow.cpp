@@ -6,7 +6,6 @@
 
 #include "step_d_workflow.h"
 #include "mat_writer.h"
-#include "mat_reader.h"
 #include "delaunay_triangulation.h"
 #include "utils.h"
 #include <iostream>
@@ -34,10 +33,12 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     // 1. REF_MASK_{reftrial}_{phase}_pair{stereopair}.mat - ROI mask (loaded from base path)
     // 2. REF_SEED_{reftrial}_{phase}_pair{stereopair}.mat - Seed point (loaded from base path)
     // 3. MATCHING2{reftrial}_pair{stereopair}.mat - Camera matching results (in output path)
-    // 4. ncorr1.mat - Camera 1 tracking results (in output path)
-    // 5. ncorr2.mat - Camera 2 tracking results (in output path)
-    // 6. dic_info_data_target_pair{stereopair}.mat - Trial metadata (in output path)
+    // 4. ncorr{cam1}_{cam2}.mat - Camera 1 and Camera 2 first frame matching results (in output path)
+    // 5. ncorr{cam1}.mat - Camera 1 tracking results (in output path)
+    // 6. ncorr{cam2}.mat - Camera 2 tracking results (in output path)
+    // 7. dic_info_data_target_pair{stereopair}.mat - Trial metadata (in output path)
     
+    // I. Preps analysis
     // 1. Load protocol and determine reference trial
     if (!loadProtocol()) {
         std::cerr << "Failed to load protocol" << std::endl;
@@ -72,7 +73,7 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     std::cout << "Applying saturation..." << std::endl;
     performSaturation(cam_first_raw, cam_second_raw, cam_first_satur, cam_second_satur);
     
-    // 6. Initialize ROI and seed
+    // II. ROI, Seed, and Matching REF to Trial at frame 1
     cv::Mat refmask_REF, refmask_trial;
     SeedPoint ref_seed_point, initial_seed_point_set1;
     std::cout << "Initializing ROI and seed..." << std::endl;
@@ -83,8 +84,9 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     }
     std::cout << "--> STEP: ROI loaded and formatted" << std::endl;
     std::cout << "--> STEP: SEED loaded and formatted" << std::endl;
+    std::cout << "--> STEP: Matching REF to Trial loaded and formatted" << std::endl;
     
-    // 7. Matching between cameras (cam1 -> cam2 at frame 1)
+    // III. Matching inside a Trial between cameras (cam1 -> cam2 at frame 1)
     cv::Mat refmask_trial_matched;
     SeedPoint initial_seed_point_set2;
     std::cout << "Performing camera matching..." << std::endl;
@@ -95,36 +97,36 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
         return {"", {}, false};
     }
     
-    // 8. Image filtering
+    // post-III. Image filtering
     std::vector<cv::Mat> cam_first, cam_second;
     std::cout << "Applying image filtering..." << std::endl;
     applyImageFiltering(cam_first_satur, cam_second_satur, refmask_trial,
                        cam_first, cam_second);
     std::cout << "--> STEP: filtering done" << std::endl;
     
-    // 9. Save trial information
+    // IV. Save trial information
     saveTrialInfo(trial, stereopair, cam_first.size());
     
-    // 10. Tracking camera 1
+    // V. Tracking camera 1
     std::cout << "Performing tracking camera 1..." << std::endl;
     if (!performTracking1(cam_first, refmask_trial, initial_seed_point_set1)) {
         std::cerr << "Failed tracking1 step" << std::endl;
         return {"", {}, false};
     }
     
-    // 11. Tracking camera 2
+    // VI. Tracking camera 2
     std::cout << "Performing tracking camera 2..." << std::endl;
     if (!performTracking2(cam_second, refmask_trial_matched, initial_seed_point_set2)) {
         std::cerr << "Failed tracking2 step" << std::endl;
         return {"", {}, false};
     }
     
-    // 12. Format output
+    // Post-preps. Format output
     formatOutput(trial, stereopair);
     
     std::cout << "--> STEP: Ncorr analysis completed" << std::endl;
     
-    // 13. Determine pair order
+    // Determine pair order
     std::vector<int> pairOrder;
     bool pairForced;
     unsigned int trial_idx = std::stoi(trial);
@@ -271,6 +273,10 @@ std::string StepDWorkflow::determineReferenceTrial(const std::string& trial) {
         oss << std::setw(3) << std::setfill('0') << config_.ref_trial_id;
         return oss.str();
     }
+
+    if (config_.debug_mode) {
+        std::cout << "Reference trial not set, using current trial: " << trial << std::endl;
+    }
     
     return trial;  // Fallback to current trial
 }
@@ -349,8 +355,8 @@ bool StepDWorkflow::initializeROIAndSeed(const std::vector<cv::Mat>& cam_first_s
                                         SeedPoint& ref_seed_point,
                                         SeedPoint& initial_seed_point_set1) {
     // Load or create ROI
-    refmask_trial = ROIManager::loadOrCreateROI(base_params_, cam_first_satur[0]);
-    if (refmask_trial.empty()) {
+    refmask_REF = ROIManager::loadOrCreateROI(base_params_, cam_first_satur[0]);
+    if (refmask_REF.empty()) {
         return false;
     }
     
@@ -376,11 +382,91 @@ bool StepDWorkflow::initializeROIAndSeed(const std::vector<cv::Mat>& cam_first_s
     }
     
     // No matching file - use seed as-is
-    refmask_REF = refmask_trial.clone();
-    initial_seed_point_set1 = ref_seed_point;
-    initial_seed_point_set1.sw = ROIManager::mapPixel2Subset(ref_seed_point.pw,
-                                                             step1_params_.spacing);
+    std::vector<cv::Mat> reftrial_cam_first_raw, reftrial_cam_second_raw;
+    std::cout << "Reading REF Trial video data..." << std::endl;
+    if (!importVideoFrames(base_params_.reftrial, 
+                           base_params_.stereopair, 
+                           reftrial_cam_first_raw, 
+                           reftrial_cam_second_raw)) {
+        std::cerr << "Failed to import REF Trial video frames" << std::endl;
+        return false;
+    }
+    std::cout << "Reading REF Trial video data done. Frames: " << reftrial_cam_first_raw.size() << std::endl;
     
+    std::ostringstream message_oss;
+    message_oss << "Matching Pair " << base_params_.stereopair << ": trial " << base_params_.reftrial << "'s frame 1 TO trial " << base_params_.trial << "'s frame 1";
+    return matchingInitialFrame(reftrial_cam_first_raw, 
+                                cam_first_satur, 
+                                refmask_REF,
+                                base_params_.matchingfile,
+                                message_oss.str(), 
+                                initial_seed_point_set1, 
+                                refmask_trial, 
+                                initial_seed_point_set1);
+}
+
+bool StepDWorkflow::matchingInitialFrame(const std::vector<cv::Mat>& cam_ref,
+                                   const std::vector<cv::Mat>& cam_cur,
+                                   const cv::Mat& refmask_ref,
+                                   const std::string ncorr_matching_path,
+                                   const std::string message,
+                                   const SeedPoint& initial_seed_point_ref,
+                                   cv::Mat& refmask_cur_matched,
+                                   SeedPoint& initial_seed_point_cur) {
+    std::cout << message << std::endl;
+    
+    // Prepare images: ref = cam_ref[0], cur = [cam_cur[0]]
+    std::vector<cv::Mat> cur_imgs = {cam_cur[0]};
+    
+    // Set seed for matching
+    step1_2_params_.initial_seed = {
+        static_cast<int>(initial_seed_point_ref.pw[0]),
+        static_cast<int>(initial_seed_point_ref.pw[1])
+    };
+    
+    // Run ncorr analysis and save to cache-compatible path (for formatOutput to find)
+    auto dic_output = runNcorrAnalysis(cam_ref[0], cur_imgs, refmask_ref,
+                                      initial_seed_point_ref, step1_2_params_,
+                                      ncorr_matching_path, false); // false for parallel processing
+    
+    // Extract matched ROI and displacement fields
+    if (!dic_output.disps.empty()) {
+        // NOTE: We use the SAME refmask_trial for both cameras since they image the same region
+        // The matching step transforms the seed point coordinates, not the ROI itself
+        // dic_output.disps[0].get_roi() is the sparse displacement grid, not the full image ROI
+        refmask_cur_matched = refmask_ref.clone();
+        
+        // Extract displacement fields to map seed point
+        const auto& disp = dic_output.disps[0];
+        const auto& u_data = disp.get_u();
+        const auto& v_data = disp.get_v();
+        
+        // Get the underlying Array2D from Data2D
+        const auto& u_array = u_data.get_array();
+        const auto& v_array = v_data.get_array();
+        
+        // Convert ncorr Array2D to cv::Mat for displacement mapping
+        cv::Mat U_mapped(u_data.data_height(), u_data.data_width(), CV_64F);
+        cv::Mat V_mapped(v_data.data_height(), v_data.data_width(), CV_64F);
+        
+        for (size_t y = 0; y < static_cast<size_t>(u_data.data_height()); ++y) {
+            for (size_t x = 0; x < static_cast<size_t>(u_data.data_width()); ++x) {
+                U_mapped.at<double>(y, x) = u_array(y, x);
+                V_mapped.at<double>(y, x) = v_array(y, x);
+            }
+        }
+        
+        // Map seed point using displacement fields
+        initial_seed_point_cur.sw = ROIManager::mapPointCoordinate(
+            initial_seed_point_ref.sw, U_mapped, V_mapped);
+        initial_seed_point_cur.pw = ROIManager::mapSubset2Pixel(
+            initial_seed_point_cur.sw, step1_2_params_.spacing);
+    } else {
+        std::cerr << "No displacement output from matching" << std::endl;
+        return false;
+    }
+    
+    std::cout << "--> STEP: " << message << " done" << std::endl;
     return true;
 }
 
@@ -440,61 +526,14 @@ bool StepDWorkflow::performMatching(const std::vector<cv::Mat>& cam_first_satur,
         }
     }
     
-    std::cout << "Running camera matching analysis..." << std::endl;
-    
-    // Prepare images: ref = cam1[0], cur = [cam2[0], cam1[0]] (second to avoid bug)
-    std::vector<cv::Mat> cur_imgs = {cam_second_satur[0], cam_first_satur[0]};
-    
-    // Set seed for matching
-    step1_2_params_.initial_seed = {
-        static_cast<int>(initial_seed_point_set1.pw[0]),
-        static_cast<int>(initial_seed_point_set1.pw[1])
-    };
-    
-    // Run ncorr analysis and save to cache-compatible path (for formatOutput to find)
-    auto dic_output = runNcorrAnalysis(cam_first_satur[0], cur_imgs, refmask_trial,
-                                      initial_seed_point_set1, step1_2_params_,
-                                      ncorr_matching_path, false); // false for parallel processing
-    
-    // Extract matched ROI and displacement fields
-    if (!dic_output.disps.empty()) {
-        // NOTE: We use the SAME refmask_trial for both cameras since they image the same region
-        // The matching step transforms the seed point coordinates, not the ROI itself
-        // dic_output.disps[0].get_roi() is the sparse displacement grid, not the full image ROI
-        refmask_trial_matched = refmask_trial.clone();
-        
-        // Extract displacement fields to map seed point
-        const auto& disp = dic_output.disps[0];
-        const auto& u_data = disp.get_u();
-        const auto& v_data = disp.get_v();
-        
-        // Get the underlying Array2D from Data2D
-        const auto& u_array = u_data.get_array();
-        const auto& v_array = v_data.get_array();
-        
-        // Convert ncorr Array2D to cv::Mat for displacement mapping
-        cv::Mat U_mapped(u_data.data_height(), u_data.data_width(), CV_64F);
-        cv::Mat V_mapped(v_data.data_height(), v_data.data_width(), CV_64F);
-        
-        for (size_t y = 0; y < static_cast<size_t>(u_data.data_height()); ++y) {
-            for (size_t x = 0; x < static_cast<size_t>(u_data.data_width()); ++x) {
-                U_mapped.at<double>(y, x) = u_array(y, x);
-                V_mapped.at<double>(y, x) = v_array(y, x);
-            }
-        }
-        
-        // Map seed point using displacement fields
-        initial_seed_point_set2.sw = ROIManager::mapPointCoordinate(
-            initial_seed_point_set1.sw, U_mapped, V_mapped);
-        initial_seed_point_set2.pw = ROIManager::mapSubset2Pixel(
-            initial_seed_point_set2.sw, step1_2_params_.spacing);
-    } else {
-        std::cerr << "No displacement output from matching" << std::endl;
-        return false;
-    }
-    
-    std::cout << "--> STEP: Ncorr matching 1-2 done" << std::endl;
-    return true;
+    return matchingInitialFrame(cam_first_satur, 
+                                cam_second_satur, 
+                                refmask_trial, 
+                                ncorr_matching_path, 
+                                "Matching 1-2", 
+                                initial_seed_point_set1, 
+                                refmask_trial_matched, 
+                                initial_seed_point_set2);
 }
 
 bool StepDWorkflow::performTracking(const int tracking_number,
@@ -824,7 +863,7 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
         ncorr::SUBREGION::CIRCLE,
         step_params.radius,
         step_params.total_threads,
-        ncorr::DIC_analysis_config::NO_UPDATE,
+        ncorr::DIC_analysis_config::KEEP_MOST_POINTS,
         config_.debug_mode
     );
     

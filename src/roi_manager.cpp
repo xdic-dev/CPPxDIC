@@ -19,7 +19,7 @@ cv::Mat ROIManager::loadOrCreateROI(const BaseParameters& params,
         std::cout << "Loading ROI from: " << params.roifile << std::endl;
         return loadROIFromMat(params.roifile);
     } else {
-        std::cout << "Creating full ROI (no ROI file found)" << std::endl;
+        std::cout << "Warning: ROI file not found, creating full ROI" << std::endl;
         return createFullROI(reference_image.size());
     }
 }
@@ -119,7 +119,7 @@ SeedPoint ROIManager::loadOrCreateSeed(const BaseParameters& params,
         std::cout << "Loading seed from: " << params.seedfile << std::endl;
         return loadSeedFromMat(params.seedfile);
     } else {
-        std::cout << "Creating default seed at ROI center" << std::endl;
+        std::cout << "Warning: Seed file not found, creating default seed at ROI center" << std::endl;
         SeedPoint seed;
         seed.pw = findROICenter(roi_mask);
         return seed;
@@ -234,6 +234,7 @@ bool ROIManager::loadMatchingResults(const std::string& matching_file,
 
 cv::Mat ROIManager::createFullROI(const cv::Size& image_size) {
     // Create full ROI (all pixels valid)
+    std::cout << "Creating full ROI (all pixels valid)" << std::endl;
     return cv::Mat::ones(image_size, CV_8UC1) * 255;
 }
 

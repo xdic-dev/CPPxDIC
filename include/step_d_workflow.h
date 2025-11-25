@@ -125,6 +125,28 @@ private:
                              cv::Mat& refmask_trial,
                              SeedPoint& ref_seed_point,
                              SeedPoint& initial_seed_point_set1);
+
+    /**
+     * Perform matching between cameras at initial frame
+     * 
+     * @param cam_ref First camera saturated frames
+     * @param cam_cur Second camera saturated frames
+     * @param refmask_ref Trial ROI mask
+     * @param ncorr_matching_path Path to ncorr matching results
+     * @param message Message to display
+     * @param initial_seed_point_ref Initial seed for camera 1
+     * @param refmask_cur_matched Output: matched trial ROI mask
+     * @param initial_seed_point_cur Output: initial seed for camera 2
+     * @return Success status
+     */
+    bool matchingInitialFrame(const std::vector<cv::Mat>& cam_ref,
+        const std::vector<cv::Mat>& cam_cur,
+        const cv::Mat& refmask_ref,
+        const std::string ncorr_matching_path,
+        const std::string message,
+        const SeedPoint& initial_seed_point_ref,
+        cv::Mat& refmask_cur_matched,
+        SeedPoint& initial_seed_point_cur);
     
     /**
      * Perform matching between cameras at initial frame
