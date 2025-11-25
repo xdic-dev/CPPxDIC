@@ -1,0 +1,146 @@
+cmake_minimum_required(VERSION 3.16)
+project(CPPxDIC_Tests)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Set output directories
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
+
+# Set include directories (following parent project pattern)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -isystem /opt/homebrew/include")
+
+# Include directories from parent project
+include_directories(
+    ${CMAKE_SOURCE_DIR}/../include
+    ${CMAKE_SOURCE_DIR}/../Tools/CppNCorr/include
+)
+
+# Find OpenCV (following parent project pattern)
+find_package(OpenCV REQUIRED)
+include_directories(${OpenCV_INCLUDE_DIRS})
+
+# Test 1: test_ncorr_bin - Analyze .bin files
+add_executable(test_ncorr_bin
+    src/test_ncorr_bin.cpp
+    ${CMAKE_SOURCE_DIR}/../src/dic_structures.cpp
+)
+
+target_link_libraries(test_ncorr_bin
+    ${OpenCV_LIBS}
+)
+
+# Test 2: test_ncorr_to_mat - Convert .bin to .mat
+add_executable(test_ncorr_to_mat
+    src/test_ncorr_to_mat.cpp
+    ${CMAKE_SOURCE_DIR}/../src/dic_structures.cpp
+    ${CMAKE_SOURCE_DIR}/../src/mat_writer.cpp
+)
+
+# Add matio library (following parent project pattern)
+find_library(MATIO_LIBRARY NAMES matio)
+if(MATIO_LIBRARY)
+    target_link_libraries(test_ncorr_to_mat ${MATIO_LIBRARY})
+    message(STATUS "Found MATIO library: ${MATIO_LIBRARY}")
+    # Also add MATIO include directory if available
+    find_path(MATIO_INCLUDE_DIR matio.h
+      HINTS /opt/homebrew/include /usr/local/include /usr/include
+    )
+    if(MATIO_INCLUDE_DIR)
+        target_include_directories(test_ncorr_to_mat PRIVATE ${MATIO_INCLUDE_DIR})
+        message(STATUS "Found MATIO include: ${MATIO_INCLUDE_DIR}")
+    endif()
+else()
+    message(FATAL_ERROR "MATIO library not found. Please install it: brew install libmatio")
+endif()
+
+# Add HDF5 library (required for MATIO v7.3 support)
+find_package(HDF5 COMPONENTS C)
+if(HDF5_FOUND)
+    target_include_directories(test_ncorr_to_mat PRIVATE ${HDF5_INCLUDE_DIRS})
+    target_link_libraries(test_ncorr_to_mat ${HDF5_C_LIBRARIES})
+    message(STATUS "Found HDF5: ${HDF5_C_LIBRARIES}")
+else()
+    message(WARNING "HDF5 not found. MAT v7.3 (HDF5) format may not work. Install with: brew install hdf5")
+endif()
+
+# Add ncorr library (following parent project pattern)
+find_library(NCORR_LIBRARY NAMES ncorr PATHS ${CMAKE_SOURCE_DIR}/../Tools/CppNCorr/lib)
+if(NCORR_LIBRARY)
+    target_link_libraries(test_ncorr_to_mat ${NCORR_LIBRARY})
+    message(STATUS "Found ncorr library: ${NCORR_LIBRARY}")
+else()
+    message(FATAL_ERROR "ncorr library not found at ${CMAKE_SOURCE_DIR}/../Tools/CppNCorr/lib")
+endif()
+
+# Link OpenCV to test_ncorr_to_mat
+target_link_libraries(test_ncorr_to_mat ${OpenCV_LIBS})
+
+# Add fftw library (needed by ncorr)
+find_library(FFTW_LIBRARY NAMES fftw3)
+if(FFTW_LIBRARY)
+    target_link_libraries(test_ncorr_to_mat ${FFTW_LIBRARY})
+endif()
+
+# Add suite sparse libraries (needed by ncorr)
+find_library(SUITESPARSE_LIBRARY1 NAMES spqr)
+target_link_libraries(test_ncorr_to_mat ${SUITESPARSE_LIBRARY1})
+
+find_library(SUITESPARSE_LIBRARY2 NAMES cholmod)
+target_link_libraries(test_ncorr_to_mat ${SUITESPARSE_LIBRARY2})
+
+find_library(SUITESPARSE_LIBRARY3 NAMES suitesparseconfig)
+target_link_libraries(test_ncorr_to_mat ${SUITESPARSE_LIBRARY3})
+
+find_library(SUITESPARSE_LIBRARY4 NAMES amd)
+target_link_libraries(test_ncorr_to_mat ${SUITESPARSE_LIBRARY4})
+
+find_library(SUITESPARSE_LIBRARY5 NAMES colamd)
+target_link_libraries(test_ncorr_to_mat ${SUITESPARSE_LIBRARY5})
+
+# Add lapack library
+find_library(LAPACK_LIBRARY NAMES lapack)
+target_link_libraries(test_ncorr_to_mat ${LAPACK_LIBRARY})
+
+# Add blas library
+find_library(BLAS_LIBRARY NAMES blas)
+target_link_libraries(test_ncorr_to_mat ${BLAS_LIBRARY})
+
+# Add pthreads
+find_package(Threads)
+target_link_libraries(test_ncorr_to_mat ${CMAKE_THREAD_LIBS_INIT})
+
+# Add OpenMP support (required by ncorr library) - following parent project's approach
+if(APPLE)
+    # Check for Homebrew OpenMP installation
+    if(EXISTS "/opt/homebrew/opt/libomp")
+        set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include")
+        set(OpenMP_C_LIB_NAMES "omp")
+        set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include")
+        set(OpenMP_CXX_LIB_NAMES "omp")
+        set(OpenMP_omp_LIBRARY "/opt/homebrew/opt/libomp/lib/libomp.dylib")
+    elseif(EXISTS "/usr/local/opt/libomp")
+        set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp -I/usr/local/opt/libomp/include")
+        set(OpenMP_C_LIB_NAMES "omp")
+        set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I/usr/local/opt/libomp/include")
+        set(OpenMP_CXX_LIB_NAMES "omp")
+        set(OpenMP_omp_LIBRARY "/usr/local/opt/libomp/lib/libomp.dylib")
+    endif()
+endif()
+
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    message(STATUS "OpenMP found - enabling parallel support")
+    target_link_libraries(test_ncorr_to_mat OpenMP::OpenMP_CXX)
+else()
+    message(WARNING "OpenMP not found - ncorr features may not work correctly")
+endif()
+
+# Compiler flags
+target_compile_options(test_ncorr_bin PRIVATE -Wall -Wextra -O2)
+target_compile_options(test_ncorr_to_mat PRIVATE -Wall -Wextra -O2)
+
+# Print configuration
+message(STATUS "CPPxDIC Tests Configuration:")
+message(STATUS "  Output directory: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+message(STATUS "  OpenCV version: ${OpenCV_VERSION}")
