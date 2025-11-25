@@ -16,37 +16,58 @@ The compiled binaries will be placed in `tests/bin/`.
 
 ## Test Programs
 
+Both test programs support **two binary file formats** with automatic detection:
+- **ncorr DIC_analysis_output files** (`ncorr*.mat.bin`) - Intermediate 2D DIC results
+- **DIC3Dcombined files** (`DIC3Dcombined*.bin`) - Final 3D stitched results
+
 ### 1. test_ncorr_bin
 
-Analyzes a `.bin` file and provides detailed statistics about the data.
+Analyzes binary files and provides detailed statistics about the data.
+
+**Supported Formats:**
+- `ncorr*.mat.bin` - 2D DIC displacement fields (u, v, cc) from ncorr tracking
+- `DIC3Dcombined*.bin` - 3D reconstructed points and displacements
 
 **Usage:**
 ```bash
 ./bin/test_ncorr_bin <path_to_bin_file>
 ```
 
-**Example:**
+**Examples:**
 ```bash
+# Analyze ncorr 2D tracking results
+./bin/test_ncorr_bin /path/to/.cache/ncorr1.mat.bin
+
+# Analyze 3D combined results
 ./bin/test_ncorr_bin ../DIC3Dcombined_2Pairs_stitched.bin
 ```
 
-**Output:**
-- Basic information (frames, points, faces, pairs)
-- Displacement data summary (DispVec and DispMgn)
-- Correlation coefficient summary (FaceCorrComb)
-- Per-frame statistics including:
+**Output for ncorr files:**
+- Basic information (frames, perspective, units, field dimensions)
+- Per-frame statistics for U, V, and correlation coefficient including:
   - Min, max, mean, median values
   - Number of zeros, NaNs, and infinities
   - Percentage breakdowns
 
-This tool is useful for:
+**Output for DIC3Dcombined files:**
+- Basic information (frames, points, faces, pairs)
+- Displacement data summary (DispVec and DispMgn)
+- Correlation coefficient summary (FaceCorrComb)
+- Per-frame statistics with data quality metrics
+
+**Use Cases:**
 - Debugging data quality issues
 - Understanding why visualization summaries show NaN or zero values
 - Verifying data integrity after processing
+- Analyzing intermediate ncorr tracking results
 
 ### 2. test_ncorr_to_mat
 
-Converts a `.bin` file to `.mat` format using the existing reader and writer implementations.
+Converts binary files to MATLAB `.mat` format for analysis.
+
+**Supported Formats:**
+- `ncorr*.mat.bin` → `.mat` with u, v, cc cell arrays + metadata
+- `DIC3Dcombined*.bin` → `.mat` with full 3D structure (xDIC compatible)
 
 **Usage:**
 ```bash
@@ -55,17 +76,25 @@ Converts a `.bin` file to `.mat` format using the existing reader and writer imp
 
 **Examples:**
 ```bash
-# Creates DIC3Dcombined_2Pairs_stitched.mat in the same location
-./bin/test_ncorr_to_mat ../DIC3Dcombined_2Pairs_stitched.bin
+# Convert ncorr 2D results (creates ncorr1.mat)
+./bin/test_ncorr_to_mat /path/to/.cache/ncorr1.mat.bin
 
-# Specify custom output location
-./bin/test_ncorr_to_mat input.bin output.mat
+# Convert 3D combined results with custom output
+./bin/test_ncorr_to_mat DIC3Dcombined.bin output.mat
 ```
 
-**Output:**
-- MAT file compatible with MATLAB/xDIC
+**Output for ncorr files:**
+- MAT file containing:
+  - `u{1:nFrames}` - Horizontal displacement fields (HxW matrices)
+  - `v{1:nFrames}` - Vertical displacement fields (HxW matrices)
+  - `cc{1:nFrames}` - Correlation coefficient fields (HxW matrices)
+  - `perspective` - "Lagrangian" or "Eulerian"
+  - `units` - Measurement units (e.g., "mm")
+  - `units_per_pixel` - Spatial calibration
+
+**Output for DIC3Dcombined files:**
+- MAT file compatible with MATLAB/xDIC containing full 3D structure
 - File size comparison between binary and MAT formats
-- Summary of converted data
 
 ## Directory Structure
 

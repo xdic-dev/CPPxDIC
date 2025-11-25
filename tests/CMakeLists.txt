@@ -20,15 +20,96 @@ include_directories(
 find_package(OpenCV REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})
 
-# Test 1: test_ncorr_bin - Analyze .bin files
+# Find OpenMP early (required for linking with ncorr)
+if(APPLE)
+    # Check for Homebrew OpenMP installation
+    if(EXISTS "/opt/homebrew/opt/libomp")
+        set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include")
+        set(OpenMP_C_LIB_NAMES "omp")
+        set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include")
+        set(OpenMP_CXX_LIB_NAMES "omp")
+        set(OpenMP_omp_LIBRARY "/opt/homebrew/opt/libomp/lib/libomp.dylib")
+    elseif(EXISTS "/usr/local/opt/libomp")
+        set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp -I/usr/local/opt/libomp/include")
+        set(OpenMP_C_LIB_NAMES "omp")
+        set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I/usr/local/opt/libomp/include")
+        set(OpenMP_CXX_LIB_NAMES "omp")
+        set(OpenMP_omp_LIBRARY "/usr/local/opt/libomp/lib/libomp.dylib")
+    endif()
+endif()
+
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    message(STATUS "OpenMP found - will enable for test programs")
+endif()
+
+# Find pthreads early
+find_package(Threads)
+
+# Test 1: test_ncorr_bin - Analyze .bin files (now supports both ncorr and DIC3Dcombined formats)
 add_executable(test_ncorr_bin
     src/test_ncorr_bin.cpp
     ${CMAKE_SOURCE_DIR}/../src/dic_structures.cpp
 )
 
-target_link_libraries(test_ncorr_bin
-    ${OpenCV_LIBS}
-)
+# Link ncorr library and dependencies (needed for loading ncorr::DIC_analysis_output files)
+find_library(NCORR_LIBRARY_BIN NAMES ncorr PATHS ${CMAKE_SOURCE_DIR}/../Tools/CppNCorr/lib)
+if(NCORR_LIBRARY_BIN)
+    target_link_libraries(test_ncorr_bin ${NCORR_LIBRARY_BIN})
+endif()
+
+target_link_libraries(test_ncorr_bin ${OpenCV_LIBS})
+
+# Add FFTW (required by ncorr)
+find_library(FFTW_LIBRARY_BIN NAMES fftw3)
+if(FFTW_LIBRARY_BIN)
+    target_link_libraries(test_ncorr_bin ${FFTW_LIBRARY_BIN})
+endif()
+
+# Add SuiteSparse libraries (required by ncorr)
+find_library(SUITESPARSE_SPQR_BIN NAMES spqr)
+if(SUITESPARSE_SPQR_BIN)
+    target_link_libraries(test_ncorr_bin ${SUITESPARSE_SPQR_BIN})
+endif()
+
+find_library(SUITESPARSE_CHOLMOD_BIN NAMES cholmod)
+if(SUITESPARSE_CHOLMOD_BIN)
+    target_link_libraries(test_ncorr_bin ${SUITESPARSE_CHOLMOD_BIN})
+endif()
+
+find_library(SUITESPARSE_CONFIG_BIN NAMES suitesparseconfig)
+if(SUITESPARSE_CONFIG_BIN)
+    target_link_libraries(test_ncorr_bin ${SUITESPARSE_CONFIG_BIN})
+endif()
+
+find_library(SUITESPARSE_AMD_BIN NAMES amd)
+if(SUITESPARSE_AMD_BIN)
+    target_link_libraries(test_ncorr_bin ${SUITESPARSE_AMD_BIN})
+endif()
+
+find_library(SUITESPARSE_COLAMD_BIN NAMES colamd)
+if(SUITESPARSE_COLAMD_BIN)
+    target_link_libraries(test_ncorr_bin ${SUITESPARSE_COLAMD_BIN})
+endif()
+
+# Add BLAS and LAPACK (required by ncorr)
+find_library(LAPACK_LIBRARY_BIN NAMES lapack)
+if(LAPACK_LIBRARY_BIN)
+    target_link_libraries(test_ncorr_bin ${LAPACK_LIBRARY_BIN})
+endif()
+
+find_library(BLAS_LIBRARY_BIN NAMES blas)
+if(BLAS_LIBRARY_BIN)
+    target_link_libraries(test_ncorr_bin ${BLAS_LIBRARY_BIN})
+endif()
+
+# Add OpenMP (required by ncorr)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(test_ncorr_bin OpenMP::OpenMP_CXX)
+endif()
+
+# Add pthreads
+target_link_libraries(test_ncorr_bin ${CMAKE_THREAD_LIBS_INIT})
 
 # Test 2: test_ncorr_to_mat - Convert .bin to .mat
 add_executable(test_ncorr_to_mat
@@ -106,34 +187,12 @@ target_link_libraries(test_ncorr_to_mat ${LAPACK_LIBRARY})
 find_library(BLAS_LIBRARY NAMES blas)
 target_link_libraries(test_ncorr_to_mat ${BLAS_LIBRARY})
 
-# Add pthreads
-find_package(Threads)
+# Add pthreads (already found earlier)
 target_link_libraries(test_ncorr_to_mat ${CMAKE_THREAD_LIBS_INIT})
 
-# Add OpenMP support (required by ncorr library) - following parent project's approach
-if(APPLE)
-    # Check for Homebrew OpenMP installation
-    if(EXISTS "/opt/homebrew/opt/libomp")
-        set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include")
-        set(OpenMP_C_LIB_NAMES "omp")
-        set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include")
-        set(OpenMP_CXX_LIB_NAMES "omp")
-        set(OpenMP_omp_LIBRARY "/opt/homebrew/opt/libomp/lib/libomp.dylib")
-    elseif(EXISTS "/usr/local/opt/libomp")
-        set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp -I/usr/local/opt/libomp/include")
-        set(OpenMP_C_LIB_NAMES "omp")
-        set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I/usr/local/opt/libomp/include")
-        set(OpenMP_CXX_LIB_NAMES "omp")
-        set(OpenMP_omp_LIBRARY "/usr/local/opt/libomp/lib/libomp.dylib")
-    endif()
-endif()
-
-find_package(OpenMP)
+# Add OpenMP (already found earlier)
 if(OpenMP_CXX_FOUND)
-    message(STATUS "OpenMP found - enabling parallel support")
     target_link_libraries(test_ncorr_to_mat OpenMP::OpenMP_CXX)
-else()
-    message(WARNING "OpenMP not found - ncorr features may not work correctly")
 endif()
 
 # Compiler flags

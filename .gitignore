@@ -2,3 +2,6 @@ build
 .cache
 docs/*.md
 tests/bin/
+tests/examples/
+reports/
+.DS_Store

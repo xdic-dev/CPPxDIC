@@ -844,7 +844,7 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
         // Run parallel DIC analysis
         dic_output_raw = ncorr::DIC_analysis_parallel(dic_parallel_input);
     } else {
-        std::cout << "  Using sequential DIC processing..." << std::endl;
+        std::cout << "  Using auto DIC processing..." << std::endl;
         dic_output_raw = ncorr::DIC_analysis(dic_input);
     }
     
