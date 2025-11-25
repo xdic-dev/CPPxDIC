@@ -127,7 +127,7 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     // 13. Determine pair order
     std::vector<int> pairOrder;
     bool pairForced;
-    int trial_idx = std::stoi(trial);
+    unsigned int trial_idx = std::stoi(trial);
     if (trial_idx > 0 && trial_idx < protocol_info_.dircond.size()) {
         protocol_info_.getPairOrder(protocol_info_.dircond[trial_idx], pairOrder, pairForced);
     } else {
@@ -632,7 +632,7 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
         return;
     }
     
-    size_t n_frames = dic1.disps.size();
+    int n_frames = dic1.disps.size();
     int Factor = dic1.disps[0].get_scalefactor() + 1;
     std::cout << "  Processing " << n_frames << " frames, Factor=" << Factor << std::endl;
     
@@ -644,15 +644,15 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
     const auto& roi1 = dic1.disps[0].get_roi();
     const auto& roi_mask = roi1.get_mask();
     results.ROImask = cv::Mat(roi_mask.height(), roi_mask.width(), CV_8U);
-    for (size_t y = 0; y < roi_mask.height(); ++y) {
-        for (size_t x = 0; x < roi_mask.width(); ++x) {
+    for (int y = 0; y < roi_mask.height(); ++y) {
+        for (int x = 0; x < roi_mask.width(); ++x) {
             results.ROImask.at<uint8_t>(y, x) = roi_mask(y, x) ? 255 : 0;
         }
     }
     
     std::vector<cv::Point2f> Pref;
-    for (size_t y = 0; y < roi_mask.height(); ++y) {
-        for (size_t x = 0; x < roi_mask.width(); ++x) {
+    for (int y = 0; y < roi_mask.height(); ++y) {
+        for (int x = 0; x < roi_mask.width(); ++x) {
             if (roi_mask(y, x)) {
                 Pref.push_back(cv::Point2f(x * Factor, y * Factor));
             }
@@ -664,7 +664,7 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
     results.CorCoeffVec.resize(n_frames * 2);
     
     std::cout << "  Processing cam1 frames..." << std::endl;
-    for (size_t ii = 0; ii < n_frames; ++ii) {
+    for (int ii = 0; ii < n_frames; ++ii) {
         const auto& disp = dic1.disps[ii];
         const auto& u_array = disp.get_u().get_array();
         const auto& v_array = disp.get_v().get_array();
@@ -674,9 +674,9 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
         points.reserve(Pref.size());
         corrcoef.reserve(Pref.size());
         
-        size_t idx = 0;
-        for (size_t y = 0; y < roi_mask.height(); ++y) {
-            for (size_t x = 0; x < roi_mask.width(); ++x) {
+        int idx = 0;
+        for (int y = 0; y < roi_mask.height(); ++y) {
+            for (int x = 0; x < roi_mask.width(); ++x) {
                 if (roi_mask(y, x)) {
                     double u = u_array(y, x);
                     double v = v_array(y, x);
@@ -703,7 +703,7 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
         // Store average corrcoef as a scalar per frame
         double avg_corr = 0.0;
         if (!corrcoef.empty()) {
-            double sum = 0.0; size_t cnt = 0;
+            double sum = 0.0; int cnt = 0;
             for (double c : corrcoef) { if (!std::isnan(c)) { sum += c; ++cnt; } }
             avg_corr = (cnt>0) ? (sum / static_cast<double>(cnt)) : std::numeric_limits<double>::quiet_NaN();
         } else {
@@ -713,7 +713,7 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
     }
     
     std::cout << "  Processing cam2 frames..." << std::endl;
-    for (size_t ii = 0; ii < n_frames; ++ii) {
+    for (int ii = 0; ii < n_frames; ++ii) {
         const auto& disp2 = dic2.disps[ii];
         const auto& u2_array = disp2.get_u().get_array();
         const auto& v2_array = disp2.get_v().get_array();
@@ -721,9 +721,9 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
         std::vector<cv::Point2f> points;
         std::vector<double> corrcoef;
         
-        size_t idx = 0;
-        for (size_t y = 0; y < roi_mask.height(); ++y) {
-            for (size_t x = 0; x < roi_mask.width(); ++x) {
+        int idx = 0;
+        for (int y = 0; y < roi_mask.height(); ++y) {
+            for (int x = 0; x < roi_mask.width(); ++x) {
                 if (roi_mask(y, x)) {
                     double u = u2_array(y, x);
                     double v = v2_array(y, x);
@@ -743,7 +743,7 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
         results.Points[n_frames + ii] = std::move(pts2d2);
         double avg_corr2 = 0.0;
         if (!corrcoef.empty()) {
-            double sum2 = 0.0; size_t cnt2 = 0;
+            double sum2 = 0.0; int cnt2 = 0;
             for (double c : corrcoef) { if (!std::isnan(c)) { sum2 += c; ++cnt2; } }
             avg_corr2 = (cnt2>0) ? (sum2 / static_cast<double>(cnt2)) : std::numeric_limits<double>::quiet_NaN();
         } else {
@@ -800,7 +800,7 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     temp_image_paths.push_back(ref_path);
     
     // Save current images
-    for (size_t i = 0; i < cur_imgs.size(); ++i) {
+    for (unsigned int i = 0; i < cur_imgs.size(); ++i) {
         std::ostringstream oss;
         oss << temp_dir << "/cur_" << std::setw(4) << std::setfill('0') << i << ".png";
         std::string cur_path = oss.str();

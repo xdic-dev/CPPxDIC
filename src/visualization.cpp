@@ -9,7 +9,6 @@
 #include <iomanip>
 #include <cmath>
 #include <algorithm>
-#include <numeric>
 #include <filesystem>
 
 namespace cppxdic {
@@ -483,6 +482,43 @@ void Visualization::generateSummaryStats(
     ofs << "Deformation type: " << results.deftype << "\n";
     ofs << "\n";
     
+    // Helper lambda to compute statistics filtering out NaN/Inf values
+    auto computeStats = [](const std::vector<double>& data, 
+                          double& min_val, double& max_val, double& mean_val,
+                          size_t& num_valid, size_t& num_nan, size_t& num_zeros) {
+        min_val = std::numeric_limits<double>::infinity();
+        max_val = -std::numeric_limits<double>::infinity();
+        mean_val = 0.0;
+        num_valid = 0;
+        num_nan = 0;
+        num_zeros = 0;
+        
+        double sum = 0.0;
+        for (const auto& val : data) {
+            if (std::isnan(val)) {
+                num_nan++;
+            } else if (std::isinf(val)) {
+                // Skip infinities
+            } else {
+                num_valid++;
+                sum += val;
+                min_val = std::min(min_val, val);
+                max_val = std::max(max_val, val);
+                if (std::abs(val) < 1e-10) {
+                    num_zeros++;
+                }
+            }
+        }
+        
+        if (num_valid > 0) {
+            mean_val = sum / num_valid;
+        } else {
+            min_val = std::numeric_limits<double>::quiet_NaN();
+            max_val = std::numeric_limits<double>::quiet_NaN();
+            mean_val = std::numeric_limits<double>::quiet_NaN();
+        }
+    };
+    
     // Field statistics
     if (!results.Disp.DispMgn.empty() && !results.Disp.DispMgn[0].empty()) {
         ofs << "Displacement Statistics:\n";
@@ -491,17 +527,33 @@ void Visualization::generateSummaryStats(
         for (size_t frame = 0; frame < results.Disp.DispMgn.size(); ++frame) {
             const auto& disp = results.Disp.DispMgn[frame];
             
-            double min_val = *std::min_element(disp.begin(), disp.end());
-            double max_val = *std::max_element(disp.begin(), disp.end());
-            double mean_val = std::accumulate(disp.begin(), disp.end(), 0.0) / disp.size();
+            double min_val, max_val, mean_val;
+            size_t num_valid, num_nan, num_zeros;
+            computeStats(disp, min_val, max_val, mean_val, num_valid, num_nan, num_zeros);
             
             ofs << std::setprecision(6) << std::fixed;
             ofs << "  Frame " << frame << ": "
                 << "min=" << min_val << ", "
                 << "max=" << max_val << ", "
-                << "mean=" << mean_val << "\n";
+                << "mean=" << mean_val;
+            
+            if (num_nan > 0 || num_zeros > 0) {
+                ofs << " (valid=" << num_valid << "/" << disp.size();
+                if (num_nan > 0) {
+                    ofs << ", NaN=" << num_nan;
+                }
+                if (num_zeros > 0) {
+                    ofs << ", zeros=" << num_zeros;
+                }
+                ofs << ")";
+            }
+            ofs << "\n";
         }
         ofs << "\n";
+    } else {
+        ofs << "Displacement Statistics:\n";
+        ofs << "------------------------\n";
+        ofs << "  No displacement data available\n\n";
     }
     
     // Correlation statistics
@@ -512,17 +564,33 @@ void Visualization::generateSummaryStats(
         for (size_t frame = 0; frame < results.FaceCorrComb.size(); ++frame) {
             const auto& corr = results.FaceCorrComb[frame];
             
-            double min_val = *std::min_element(corr.begin(), corr.end());
-            double max_val = *std::max_element(corr.begin(), corr.end());
-            double mean_val = std::accumulate(corr.begin(), corr.end(), 0.0) / corr.size();
+            double min_val, max_val, mean_val;
+            size_t num_valid, num_nan, num_zeros;
+            computeStats(corr, min_val, max_val, mean_val, num_valid, num_nan, num_zeros);
             
             ofs << std::setprecision(6) << std::fixed;
             ofs << "  Frame " << frame << ": "
                 << "min=" << min_val << ", "
                 << "max=" << max_val << ", "
-                << "mean=" << mean_val << "\n";
+                << "mean=" << mean_val;
+            
+            if (num_nan > 0 || num_zeros > 0) {
+                ofs << " (valid=" << num_valid << "/" << corr.size();
+                if (num_nan > 0) {
+                    ofs << ", NaN=" << num_nan;
+                }
+                if (num_zeros > 0) {
+                    ofs << ", zeros=" << num_zeros;
+                }
+                ofs << ")";
+            }
+            ofs << "\n";
         }
         ofs << "\n";
+    } else {
+        ofs << "Correlation Coefficient Statistics:\n";
+        ofs << "------------------------------------\n";
+        ofs << "  No correlation data available\n\n";
     }
     
     ofs.close();

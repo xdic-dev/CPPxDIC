@@ -1,1 +1,4 @@
 build
+.cache
+docs/*.md
+tests/bin/

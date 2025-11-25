@@ -271,23 +271,103 @@ bool MatWriter::writeDICResultFile(const std::string& filename,
         return false;
     }
     
-    // Create input struct
+    // Create input struct with actual values
     std::vector<std::string> input_fields = {"radius", "spacing", "subregion_type", "interp_type"};
     matvar_t* input_struct = createStructVariable("input", input_fields);
     
-    // Create output struct with displacement fields
-    std::vector<std::string> output_fields = {"disps", "perspective_type", "units", "units_per_pixel"};
-    matvar_t* output_struct = createStructVariable("output", output_fields);
+    // Populate input fields
+    size_t scalar_dims[2] = {1, 1};
+    double radius_val = static_cast<double>(dic_input.r);
+    double spacing_val = static_cast<double>(dic_input.scalefactor);
+    matvar_t* radius_var = Mat_VarCreate("radius", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, scalar_dims, &radius_val, 0);
+    matvar_t* spacing_var = Mat_VarCreate("spacing", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, scalar_dims, &spacing_val, 0);
+    Mat_VarSetStructFieldByName(input_struct, "radius", 0, radius_var);
+    Mat_VarSetStructFieldByName(input_struct, "spacing", 0, spacing_var);
     
-    // Write structs to file
+    // Write input struct
     Mat_VarWrite(matfp, input_struct, MAT_COMPRESSION_NONE);
-    Mat_VarWrite(matfp, output_struct, MAT_COMPRESSION_NONE);
-    
     Mat_VarFree(input_struct);
-    Mat_VarFree(output_struct);
+    
+    // Create output struct with displacement data
+    size_t n_frames = dic_output.disps.size();
+    if (n_frames > 0) {
+        std::vector<std::string> output_fields = {"u", "v", "cc", "roi"};
+        matvar_t* output_struct = createStructVariable("output", output_fields);
+        
+        // Create cell arrays for displacement components
+        size_t cell_dims[2] = {n_frames, 1};
+        matvar_t* u_cell = Mat_VarCreate("u", MAT_C_CELL, MAT_T_CELL, 2, cell_dims, nullptr, 0);
+        matvar_t* v_cell = Mat_VarCreate("v", MAT_C_CELL, MAT_T_CELL, 2, cell_dims, nullptr, 0);
+        matvar_t* cc_cell = Mat_VarCreate("cc", MAT_C_CELL, MAT_T_CELL, 2, cell_dims, nullptr, 0);
+        matvar_t* roi_cell = Mat_VarCreate("roi", MAT_C_CELL, MAT_T_CELL, 2, cell_dims, nullptr, 0);
+        
+        // Fill cells with actual data from each frame
+        for (size_t i = 0; i < n_frames; ++i) {
+            const auto& disp = dic_output.disps[i];
+            const auto& u_array = disp.get_u().get_array();
+            const auto& v_array = disp.get_v().get_array();
+            const auto& cc_array = disp.get_cc().get_array();
+            const auto& roi_mask = disp.get_roi().get_mask();
+            
+            size_t height = u_array.height();
+            size_t width = u_array.width();
+            size_t data_dims[2] = {height, width};
+            
+            // Create u displacement matrix (column-major for MATLAB)
+            double* u_data = new double[height * width];
+            for (size_t y = 0; y < height; ++y) {
+                for (size_t x = 0; x < width; ++x) {
+                    u_data[x * height + y] = u_array(y, x);
+                }
+            }
+            matvar_t* u_mat = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, data_dims, u_data, MAT_F_DONT_COPY_DATA);
+            Mat_VarSetCell(u_cell, i, u_mat);
+            
+            // Create v displacement matrix
+            double* v_data = new double[height * width];
+            for (size_t y = 0; y < height; ++y) {
+                for (size_t x = 0; x < width; ++x) {
+                    v_data[x * height + y] = v_array(y, x);
+                }
+            }
+            matvar_t* v_mat = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, data_dims, v_data, MAT_F_DONT_COPY_DATA);
+            Mat_VarSetCell(v_cell, i, v_mat);
+            
+            // Create correlation coefficient matrix
+            double* cc_data = new double[height * width];
+            for (size_t y = 0; y < height; ++y) {
+                for (size_t x = 0; x < width; ++x) {
+                    cc_data[x * height + y] = cc_array(y, x);
+                }
+            }
+            matvar_t* cc_mat = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, data_dims, cc_data, MAT_F_DONT_COPY_DATA);
+            Mat_VarSetCell(cc_cell, i, cc_mat);
+            
+            // Create ROI mask matrix
+            uint8_t* roi_data = new uint8_t[height * width];
+            for (size_t y = 0; y < height; ++y) {
+                for (size_t x = 0; x < width; ++x) {
+                    roi_data[x * height + y] = roi_mask(y, x) ? 1 : 0;
+                }
+            }
+            matvar_t* roi_mat = Mat_VarCreate("", MAT_C_UINT8, MAT_T_UINT8, 2, data_dims, roi_data, MAT_F_DONT_COPY_DATA);
+            Mat_VarSetCell(roi_cell, i, roi_mat);
+        }
+        
+        // Add cells to output struct
+        Mat_VarSetStructFieldByName(output_struct, "u", 0, u_cell);
+        Mat_VarSetStructFieldByName(output_struct, "v", 0, v_cell);
+        Mat_VarSetStructFieldByName(output_struct, "cc", 0, cc_cell);
+        Mat_VarSetStructFieldByName(output_struct, "roi", 0, roi_cell);
+        
+        // Write output struct
+        Mat_VarWrite(matfp, output_struct, MAT_COMPRESSION_NONE);
+        Mat_VarFree(output_struct);
+    }
+    
     Mat_Close(matfp);
     
-    std::cout << "Wrote DIC result file: " << filename << std::endl;
+    std::cout << "Wrote DIC result file: " << filename << " (" << n_frames << " frames)" << std::endl;
     return true;
 }
 
@@ -902,6 +982,28 @@ bool MatWriter::write3DCombinedResults(const std::string& filename,
         const auto& pts = combined.Points3D[i];
         std::vector<std::string> pt_fields = {"x", "y", "z"};
         matvar_t* pt_struct = createStructVariable("point3d", pt_fields);
+        
+        // Write x, y, z arrays if they contain data
+        size_t n_points = pts.x.size();
+        if (n_points > 0) {
+            std::vector<size_t> dims = {n_points, 1};
+            
+            // Create x array
+            matvar_t* x_var = Mat_VarCreate("x", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
+                                            (void*)pts.x.data(), 0);
+            Mat_VarSetStructFieldByName(pt_struct, "x", 0, x_var);
+            
+            // Create y array
+            matvar_t* y_var = Mat_VarCreate("y", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
+                                            (void*)pts.y.data(), 0);
+            Mat_VarSetStructFieldByName(pt_struct, "y", 0, y_var);
+            
+            // Create z array
+            matvar_t* z_var = Mat_VarCreate("z", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
+                                            (void*)pts.z.data(), 0);
+            Mat_VarSetStructFieldByName(pt_struct, "z", 0, z_var);
+        }
+        
         Mat_VarSetCell(points3d_cell, i, pt_struct);
     }
     
@@ -923,11 +1025,119 @@ bool MatWriter::write3DCombinedResults(const std::string& filename,
                           MAT_T_DOUBLE, MAT_C_DOUBLE);
     }
     
+    // Write corrComb as cell array
+    if (!combined.corrComb.empty()) {
+        size_t n_frames_corr = combined.corrComb.size();
+        std::vector<size_t> cell_dims = {1, n_frames_corr};
+        matvar_t* corr_cell = Mat_VarCreate("corrComb", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
+        
+        for (size_t i = 0; i < n_frames_corr; ++i) {
+            const auto& corr_frame = combined.corrComb[i];
+            if (!corr_frame.empty()) {
+                std::vector<size_t> dims = {corr_frame.size(), 1};
+                matvar_t* corr_var = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
+                                                  (void*)corr_frame.data(), 0);
+                Mat_VarSetCell(corr_cell, i, corr_var);
+            }
+        }
+        Mat_VarWrite(matfp, corr_cell, MAT_COMPRESSION_NONE);
+        Mat_VarFree(corr_cell);
+    }
+    
+    // Write FaceCorrComb as cell array
+    if (!combined.FaceCorrComb.empty()) {
+        size_t n_frames_face = combined.FaceCorrComb.size();
+        std::vector<size_t> cell_dims = {1, n_frames_face};
+        matvar_t* face_corr_cell = Mat_VarCreate("FaceCorrComb", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
+        
+        for (size_t i = 0; i < n_frames_face; ++i) {
+            const auto& face_corr = combined.FaceCorrComb[i];
+            if (!face_corr.empty()) {
+                std::vector<size_t> dims = {face_corr.size(), 1};
+                matvar_t* fc_var = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
+                                                (void*)face_corr.data(), 0);
+                Mat_VarSetCell(face_corr_cell, i, fc_var);
+            }
+        }
+        Mat_VarWrite(matfp, face_corr_cell, MAT_COMPRESSION_NONE);
+        Mat_VarFree(face_corr_cell);
+    }
+    
+    // Write FaceCentroids as cell array
+    if (!combined.FaceCentroids.empty()) {
+        size_t n_frames_cent = combined.FaceCentroids.size();
+        std::vector<size_t> cell_dims = {1, n_frames_cent};
+        matvar_t* cent_cell = Mat_VarCreate("FaceCentroids", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
+        
+        for (size_t i = 0; i < n_frames_cent; ++i) {
+            const auto& centroids = combined.FaceCentroids[i];
+            if (!centroids.empty()) {
+                std::vector<size_t> dims = {centroids.size(), 1};
+                matvar_t* cent_var = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
+                                                  (void*)centroids.data(), 0);
+                Mat_VarSetCell(cent_cell, i, cent_var);
+            }
+        }
+        Mat_VarWrite(matfp, cent_cell, MAT_COMPRESSION_NONE);
+        Mat_VarFree(cent_cell);
+    }
+    
     // Write Displacement data
     std::vector<std::string> disp_fields = {"DispVec", "DispMgn"};
     matvar_t* disp_struct = createStructVariable("Disp", disp_fields);
+    
+    // Write DispVec if available
+    if (!combined.Disp.DispVec.empty()) {
+        size_t n_disp = combined.Disp.DispVec.size();
+        std::vector<size_t> cell_dims = {1, n_disp};
+        matvar_t* disp_vec_cell = Mat_VarCreate("DispVec", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
+        
+        for (size_t i = 0; i < n_disp; ++i) {
+            const auto& disp_vec = combined.Disp.DispVec[i];
+            if (!disp_vec.empty()) {
+                std::vector<size_t> dims = {disp_vec.size(), 1};
+                matvar_t* dv_var = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
+                                                (void*)disp_vec.data(), 0);
+                Mat_VarSetCell(disp_vec_cell, i, dv_var);
+            }
+        }
+        Mat_VarSetStructFieldByName(disp_struct, "DispVec", 0, disp_vec_cell);
+    }
+    
+    // Write DispMgn if available
+    if (!combined.Disp.DispMgn.empty()) {
+        size_t n_mgn = combined.Disp.DispMgn.size();
+        std::vector<size_t> cell_dims = {1, n_mgn};
+        matvar_t* disp_mgn_cell = Mat_VarCreate("DispMgn", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
+        
+        for (size_t i = 0; i < n_mgn; ++i) {
+            const auto& disp_mgn = combined.Disp.DispMgn[i];
+            if (!disp_mgn.empty()) {
+                std::vector<size_t> dims = {disp_mgn.size(), 1};
+                matvar_t* dm_var = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
+                                                (void*)disp_mgn.data(), 0);
+                Mat_VarSetCell(disp_mgn_cell, i, dm_var);
+            }
+        }
+        Mat_VarSetStructFieldByName(disp_struct, "DispMgn", 0, disp_mgn_cell);
+    }
+    
     Mat_VarWrite(matfp, disp_struct, MAT_COMPRESSION_NONE);
     Mat_VarFree(disp_struct);
+    
+    // Write FacePairInds
+    if (!combined.FacePairInds.empty()) {
+        std::vector<size_t> dims = {combined.FacePairInds.size(), 1};
+        writeArrayVariable(matfp, "FacePairInds", combined.FacePairInds.data(), dims, 
+                          MAT_T_INT32, MAT_C_INT32);
+    }
+    
+    // Write PointPairInds
+    if (!combined.PointPairInds.empty()) {
+        std::vector<size_t> dims = {combined.PointPairInds.size(), 1};
+        writeArrayVariable(matfp, "PointPairInds", combined.PointPairInds.data(), dims, 
+                          MAT_T_INT32, MAT_C_INT32);
+    }
     
     Mat_Close(matfp);
     std::cout << "Wrote DIC3Dcombined: " << filename << std::endl;
