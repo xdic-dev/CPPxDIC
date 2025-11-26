@@ -23,6 +23,7 @@ public:
     std::string dic_path;                // location of the output data from DIC
     
     // Processing flags
+    bool im_filter_mode = false;
     bool automatic_process = true;       // automatic processing flag
     bool parallel_processing = false;     // parallel processing flag
     

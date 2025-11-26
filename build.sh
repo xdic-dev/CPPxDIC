@@ -57,7 +57,7 @@ cd build
 
 # Configure with CMake
 echo "Configuring with CMake..."
-if cmake ..; then
+if cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON; then
     echo "✓ CMake configuration successful"
 else
     echo "❌ CMake configuration failed"

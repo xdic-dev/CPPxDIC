@@ -5,10 +5,12 @@
  */
 
 #include "step_d_workflow.h"
+#include "Array2D.h"
 #include "mat_writer.h"
 #include "delaunay_triangulation.h"
 #include "utils.h"
 #include <iostream>
+#include <opencv2/imgcodecs.hpp>
 #include <sstream>
 #include <iomanip>
 #include <filesystem>
@@ -105,11 +107,16 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     
     // post-III. Image filtering
     std::vector<cv::Mat> cam_first, cam_second;
-    std::cout << "Applying image filtering..." << std::endl;
-    applyImageFiltering(cam_first_satur, cam_second_satur, refmask_trial,
-                       cam_first, cam_second);
-    std::cout << "--> STEP: filtering done" << std::endl;
-
+    if(config_.im_filter_mode) {
+        std::cout << "Applying image filtering..." << std::endl;
+        applyImageFiltering(cam_first_satur, cam_second_satur, refmask_trial,
+                           cam_first, cam_second);
+        std::cout << "--> STEP: filtering done" << std::endl;
+    } else {
+        std::cout << "Skipping image filtering" << std::endl;
+        cam_first = cam_first_satur;
+        cam_second = cam_second_satur;
+    }
     cv::imwrite("cam_first_filtered.png", cam_first[0]);
     cv::imwrite("cam_second_filtered.png", cam_second[0]);
     
@@ -907,6 +914,8 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     
     // Convert ROI mask
     ncorr::ROI2D roi = ROIManager::matToNcorrROI(roi_mask);
+
+    cv::imwrite(temp_dir + "/roi_mask.png", get_cv_img(roi.get_mask(), 0, 255));
     
     // Setup DIC input
     // Note: scalefactor = spacing + 1 (this is how ncorr downsamples the displacement field)
