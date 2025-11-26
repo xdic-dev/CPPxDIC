@@ -363,7 +363,49 @@ bool StepDWorkflow::initializeROIAndSeed(const std::vector<cv::Mat>& cam_first_s
     // Load or create seed
     ref_seed_point = ROIManager::loadOrCreateSeed(base_params_, refmask_trial);
     
-    // If matching file exists, load it to get transformed ROI and seed
+    // Check cache for MATCHING file to avoid redundant computation
+    std::filesystem::path cache_bin = std::filesystem::path(base_params_.matchingfile).parent_path() / 
+        ".cache" / (std::filesystem::path(base_params_.matchingfile).filename().string() + ".bin");
+    
+    // Try loading from cache first (.bin)
+    if (std::filesystem::exists(cache_bin)) {
+        std::cout << "Checkpoint found: \"" << cache_bin.string() << "\"" << std::endl;
+        std::cout << "--> STEP: MATCHING file loaded from checkpoint (skipped computation)" << std::endl;
+        
+        // Load displacement fields from cache to map seed point
+        auto dic_output = ncorr::DIC_analysis_output::load(cache_bin.string());
+        
+        if (!dic_output.disps.empty()) {
+            const auto& disp = dic_output.disps[0];
+            const auto& u_array = disp.get_u().get_array();
+            const auto& v_array = disp.get_v().get_array();
+            
+            cv::Mat U_mapped(disp.get_u().data_height(), disp.get_u().data_width(), CV_64F);
+            cv::Mat V_mapped(disp.get_v().data_height(), disp.get_v().data_width(), CV_64F);
+            
+            for (size_t y = 0; y < static_cast<size_t>(disp.get_u().data_height()); ++y) {
+                for (size_t x = 0; x < static_cast<size_t>(disp.get_u().data_width()); ++x) {
+                    U_mapped.at<double>(y, x) = u_array(y, x);
+                    V_mapped.at<double>(y, x) = v_array(y, x);
+                }
+            }
+            
+            // Map seed point using displacement fields
+            ref_seed_point.sw = ROIManager::mapPixel2Subset(ref_seed_point.pw,
+                                                           step1_params_.spacing);
+            initial_seed_point_set1.sw = ROIManager::mapPointCoordinate(ref_seed_point.sw,
+                                                                        U_mapped, V_mapped);
+            initial_seed_point_set1.pw = ROIManager::mapSubset2Pixel(initial_seed_point_set1.sw,
+                                                                     step1_params_.spacing);
+            
+            std::cout << "--> STEP: MATCHING transformation applied" << std::endl;
+            return true;
+        } else {
+            std::cerr << "Warning: Cached MATCHING file has no displacements, re-running..." << std::endl;
+        }
+    }
+    
+    // Try loading from .mat file (for backward compatibility or MATLAB-generated files)
     if (std::filesystem::exists(base_params_.matchingfile)) {
         cv::Mat U_mapped, V_mapped;
         if (ROIManager::loadMatchingResults(base_params_.matchingfile,
@@ -377,6 +419,8 @@ bool StepDWorkflow::initializeROIAndSeed(const std::vector<cv::Mat>& cam_first_s
                                                                         U_mapped, V_mapped);
             initial_seed_point_set1.pw = ROIManager::mapSubset2Pixel(initial_seed_point_set1.sw,
                                                                      step1_params_.spacing);
+            
+            std::cout << "--> STEP: MATCHING transformation applied from .mat file" << std::endl;
             return true;
         }
     }
@@ -919,10 +963,18 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     save(dic_lagrangian, cache_bin);
     std::cout << "DIC analysis saved to cache: " << cache_bin << std::endl;
     
-    // Optionally generate .mat file with BOTH perspectives (for MATLAB users)
-    if (config_.generate_mat_files) {
+    // Generate .mat file for MATLAB compatibility
+    // MATCHING files (MATCHING2xxx and ncorrXY) are ALWAYS generated (needed for seed transformation and external tools)
+    // Other files are only generated if config_.generate_mat_files is enabled
+    bool is_matching_file = (output_path.find("MATCHING") != std::string::npos) || 
+                           (output_path.find("ncorr") != std::string::npos && 
+                            std::filesystem::path(output_path).filename().string().find("ncorr") == 0 &&
+                            std::filesystem::path(output_path).stem().string().length() == 7); // ncorrXY format
+    bool should_generate_mat = is_matching_file || config_.generate_mat_files;
+    
+    if (should_generate_mat) {
         // For MATCHING files, write with both perspectives
-        if (output_path.find("MATCHING") != std::string::npos) {
+        if (is_matching_file) {
             // Extract necessary data for writeMatchingFile
             cv::Mat ref_img_out = ref_img.clone();
             cv::Mat cur_img_out = cur_imgs[0].clone();  // First current image
