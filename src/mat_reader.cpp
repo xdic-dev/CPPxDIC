@@ -147,9 +147,14 @@ cv::Mat MatReader::readImage(matvar_t* var) {
         const uint8_t* data = static_cast<const uint8_t*>(var->data);
         img = cv::Mat(rows, cols, CV_8U);
         
+        // Check if this is a MATLAB logical array (values are 0 and 1)
+        bool is_logical = (var->isLogical != 0);
+        
         for (size_t r = 0; r < rows; ++r) {
             for (size_t c = 0; c < cols; ++c) {
-                img.at<uint8_t>(r, c) = data[c * rows + r];
+                uint8_t value = data[c * rows + r];
+                // Scale logical values (0,1) to image values (0,255) for proper visualization and processing
+                img.at<uint8_t>(r, c) = is_logical ? (value * 255) : value;
             }
         }
     } else {

@@ -48,12 +48,24 @@ cv::Mat ROIManager::loadROIFromMat(const std::string& roi_file) {
         roi_mask = cv::Mat(height, width, CV_8UC1);
         const uint8_t* data = static_cast<const uint8_t*>(refmask_var->data);
         
+        // Check if this is a MATLAB logical array (values are 0 and 1)
+        bool is_logical = (refmask_var->isLogical != 0);
+        
         // MATLAB is column-major, OpenCV is row-major
         for (size_t y = 0; y < height; ++y) {
             for (size_t x = 0; x < width; ++x) {
-                roi_mask.at<uint8_t>(y, x) = data[x * height + y];
+                uint8_t value = data[x * height + y];
+                // Scale logical values (0,1) to image values (0,255) for proper visualization
+                roi_mask.at<uint8_t>(y, x) = is_logical ? (value * 255) : value;
             }
         }
+        
+        if (is_logical) {
+            std::cout << "  Loaded logical mask (scaled 0/1 to 0/255)" << std::endl;
+        }
+    } else {
+        std::cerr << "Warning: Unexpected refmask type (class=" << refmask_var->class_type 
+                  << ", rank=" << refmask_var->rank << ")" << std::endl;
     }
     
     Mat_VarFree(refmask_var);

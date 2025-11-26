@@ -73,6 +73,11 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     std::cout << "Applying saturation..." << std::endl;
     performSaturation(cam_first_raw, cam_second_raw, cam_first_satur, cam_second_satur);
     
+    cv::imwrite("cam_first_satur.png", cam_first_satur[0]);
+    cv::imwrite("cam_second_satur.png", cam_second_satur[0]);
+    cv::imwrite("cam_first_raw.png", cam_first_raw[0]);
+    cv::imwrite("cam_second_raw.png", cam_second_raw[0]);
+    
     // II. ROI, Seed, and Matching REF to Trial at frame 1
     cv::Mat refmask_REF, refmask_trial;
     SeedPoint ref_seed_point, initial_seed_point_set1;
@@ -82,6 +87,7 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
         std::cerr << "Failed to initialize ROI and seed" << std::endl;
         return {"", {}, false};
     }
+
     std::cout << "--> STEP: ROI loaded and formatted" << std::endl;
     std::cout << "--> STEP: SEED loaded and formatted" << std::endl;
     std::cout << "--> STEP: Matching REF to Trial loaded and formatted" << std::endl;
@@ -103,6 +109,9 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     applyImageFiltering(cam_first_satur, cam_second_satur, refmask_trial,
                        cam_first, cam_second);
     std::cout << "--> STEP: filtering done" << std::endl;
+
+    cv::imwrite("cam_first_filtered.png", cam_first[0]);
+    cv::imwrite("cam_second_filtered.png", cam_second[0]);
     
     // IV. Save trial information
     saveTrialInfo(trial, stereopair, cam_first.size());
@@ -390,6 +399,9 @@ bool StepDWorkflow::initializeROIAndSeed(const std::vector<cv::Mat>& cam_first_s
                 }
             }
             
+            // TODO:Set trial mask to reference mask (matching doesn't change ROI, only seed point)
+            //refmask_trial = refmask_REF.clone();
+            
             // Map seed point using displacement fields
             ref_seed_point.sw = ROIManager::mapPixel2Subset(ref_seed_point.pw,
                                                            step1_params_.spacing);
@@ -447,6 +459,7 @@ bool StepDWorkflow::initializeROIAndSeed(const std::vector<cv::Mat>& cam_first_s
                                 initial_seed_point_set1, 
                                 refmask_trial, 
                                 initial_seed_point_set1);
+
 }
 
 bool StepDWorkflow::matchingInitialFrame(const std::vector<cv::Mat>& cam_ref,

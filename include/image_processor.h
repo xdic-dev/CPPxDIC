@@ -55,19 +55,17 @@ public:
                       const std::pair<double, double>* gs_boundaries = nullptr);
     
     /**
-     * Apply filtering to single image with known boundaries
+     * Apply bandpass filter to image using FFT
      * 
      * @param input Input image
-     * @param gs_boundaries Grayscale boundaries [min, max]
-     * @param param_filt Filtering parameters
-     * @return Filtered image
+     * @param param_filt Filtering parameters [low_freq, high_freq]
+     * @return Filtered image (float)
      */
-    static cv::Mat filterWithBoundaries(const cv::Mat& input,
-                                       const std::pair<double, double>& gs_boundaries,
+    static cv::Mat applyBandpassFilter(const cv::Mat& input,
                                        const std::vector<int>& param_filt);
     
     /**
-     * Compute grayscale boundaries from masked region
+     * Compute grayscale boundaries from masked region using min/max
      * 
      * @param image Input image
      * @param mask ROI mask
@@ -75,6 +73,30 @@ public:
      */
     static std::pair<double, double> computeGrayscaleBoundaries(const cv::Mat& image,
                                                                 const cv::Mat& mask);
+    
+    /**
+     * Compute grayscale boundaries using percentiles
+     * 
+     * @param image Input image (CV_32F)
+     * @param mask ROI mask
+     * @param lower_percentile Lower percentile (e.g., 5.0 for 5th percentile)
+     * @param upper_percentile Upper percentile (e.g., 95.0 for 95th percentile)
+     * @return Grayscale boundaries [lower, upper]
+     */
+    static std::pair<double, double> computePercentileBoundaries(const cv::Mat& image,
+                                                                 const cv::Mat& mask,
+                                                                 double lower_percentile,
+                                                                 double upper_percentile);
+    
+    /**
+     * Normalize and clamp image to [0, 255] using boundaries
+     * 
+     * @param image Input image (CV_32F)
+     * @param boundaries Grayscale boundaries [min, max]
+     * @return Normalized and clamped image (CV_8UC1)
+     */
+    static cv::Mat normalizeAndClamp(const cv::Mat& image,
+                                    const std::pair<double, double>& boundaries);
     
     /**
      * Load images from file paths

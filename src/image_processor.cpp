@@ -73,24 +73,29 @@ ImageProcessor::filterLikeBen(const std::vector<cv::Mat>& input,
     std::vector<cv::Mat> filtered_images;
     std::pair<double, double> boundaries;
     
-    // Compute boundaries from first image if not provided
+    // Apply bandpass filter to all images first
+    for (const auto& img : input) {
+        cv::Mat filtered = applyBandpassFilter(img, param_filt);
+        filtered_images.push_back(filtered);
+    }
+    
+    // Compute boundaries from FIRST FILTERED image using percentiles (5th, 95th) if not provided
     if (gs_boundaries == nullptr) {
-        boundaries = computeGrayscaleBoundaries(input[0], mask);
+        boundaries = computePercentileBoundaries(filtered_images[0], mask, 5.0, 95.0);
+        std::cout << "  Computed filter boundaries: [" << boundaries.first << ", " << boundaries.second << "]" << std::endl;
     } else {
         boundaries = *gs_boundaries;
     }
     
-    // Filter each image
-    for (const auto& img : input) {
-        cv::Mat filtered = filterWithBoundaries(img, boundaries, param_filt);
-        filtered_images.push_back(filtered);
+    // Normalize each filtered image using the boundaries
+    for (size_t i = 0; i < filtered_images.size(); ++i) {
+        filtered_images[i] = normalizeAndClamp(filtered_images[i], boundaries);
     }
     
     return {filtered_images, boundaries};
 }
 
-cv::Mat ImageProcessor::filterWithBoundaries(const cv::Mat& input,
-                                            const std::pair<double, double>& gs_boundaries,
+cv::Mat ImageProcessor::applyBandpassFilter(const cv::Mat& input,
                                             const std::vector<int>& param_filt) {
     // Convert to float for processing
     cv::Mat float_img;
@@ -143,14 +148,7 @@ cv::Mat ImageProcessor::filterWithBoundaries(const cv::Mat& input,
     cv::idft(filtered_complex, filtered_img, cv::DFT_SCALE | cv::DFT_REAL_OUTPUT);
     filtered_img = filtered_img(cv::Rect(0, 0, input.cols, input.rows));
     
-    // Normalize to boundaries and stretch to [0, 255]
-    cv::Mat normalized = normalizeImage(filtered_img, gs_boundaries.first, gs_boundaries.second);
-    
-    // Convert back to uint8
-    cv::Mat output;
-    normalized.convertTo(output, CV_8UC1);
-    
-    return output;
+    return filtered_img;
 }
 
 std::pair<double, double> ImageProcessor::computeGrayscaleBoundaries(const cv::Mat& image,
@@ -173,6 +171,62 @@ std::pair<double, double> ImageProcessor::computeGrayscaleBoundaries(const cv::M
     }
     
     return {min_val, max_val};
+}
+
+std::pair<double, double> ImageProcessor::computePercentileBoundaries(const cv::Mat& image,
+                                                                      const cv::Mat& mask,
+                                                                      double lower_percentile,
+                                                                      double upper_percentile) {
+    // Collect all pixel values within masked region
+    std::vector<float> values;
+    
+    for (int y = 0; y < image.rows; ++y) {
+        for (int x = 0; x < image.cols; ++x) {
+            if (mask.at<uint8_t>(y, x) > 0) {
+                values.push_back(image.at<float>(y, x));
+            }
+        }
+    }
+    
+    if (values.empty()) {
+        std::cerr << "Warning: No pixels in mask for percentile computation" << std::endl;
+        return {0.0, 255.0};
+    }
+    
+    // Sort values
+    std::sort(values.begin(), values.end());
+    
+    // Compute percentile indices
+    size_t lower_idx = static_cast<size_t>(values.size() * lower_percentile / 100.0);
+    size_t upper_idx = static_cast<size_t>(values.size() * upper_percentile / 100.0);
+    
+    lower_idx = std::min(lower_idx, values.size() - 1);
+    upper_idx = std::min(upper_idx, values.size() - 1);
+    
+    return {values[lower_idx], values[upper_idx]};
+}
+
+cv::Mat ImageProcessor::normalizeAndClamp(const cv::Mat& image,
+                                         const std::pair<double, double>& boundaries) {
+    // Normalize: ((image - min) / (max - min))
+    // Then saturate to [0, 1] and scale to [0, 255]
+    cv::Mat normalized;
+    
+    double range = boundaries.second - boundaries.first;
+    if (range > 0) {
+        normalized = (image - boundaries.first) / range;
+        // Saturate (clamp) to [0, 1]
+        cv::threshold(normalized, normalized, 1.0, 1.0, cv::THRESH_TRUNC);
+        cv::threshold(normalized, normalized, 0.0, 0.0, cv::THRESH_TOZERO);
+    } else {
+        normalized = cv::Mat::zeros(image.size(), CV_32F);
+    }
+    
+    // Convert to uint8 [0, 255]
+    cv::Mat output;
+    normalized.convertTo(output, CV_8UC1, 255.0);
+    
+    return output;
 }
 
 std::vector<cv::Mat> ImageProcessor::loadImages(const std::vector<std::string>& paths,
