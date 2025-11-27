@@ -83,7 +83,7 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     // II. ROI, Seed, and Matching REF to Trial at frame 1
     cv::Mat refmask_REF, refmask_trial;
     SeedPoint ref_seed_point, initial_seed_point_set1;
-    std::cout << "Initializing ROI and seed..." << std::endl;
+    std::cout << "Initializing ROI, seed, and matching REF to Trial..." << std::endl;
     if (!initializeROIAndSeed(cam_first_satur, refmask_REF, refmask_trial,
                              ref_seed_point, initial_seed_point_set1)) {
         std::cerr << "Failed to initialize ROI and seed" << std::endl;

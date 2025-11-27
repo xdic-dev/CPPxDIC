@@ -20,6 +20,54 @@ bool MatWriter::writeMatchingFile(const std::string& filename,
                                  const ncorr::DIC_analysis_output& dic_output,
                                  const std::map<std::string, double>& dispinfo) {
     
+    // Format dispinfo and displacements
+    matvar_t* dispinfo_var = formatDispInfo(dispinfo);
+    matvar_t* displacements_var = formatDisplacements(dic_output);
+    
+    // Write using common function
+    bool success = writeDicNcorrFile(filename, ref_img, cur_img, ref_roi, cur_roi,
+                                     dispinfo_var, displacements_var, dic_output);
+    
+    if (success) {
+        std::cout << "Wrote MATCHING file: " << filename << std::endl;
+    }
+    
+    return success;
+}
+
+bool MatWriter::writeMatchingFile(const std::string& filename,
+                                 const cv::Mat& ref_img,
+                                 const cv::Mat& cur_img,
+                                 const cv::Mat& ref_roi,
+                                 const cv::Mat& cur_roi,
+                                 const ncorr::DIC_analysis_output& dic_lagrangian,
+                                 const ncorr::DIC_analysis_output& dic_eulerian,
+                                 const std::map<std::string, double>& dispinfo) {
+    
+    // Format dispinfo and displacements with both perspectives
+    matvar_t* dispinfo_var = formatDispInfo(dispinfo);
+    matvar_t* displacements_var = formatDisplacements(dic_lagrangian, dic_eulerian);
+    
+    // Write using common function (use lagrangian for ROI update)
+    bool success = writeDicNcorrFile(filename, ref_img, cur_img, ref_roi, cur_roi,
+                                     dispinfo_var, displacements_var, dic_lagrangian);
+    
+    if (success) {
+        std::cout << "Wrote MATCHING file with both perspectives: " << filename << std::endl;
+    }
+    
+    return success;
+}
+
+bool MatWriter::writeDicNcorrFile(const std::string& filename,
+                                 const cv::Mat& ref_img,
+                                 const cv::Mat& cur_img,
+                                 const cv::Mat& ref_roi,
+                                 const cv::Mat& cur_roi,
+                                 matvar_t* dispinfo_var,
+                                 matvar_t* displacements_var,
+                                 const ncorr::DIC_analysis_output& dic_output) {
+    
     // Create MAT file (v7.3 HDF5 format for xDIC compatibility)
     mat_t* matfp = createMatFileHDF5(filename);
     if (!matfp) {
@@ -27,7 +75,7 @@ bool MatWriter::writeMatchingFile(const std::string& filename,
         return false;
     }
     
-    // Create reference_save struct
+    // ===== CREATE REFERENCE_SAVE STRUCT =====
     std::vector<std::string> ref_fields = {"gs", "name", "path", "roi", "type"};
     matvar_t* reference_save = createStructVariable("reference_save", ref_fields);
     
@@ -44,7 +92,7 @@ bool MatWriter::writeMatchingFile(const std::string& filename,
     addFieldToStruct(ref_roi_struct, "mask", ref_roi_mask, 0);
     addFieldToStruct(reference_save, "roi", ref_roi_struct, 0);
     
-    // Update current ROI with displacement field before saving
+    // ===== UPDATE CURRENT ROI WITH DISPLACEMENT FIELD =====
     cv::Mat cur_roi_updated = cur_roi.clone();  // Default to original
     if (!dic_output.disps.empty()) {
         try {
@@ -70,134 +118,55 @@ bool MatWriter::writeMatchingFile(const std::string& filename,
         }
     }
     
-    // Create current_save struct with updated ROI
+    // ===== CREATE CURRENT_SAVE STRUCT =====
     matvar_t* current_save = createStructVariable("current_save", ref_fields);
+    
+    // Add cur image
     writeMatVariable(matfp, "cur_gs_temp", cur_img);
     matvar_t* cur_gs = Mat_VarRead(matfp, "cur_gs_temp");
     addFieldToStruct(current_save, "gs", cur_gs, 0);
     
+    // Add cur ROI (updated)
     matvar_t* cur_roi_struct = createStructVariable("roi", roi_fields);
     writeMatVariable(matfp, "cur_roi_temp", cur_roi_updated);  // Write UPDATED ROI
     matvar_t* cur_roi_mask = Mat_VarRead(matfp, "cur_roi_temp");
     addFieldToStruct(cur_roi_struct, "mask", cur_roi_mask, 0);
     addFieldToStruct(current_save, "roi", cur_roi_struct, 0);
     
-    // Create data_dic_save struct
-    std::vector<std::string> data_fields = {"dispinfo", "displacements"};
+    // ===== CREATE DATA_DIC_SAVE STRUCT =====
+    std::vector<std::string> data_fields = {"dispinfo", "displacements", "straininfo", "strains"};
     matvar_t* data_dic_save = createStructVariable("data_dic_save", data_fields);
     
-    matvar_t* dispinfo_var = formatDispInfo(dispinfo);
-    matvar_t* displacements_var = formatDisplacements(dic_output);
-    
+    // Add dispinfo and displacements (passed as arguments)
     addFieldToStruct(data_dic_save, "dispinfo", dispinfo_var, 0);
     addFieldToStruct(data_dic_save, "displacements", displacements_var, 0);
     
-    // Write all structs to file
+    // Add empty straininfo struct (placeholder for compatibility)
+    std::vector<std::string> straininfo_fields = {"radius", "subsettrunc"};
+    matvar_t* straininfo_var = createStructVariable("straininfo", straininfo_fields);
+    addFieldToStruct(data_dic_save, "straininfo", straininfo_var, 0);
+    
+    // Add empty strains struct (placeholder for compatibility)
+    std::vector<std::string> strains_fields = {
+        "plot_exx_ref_formatted", "plot_exy_ref_formatted", "plot_eyy_ref_formatted",
+        "roi_ref_formatted", "plot_exx_cur_formatted", "plot_exy_cur_formatted",
+        "plot_eyy_cur_formatted", "roi_cur_formatted"
+    };
+    matvar_t* strains_var = createStructVariable("strains", strains_fields);
+    addFieldToStruct(data_dic_save, "strains", strains_var, 0);
+    
+    // ===== WRITE ALL STRUCTS TO FILE =====
     Mat_VarWrite(matfp, reference_save, MAT_COMPRESSION_NONE);
     Mat_VarWrite(matfp, current_save, MAT_COMPRESSION_NONE);
     Mat_VarWrite(matfp, data_dic_save, MAT_COMPRESSION_NONE);
     
+    // Clean up
     Mat_VarFree(reference_save);
     Mat_VarFree(current_save);
     Mat_VarFree(data_dic_save);
     
     Mat_Close(matfp);
     
-    std::cout << "Wrote MATCHING file: " << filename << std::endl;
-    return true;
-}
-
-bool MatWriter::writeMatchingFile(const std::string& filename,
-                                 const cv::Mat& ref_img,
-                                 const cv::Mat& cur_img,
-                                 const cv::Mat& ref_roi,
-                                 const cv::Mat& cur_roi,
-                                 const ncorr::DIC_analysis_output& dic_lagrangian,
-                                 const ncorr::DIC_analysis_output& dic_eulerian,
-                                 const std::map<std::string, double>& dispinfo) {
-    
-    // Create MAT file (v7.3 HDF5 format for xDIC compatibility)
-    mat_t* matfp = createMatFileHDF5(filename);
-    if (!matfp) {
-        std::cerr << "Failed to create MAT file: " << filename << std::endl;
-        return false;
-    }
-    
-    // Create reference_save struct
-    std::vector<std::string> ref_fields = {"gs", "name", "path", "roi", "type"};
-    matvar_t* reference_save = createStructVariable("reference_save", ref_fields);
-    
-    // Add ref image
-    writeMatVariable(matfp, "ref_gs_temp", ref_img);
-    matvar_t* ref_gs = Mat_VarRead(matfp, "ref_gs_temp");
-    addFieldToStruct(reference_save, "gs", ref_gs, 0);
-    
-    // Add ref ROI
-    std::vector<std::string> roi_fields = {"mask"};
-    matvar_t* ref_roi_struct = createStructVariable("roi", roi_fields);
-    writeMatVariable(matfp, "ref_roi_temp", ref_roi);
-    matvar_t* ref_roi_mask = Mat_VarRead(matfp, "ref_roi_temp");
-    addFieldToStruct(ref_roi_struct, "mask", ref_roi_mask, 0);
-    addFieldToStruct(reference_save, "roi", ref_roi_struct, 0);
-    
-    // Update current ROI with displacement field before saving
-    cv::Mat cur_roi_updated = cur_roi.clone();  // Default to original
-    if (!dic_lagrangian.disps.empty()) {
-        try {
-            // Convert cv::Mat to ncorr::ROI2D
-            ncorr::ROI2D roi_current = convertMatToROI2D(cur_roi);
-            
-            // Apply ROI update using first displacement field
-            ncorr::ROI2D roi_updated = ncorr::update(
-                roi_current, 
-                dic_lagrangian.disps[0],
-                ncorr::INTERP::CUBIC_KEYS
-            );
-            
-            // Convert back to cv::Mat
-            cur_roi_updated = convertROI2DToMat(roi_updated);
-            
-            std::cout << "  Applied ROI update with displacement field" << std::endl;
-        } catch (const std::exception& e) {
-            std::cerr << "  Warning: ROI update failed: " << e.what() << std::endl;
-            std::cerr << "  Using original ROI instead" << std::endl;
-        }
-    }
-    
-    // Create current_save struct with updated ROI
-    matvar_t* current_save = createStructVariable("current_save", ref_fields);
-    writeMatVariable(matfp, "cur_gs_temp", cur_img);
-    matvar_t* cur_gs = Mat_VarRead(matfp, "cur_gs_temp");
-    addFieldToStruct(current_save, "gs", cur_gs, 0);
-    
-    matvar_t* cur_roi_struct = createStructVariable("roi", roi_fields);
-    writeMatVariable(matfp, "cur_roi_temp", cur_roi_updated);
-    matvar_t* cur_roi_mask = Mat_VarRead(matfp, "cur_roi_temp");
-    addFieldToStruct(cur_roi_struct, "mask", cur_roi_mask, 0);
-    addFieldToStruct(current_save, "roi", cur_roi_struct, 0);
-    
-    // Create data_dic_save struct with BOTH perspectives
-    std::vector<std::string> data_fields = {"dispinfo", "displacements"};
-    matvar_t* data_dic_save = createStructVariable("data_dic_save", data_fields);
-    
-    matvar_t* dispinfo_var = formatDispInfo(dispinfo);
-    matvar_t* displacements_var = formatDisplacements(dic_lagrangian, dic_eulerian);
-    
-    addFieldToStruct(data_dic_save, "dispinfo", dispinfo_var, 0);
-    addFieldToStruct(data_dic_save, "displacements", displacements_var, 0);
-    
-    // Write all structs to file
-    Mat_VarWrite(matfp, reference_save, MAT_COMPRESSION_NONE);
-    Mat_VarWrite(matfp, current_save, MAT_COMPRESSION_NONE);
-    Mat_VarWrite(matfp, data_dic_save, MAT_COMPRESSION_NONE);
-    
-    Mat_VarFree(reference_save);
-    Mat_VarFree(current_save);
-    Mat_VarFree(data_dic_save);
-    
-    Mat_Close(matfp);
-    
-    std::cout << "Wrote MATCHING file with both perspectives: " << filename << std::endl;
     return true;
 }
 
@@ -566,17 +535,18 @@ void MatWriter::convertDispToArrays(const ncorr::Disp2D& disp,
 }
 
 matvar_t* MatWriter::formatDispInfo(const std::map<std::string, double>& params) {
-    // Create dispinfo struct
+    // Create dispinfo struct with all required fields
     std::vector<std::string> field_names = {
-        "cutoff_corrcoef", "cutoff_diffnorm", "cutoff_iteration",
-        "radius", "spacing", "subsettrunc", "total_threads", "type", "units"
+        "cutoff_corrcoef", "cutoff_diffnorm", "cutoff_iteration", "imgcorr",
+        "lenscoef", "pixtounits", "radius", "spacing", "subsettrunc", 
+        "total_threads", "type", "units"
     };
     
     matvar_t* dispinfo = createStructVariable("dispinfo", field_names);
     if (!dispinfo) return nullptr;
     
-    // Helper to write scalar field
-    auto writeField = [&](const std::string& field_name, double value) {
+    // Helper to write scalar field (1x1)
+    auto writeScalarField = [&](const std::string& field_name, double value) {
         size_t dims[2] = {1, 1};
         double* data = new double[1];
         data[0] = value;
@@ -587,11 +557,39 @@ matvar_t* MatWriter::formatDispInfo(const std::map<std::string, double>& params)
         }
     };
     
-    // Populate numeric fields from params map
+    // Populate numeric fields from params map (all 1x1 except cutoff_corrcoef)
     for (const auto& p : params) {
-        if (p.first == "type" || p.first == "units") continue;  // Skip string fields
-        writeField(p.first, p.second);
+        if (p.first == "type" || p.first == "units" || p.first == "cutoff_corrcoef") {
+            continue;  // Handle these separately
+        }
+        writeScalarField(p.first, p.second);
     }
+    
+    // Special handling for cutoff_corrcoef (1x2 array)
+    size_t corrcoef_dims[2] = {1, 2};
+    double* corrcoef_data = new double[2];
+    // Use value from params if available, otherwise default
+    auto it = params.find("cutoff_corrcoef");
+    corrcoef_data[0] = (it != params.end()) ? it->second : 0.0;
+    corrcoef_data[1] = corrcoef_data[0];  // Both values same by default
+    matvar_t* corrcoef_var = Mat_VarCreate("cutoff_corrcoef", MAT_C_DOUBLE, MAT_T_DOUBLE, 
+                                          2, corrcoef_dims, corrcoef_data, MAT_F_DONT_COPY_DATA);
+    Mat_VarSetStructFieldByName(dispinfo, "cutoff_corrcoef", 0, corrcoef_var);
+    
+    // Add empty imgcorr struct
+    std::vector<std::string> imgcorr_fields = {"idx_ref", "idx_cur"};
+    matvar_t* imgcorr_var = createStructVariable("imgcorr", imgcorr_fields);
+    Mat_VarSetStructFieldByName(dispinfo, "imgcorr", 0, imgcorr_var);
+    
+    // Add lenscoef (default 0.0 if not in params)
+    auto lenscoef_it = params.find("lenscoef");
+    double lenscoef_val = (lenscoef_it != params.end()) ? lenscoef_it->second : 0.0;
+    writeScalarField("lenscoef", lenscoef_val);
+    
+    // Add pixtounits (default 1.0 if not in params)
+    auto pixtounits_it = params.find("pixtounits");
+    double pixtounits_val = (pixtounits_it != params.end()) ? pixtounits_it->second : 1.0;
+    writeScalarField("pixtounits", pixtounits_val);
     
     // Write string fields
     std::string type_str = "Regular";

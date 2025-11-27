@@ -324,6 +324,29 @@ private:
      * @return OpenCV binary mask (CV_8U)
      */
     static cv::Mat convertROI2DToMat(const ncorr::ROI2D& roi);
+    
+    /**
+     * Write DIC Ncorr file (common logic for MATCHING files)
+     * Creates reference_save, current_save, and data_dic_save structures
+     * 
+     * @param filename Output MAT filename
+     * @param ref_img Reference image
+     * @param cur_img Current image
+     * @param ref_roi Reference ROI
+     * @param cur_roi Current ROI (will be updated with displacement if available)
+     * @param dispinfo_var Formatted dispinfo struct variable
+     * @param displacements_var Formatted displacements struct variable
+     * @param dic_output DIC output (used for ROI update)
+     * @return Success status
+     */
+    static bool writeDicNcorrFile(const std::string& filename,
+                                 const cv::Mat& ref_img,
+                                 const cv::Mat& cur_img,
+                                 const cv::Mat& ref_roi,
+                                 const cv::Mat& cur_roi,
+                                 matvar_t* dispinfo_var,
+                                 matvar_t* displacements_var,
+                                 const ncorr::DIC_analysis_output& dic_output);
 };
 
 } // namespace cppxdic
