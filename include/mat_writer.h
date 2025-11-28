@@ -124,6 +124,8 @@ public:
      * @param cur_rois Vector of current ROIs (one per frame)
      * @param dic_outputs Vector of DIC outputs (one per frame)
      * @param dispinfo DIC parameters
+     * @param type_str Type string for all frames (default: "load")
+     * @param ref_name Reference image name (default: "reference")
      * @return Success status
      */
     static bool writeMultiFrameNcorrFile(const std::string& filename,
@@ -132,7 +134,9 @@ public:
                                         const cv::Mat& ref_roi,
                                         const std::vector<cv::Mat>& cur_rois,
                                         const std::vector<ncorr::DIC_analysis_output>& dic_outputs,
-                                        const std::map<std::string, double>& dispinfo);
+                                        const std::map<std::string, double>& dispinfo,
+                                        const std::string& type_str = "load",
+                                        const std::string& ref_name = "reference");
     
     /**
      * Write ncorr1.mat / ncorr2.mat / ncorr12.mat files

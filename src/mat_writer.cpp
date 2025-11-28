@@ -179,7 +179,9 @@ bool MatWriter::writeMultiFrameNcorrFile(const std::string& filename,
                                         const cv::Mat& ref_roi,
                                         const std::vector<cv::Mat>& cur_rois,
                                         const std::vector<ncorr::DIC_analysis_output>& dic_outputs,
-                                        const std::map<std::string, double>& dispinfo) {
+                                        const std::map<std::string, double>& dispinfo,
+                                        const std::string& type_str,
+                                        const std::string& ref_name) {
     
     if (cur_imgs.empty()) {
         std::cerr << "Error: No current images provided" << std::endl;
@@ -264,17 +266,70 @@ bool MatWriter::writeMultiFrameNcorrFile(const std::string& filename,
     
     addFieldToStruct(current_save, "roi", roi_cell, 0);
     
-    // TODO: Add name, path, type cell arrays (placeholders for now)
+    // Create name cell array (current_1, current_2, ...)
+    matvar_t* name_cell = Mat_VarCreate("name", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
+    for (size_t i = 0; i < n_frames; ++i) {
+        std::string name = "current_" + std::to_string(i + 1);  // 1-indexed
+        std::vector<size_t> str_dims = {1, name.length()};
+        matvar_t* name_var = Mat_VarCreate(nullptr, MAT_C_CHAR, MAT_T_UINT8, 2, str_dims.data(), 
+                                          (void*)name.c_str(), 0);
+        Mat_VarSetCell(name_cell, i, name_var);
+    }
+    addFieldToStruct(current_save, "name", name_cell, 0);
+    
+    // Create path cell array (empty for all frames)
+    matvar_t* path_cell = Mat_VarCreate("path", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
+    for (size_t i = 0; i < n_frames; ++i) {
+        Mat_VarSetCell(path_cell, i, nullptr);  // Empty path
+    }
+    addFieldToStruct(current_save, "path", path_cell, 0);
+    
+    // Create type cell array ("load" for all frames)
+    matvar_t* type_cell = Mat_VarCreate("type", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
+    for (size_t i = 0; i < n_frames; ++i) {
+        std::string type = "load";
+        std::vector<size_t> str_dims = {1, type.length()};
+        matvar_t* type_var = Mat_VarCreate(nullptr, MAT_C_CHAR, MAT_T_UINT8, 2, str_dims.data(), 
+                                          (void*)type.c_str(), 0);
+        Mat_VarSetCell(type_cell, i, type_var);
+    }
+    addFieldToStruct(current_save, "type", type_cell, 0);
+    
+    // Add name and type to reference_save
+    std::string ref_name = "reference";
+    std::vector<size_t> ref_name_dims = {1, ref_name.length()};
+    matvar_t* ref_name_var = Mat_VarCreate("name", MAT_C_CHAR, MAT_T_UINT8, 2, ref_name_dims.data(), 
+                                          (void*)ref_name.c_str(), 0);
+    addFieldToStruct(reference_save, "name", ref_name_var, 0);
+    
+    std::string ref_type = "load";
+    std::vector<size_t> ref_type_dims = {1, ref_type.length()};
+    matvar_t* ref_type_var = Mat_VarCreate("type", MAT_C_CHAR, MAT_T_UINT8, 2, ref_type_dims.data(), 
+                                          (void*)ref_type.c_str(), 0);
+    addFieldToStruct(reference_save, "type", ref_type_var, 0);
+    
+    // Add empty path to reference_save
+    addFieldToStruct(reference_save, "path", nullptr, 0);
     
     // ===== CREATE DATA_DIC_SAVE STRUCT =====
     // Format dispinfo
     matvar_t* dispinfo_var = formatDispInfo(dispinfo);
     
     // Format displacements (multi-frame)
-    // TODO: Implement multi-frame displacement formatting
+    matvar_t* displacements_var = nullptr;
+    if (!dic_outputs.empty() && dic_outputs.size() == n_frames) {
+        // Use the first DIC output to format displacements
+        // In multi-frame tracking, all frames typically use the same reference
+        displacements_var = formatDisplacements(dic_outputs[0]);
+    }
+    
     std::vector<std::string> data_fields = {"dispinfo", "displacements", "straininfo", "strains"};
     matvar_t* data_dic_save = createStructVariable("data_dic_save", data_fields);
     addFieldToStruct(data_dic_save, "dispinfo", dispinfo_var, 0);
+    
+    if (displacements_var) {
+        addFieldToStruct(data_dic_save, "displacements", displacements_var, 0);
+    }
     
     // Add empty straininfo and strains (placeholders)
     std::vector<std::string> straininfo_fields = {"radius", "subsettrunc"};
