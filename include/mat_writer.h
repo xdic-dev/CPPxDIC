@@ -114,6 +114,27 @@ public:
                                   const std::vector<int>& frame_indices);
     
     /**
+     * Write multi-frame ncorr files (ncorr1.mat, ncorr2.mat, etc.)
+     * For tracking DIC with multiple current frames
+     * 
+     * @param filename Output MAT filename
+     * @param ref_img Reference image
+     * @param cur_imgs Vector of current images (one per frame)
+     * @param ref_roi Reference ROI
+     * @param cur_rois Vector of current ROIs (one per frame)
+     * @param dic_outputs Vector of DIC outputs (one per frame)
+     * @param dispinfo DIC parameters
+     * @return Success status
+     */
+    static bool writeMultiFrameNcorrFile(const std::string& filename,
+                                        const cv::Mat& ref_img,
+                                        const std::vector<cv::Mat>& cur_imgs,
+                                        const cv::Mat& ref_roi,
+                                        const std::vector<cv::Mat>& cur_rois,
+                                        const std::vector<ncorr::DIC_analysis_output>& dic_outputs,
+                                        const std::map<std::string, double>& dispinfo);
+    
+    /**
      * Write ncorr1.mat / ncorr2.mat / ncorr12.mat files
      * Full DIC results with dispinfo and displacements
      * Structure matches xDIC output format with:

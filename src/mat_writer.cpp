@@ -173,6 +173,138 @@ bool MatWriter::writeDicNcorrFile(const std::string& filename,
     return true;
 }
 
+bool MatWriter::writeMultiFrameNcorrFile(const std::string& filename,
+                                        const cv::Mat& ref_img,
+                                        const std::vector<cv::Mat>& cur_imgs,
+                                        const cv::Mat& ref_roi,
+                                        const std::vector<cv::Mat>& cur_rois,
+                                        const std::vector<ncorr::DIC_analysis_output>& dic_outputs,
+                                        const std::map<std::string, double>& dispinfo) {
+    
+    if (cur_imgs.empty()) {
+        std::cerr << "Error: No current images provided" << std::endl;
+        return false;
+    }
+    
+    size_t n_frames = cur_imgs.size();
+    std::cout << "Writing multi-frame ncorr file with " << n_frames << " frames..." << std::endl;
+    
+    // Create MAT file (v7.3 HDF5 format)
+    mat_t* matfp = createMatFileHDF5(filename);
+    if (!matfp) {
+        std::cerr << "Failed to create MAT file: " << filename << std::endl;
+        return false;
+    }
+    
+    // ===== CREATE REFERENCE_SAVE STRUCT (single image) =====
+    std::vector<std::string> ref_fields = {"gs", "name", "path", "roi", "type"};
+    matvar_t* reference_save = createStructVariable("reference_save", ref_fields);
+    
+    // Add ref image (single 2D array)
+    writeMatVariable(matfp, "ref_gs_temp", ref_img);
+    matvar_t* ref_gs = Mat_VarRead(matfp, "ref_gs_temp");
+    addFieldToStruct(reference_save, "gs", ref_gs, 0);
+    
+    // Add ref ROI
+    std::vector<std::string> roi_fields = {"mask"};
+    matvar_t* ref_roi_struct = createStructVariable("roi", roi_fields);
+    writeMatVariable(matfp, "ref_roi_temp", ref_roi);
+    matvar_t* ref_roi_mask = Mat_VarRead(matfp, "ref_roi_temp");
+    addFieldToStruct(ref_roi_struct, "mask", ref_roi_mask, 0);
+    addFieldToStruct(reference_save, "roi", ref_roi_struct, 0);
+    
+    // ===== CREATE CURRENT_SAVE STRUCT (cell arrays for multi-frame) =====
+    matvar_t* current_save = createStructVariable("current_save", ref_fields);
+    
+    // Create gs cell array (n_frames x 1)
+    std::vector<size_t> cell_dims = {n_frames, 1};
+    matvar_t* gs_cell = Mat_VarCreate("gs", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
+    
+    for (size_t i = 0; i < n_frames; ++i) {
+        // Write each image temporarily and read it back
+        std::string temp_name = "cur_gs_temp_" + std::to_string(i);
+        writeMatVariable(matfp, temp_name, cur_imgs[i]);
+        matvar_t* img_var = Mat_VarRead(matfp, temp_name.c_str());
+        Mat_VarSetCell(gs_cell, i, img_var);
+    }
+    
+    addFieldToStruct(current_save, "gs", gs_cell, 0);
+    
+    // Create roi cell array (n_frames x 1)
+    matvar_t* roi_cell = Mat_VarCreate("roi", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
+    
+    for (size_t i = 0; i < n_frames; ++i) {
+        // Use provided ROI or clone from reference if not enough provided
+        cv::Mat cur_roi_to_use = (i < cur_rois.size()) ? cur_rois[i] : ref_roi.clone();
+        
+        // Update ROI with displacement if available
+        if (i < dic_outputs.size() && !dic_outputs[i].disps.empty()) {
+            try {
+                ncorr::ROI2D roi_current = convertMatToROI2D(cur_roi_to_use);
+                ncorr::ROI2D roi_updated = ncorr::update(
+                    roi_current, 
+                    dic_outputs[i].disps[0],
+                    ncorr::INTERP::CUBIC_KEYS
+                );
+                cur_roi_to_use = convertROI2DToMat(roi_updated);
+            } catch (const std::exception& e) {
+                std::cerr << "  Warning: ROI update failed for frame " << i << ": " << e.what() << std::endl;
+            }
+        }
+        
+        // Create ROI struct for this frame
+        matvar_t* frame_roi_struct = createStructVariable("roi", roi_fields);
+        std::string temp_roi_name = "cur_roi_temp_" + std::to_string(i);
+        writeMatVariable(matfp, temp_roi_name, cur_roi_to_use);
+        matvar_t* roi_mask_var = Mat_VarRead(matfp, temp_roi_name.c_str());
+        addFieldToStruct(frame_roi_struct, "mask", roi_mask_var, 0);
+        
+        Mat_VarSetCell(roi_cell, i, frame_roi_struct);
+    }
+    
+    addFieldToStruct(current_save, "roi", roi_cell, 0);
+    
+    // TODO: Add name, path, type cell arrays (placeholders for now)
+    
+    // ===== CREATE DATA_DIC_SAVE STRUCT =====
+    // Format dispinfo
+    matvar_t* dispinfo_var = formatDispInfo(dispinfo);
+    
+    // Format displacements (multi-frame)
+    // TODO: Implement multi-frame displacement formatting
+    std::vector<std::string> data_fields = {"dispinfo", "displacements", "straininfo", "strains"};
+    matvar_t* data_dic_save = createStructVariable("data_dic_save", data_fields);
+    addFieldToStruct(data_dic_save, "dispinfo", dispinfo_var, 0);
+    
+    // Add empty straininfo and strains (placeholders)
+    std::vector<std::string> straininfo_fields = {"radius", "subsettrunc"};
+    matvar_t* straininfo_var = createStructVariable("straininfo", straininfo_fields);
+    addFieldToStruct(data_dic_save, "straininfo", straininfo_var, 0);
+    
+    std::vector<std::string> strains_fields = {
+        "plot_exx_ref_formatted", "plot_exy_ref_formatted", "plot_eyy_ref_formatted",
+        "roi_ref_formatted", "plot_exx_cur_formatted", "plot_exy_cur_formatted",
+        "plot_eyy_cur_formatted", "roi_cur_formatted"
+    };
+    matvar_t* strains_var = createStructVariable("strains", strains_fields);
+    addFieldToStruct(data_dic_save, "strains", strains_var, 0);
+    
+    // ===== WRITE ALL STRUCTS TO FILE =====
+    Mat_VarWrite(matfp, reference_save, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, current_save, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, data_dic_save, MAT_COMPRESSION_NONE);
+    
+    // Clean up
+    Mat_VarFree(reference_save);
+    Mat_VarFree(current_save);
+    Mat_VarFree(data_dic_save);
+    
+    Mat_Close(matfp);
+    
+    std::cout << "Successfully wrote multi-frame ncorr file: " << filename << std::endl;
+    return true;
+}
+
 bool MatWriter::writeROIMaskFile(const std::string& filename,
                                 const cv::Mat& mask) {
     mat_t* matfp = createMatFileV5(filename);

@@ -229,10 +229,56 @@ if(HDF5_FOUND)
     target_link_libraries(test_mat_comparator ${HDF5_C_LIBRARIES})
 endif()
 
+# Test 4: test_mat_writers - Unit tests for MAT file writers
+add_executable(test_mat_writers
+    src/test_mat_writers.cpp
+    ${CMAKE_SOURCE_DIR}/../src/dic_structures.cpp
+    ${CMAKE_SOURCE_DIR}/../src/mat_writer.cpp
+)
+
+# Link matio library
+target_link_libraries(test_mat_writers ${MATIO_LIBRARY})
+
+# Link HDF5 library
+if(HDF5_FOUND)
+    target_include_directories(test_mat_writers PRIVATE ${HDF5_INCLUDE_DIRS})
+    target_link_libraries(test_mat_writers ${HDF5_C_LIBRARIES})
+endif()
+
+# Link Eigen3
+if(TARGET Eigen3::Eigen)
+    target_link_libraries(test_mat_writers Eigen3::Eigen)
+endif()
+
+# Link ncorr library
+if(NCORR_LIBRARY)
+    target_link_libraries(test_mat_writers ${NCORR_LIBRARY})
+endif()
+
+# Link OpenCV
+target_link_libraries(test_mat_writers ${OpenCV_LIBS})
+
+# Link other dependencies (needed by ncorr)
+if(FFTW_LIBRARY)
+    target_link_libraries(test_mat_writers ${FFTW_LIBRARY})
+endif()
+target_link_libraries(test_mat_writers ${SUITESPARSE_LIBRARY1})
+target_link_libraries(test_mat_writers ${SUITESPARSE_LIBRARY2})
+target_link_libraries(test_mat_writers ${SUITESPARSE_LIBRARY3})
+target_link_libraries(test_mat_writers ${SUITESPARSE_LIBRARY4})
+target_link_libraries(test_mat_writers ${SUITESPARSE_LIBRARY5})
+target_link_libraries(test_mat_writers ${LAPACK_LIBRARY})
+target_link_libraries(test_mat_writers ${BLAS_LIBRARY})
+target_link_libraries(test_mat_writers ${CMAKE_THREAD_LIBS_INIT})
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(test_mat_writers OpenMP::OpenMP_CXX)
+endif()
+
 # Compiler flags
 target_compile_options(test_ncorr_bin PRIVATE -Wall -Wextra -O2)
 target_compile_options(test_ncorr_to_mat PRIVATE -Wall -Wextra -O2)
 target_compile_options(test_mat_comparator PRIVATE -Wall -Wextra -O2)
+target_compile_options(test_mat_writers PRIVATE -Wall -Wextra -O2)
 
 # Print configuration
 message(STATUS "CPPxDIC Tests Configuration:")
