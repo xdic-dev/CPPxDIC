@@ -907,36 +907,132 @@ bool MatWriter::writeDIC2DPairResults(const std::string& filename,
         writeMatVariable(matfp, "ROImask", results.ROImask);
     }
     
-    // Write Points as cell array
-    size_t n_frames = results.Points.size();
-    std::vector<size_t> cell_dims = {1, n_frames};
-    matvar_t* points_cell = Mat_VarCreate("Points", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
+    // Write ncorrInfo structure
+    std::vector<std::string> ncorr_fields = {
+        "cutoff_corrcoef", "cutoff_diffnorm", "cutoff_iteration",
+        "imgcorr", "lenscoef", "pixtounits", "radius", "spacing",
+        "subsettrunc", "total_threads", "type", "units"
+    };
+    matvar_t* ncorr_struct = createStructVariable("ncorrInfo", ncorr_fields);
     
-    for (size_t i = 0; i < n_frames; ++i) {
-        const auto& pts = results.Points[i];
-        std::vector<std::string> pt_fields = {"x", "y"};
-        matvar_t* pt_struct = createStructVariable("point", pt_fields);
-        
-        // Write x and y arrays
-        std::vector<size_t> dims = {pts.x.size(), 1};
-        matvar_t* x_var = Mat_VarCreate("x", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
-                                        (void*)pts.x.data(), 0);
-        matvar_t* y_var = Mat_VarCreate("y", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
-                                        (void*)pts.y.data(), 0);
-        
-        Mat_VarSetCell(points_cell, i, pt_struct);
-        Mat_VarFree(x_var);
-        Mat_VarFree(y_var);
+    // Add cutoff_corrcoef array
+    if (!results.ncorrInfo.cutoff_corrcoef.empty()) {
+        std::vector<size_t> dims = {results.ncorrInfo.cutoff_corrcoef.size(), 1};
+        matvar_t* cutoff_var = Mat_VarCreate("cutoff_corrcoef", MAT_C_DOUBLE, MAT_T_DOUBLE,
+                                            2, dims.data(), (void*)results.ncorrInfo.cutoff_corrcoef.data(), 0);
+        Mat_VarSetStructFieldByName(ncorr_struct, "cutoff_corrcoef", 0, cutoff_var);
     }
     
-    Mat_VarWrite(matfp, points_cell, MAT_COMPRESSION_NONE);
-    Mat_VarFree(points_cell);
+    // Add scalar fields
+    matvar_t* diffnorm_var = Mat_VarCreate("cutoff_diffnorm", MAT_C_DOUBLE, MAT_T_DOUBLE,
+                                          2, (size_t[]){1,1}, &results.ncorrInfo.cutoff_diffnorm, 0);
+    Mat_VarSetStructFieldByName(ncorr_struct, "cutoff_diffnorm", 0, diffnorm_var);
     
-    // Write CorCoeffVec
+    matvar_t* iteration_var = Mat_VarCreate("cutoff_iteration", MAT_C_INT32, MAT_T_INT32,
+                                           2, (size_t[]){1,1}, &results.ncorrInfo.cutoff_iteration, 0);
+    Mat_VarSetStructFieldByName(ncorr_struct, "cutoff_iteration", 0, iteration_var);
+    
+    matvar_t* lenscoef_var = Mat_VarCreate("lenscoef", MAT_C_INT32, MAT_T_INT32,
+                                          2, (size_t[]){1,1}, &results.ncorrInfo.lenscoef, 0);
+    Mat_VarSetStructFieldByName(ncorr_struct, "lenscoef", 0, lenscoef_var);
+    
+    matvar_t* pixtounits_var = Mat_VarCreate("pixtounits", MAT_C_DOUBLE, MAT_T_DOUBLE,
+                                            2, (size_t[]){1,1}, &results.ncorrInfo.pixtounits, 0);
+    Mat_VarSetStructFieldByName(ncorr_struct, "pixtounits", 0, pixtounits_var);
+    
+    matvar_t* radius_var = Mat_VarCreate("radius", MAT_C_INT32, MAT_T_INT32,
+                                        2, (size_t[]){1,1}, &results.ncorrInfo.radius, 0);
+    Mat_VarSetStructFieldByName(ncorr_struct, "radius", 0, radius_var);
+    
+    matvar_t* spacing_var = Mat_VarCreate("spacing", MAT_C_INT32, MAT_T_INT32,
+                                         2, (size_t[]){1,1}, &results.ncorrInfo.spacing, 0);
+    Mat_VarSetStructFieldByName(ncorr_struct, "spacing", 0, spacing_var);
+    
+    int subsettrunc_int = results.ncorrInfo.subsettrunc ? 1 : 0;
+    matvar_t* subsettrunc_var = Mat_VarCreate("subsettrunc", MAT_C_INT32, MAT_T_INT32,
+                                             2, (size_t[]){1,1}, &subsettrunc_int, 0);
+    Mat_VarSetStructFieldByName(ncorr_struct, "subsettrunc", 0, subsettrunc_var);
+    
+    matvar_t* threads_var = Mat_VarCreate("total_threads", MAT_C_INT32, MAT_T_INT32,
+                                         2, (size_t[]){1,1}, &results.ncorrInfo.total_threads, 0);
+    Mat_VarSetStructFieldByName(ncorr_struct, "total_threads", 0, threads_var);
+    
+    // Add string fields
+    if (!results.ncorrInfo.type.empty()) {
+        std::vector<size_t> dims = {1, results.ncorrInfo.type.length()};
+        matvar_t* type_var = Mat_VarCreate("type", MAT_C_CHAR, MAT_T_UINT8,
+                                          2, dims.data(), (void*)results.ncorrInfo.type.c_str(), 0);
+        Mat_VarSetStructFieldByName(ncorr_struct, "type", 0, type_var);
+    }
+    
+    if (!results.ncorrInfo.units.empty()) {
+        std::vector<size_t> dims = {1, results.ncorrInfo.units.length()};
+        matvar_t* units_var = Mat_VarCreate("units", MAT_C_CHAR, MAT_T_UINT8,
+                                           2, dims.data(), (void*)results.ncorrInfo.units.c_str(), 0);
+        Mat_VarSetStructFieldByName(ncorr_struct, "units", 0, units_var);
+    }
+    
+    // Add imgcorr cell array
+    if (!results.ncorrInfo.imgcorr.empty()) {
+        std::vector<size_t> cell_dims = {results.ncorrInfo.imgcorr.size(), 1};
+        matvar_t* imgcorr_cell = Mat_VarCreate("imgcorr", MAT_C_CELL, MAT_T_CELL,
+                                              2, cell_dims.data(), nullptr, 0);
+        for (size_t i = 0; i < results.ncorrInfo.imgcorr.size(); ++i) {
+            const std::string& img = results.ncorrInfo.imgcorr[i];
+            if (!img.empty()) {
+                std::vector<size_t> dims = {1, img.length()};
+                matvar_t* str_var = Mat_VarCreate(nullptr, MAT_C_CHAR, MAT_T_UINT8,
+                                                 2, dims.data(), (void*)img.c_str(), 0);
+                Mat_VarSetCell(imgcorr_cell, i, str_var);
+            }
+        }
+        Mat_VarSetStructFieldByName(ncorr_struct, "imgcorr", 0, imgcorr_cell);
+    }
+    
+    // Write ncorrInfo struct
+    Mat_VarWrite(matfp, ncorr_struct, MAT_COMPRESSION_NONE);
+    Mat_VarFree(ncorr_struct);
+    
+    // Write Points as cell array (300x1, each cell is Nx2 array)
+    size_t n_frames = results.Points.size();
+    if (n_frames > 0) {
+        std::vector<size_t> cell_dims = {n_frames, 1};
+        matvar_t* points_cell = Mat_VarCreate("Points", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
+        
+        for (size_t i = 0; i < n_frames; ++i) {
+            const auto& pts = results.Points[i];
+            size_t n_points = pts.x.size();
+            
+            if (n_points == 0) {
+                Mat_VarSetCell(points_cell, i, nullptr);
+                continue;
+            }
+            
+            // Create Nx2 array [x, y]
+            std::vector<double> xy_data(n_points * 2);
+            for (size_t j = 0; j < n_points; ++j) {
+                xy_data[j * 2 + 0] = pts.x[j];
+                xy_data[j * 2 + 1] = pts.y[j];
+            }
+            
+            std::vector<size_t> dims = {n_points, 2};
+            matvar_t* xy_var = Mat_VarCreate(nullptr, MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
+                                            xy_data.data(), 0);
+            
+            Mat_VarSetCell(points_cell, i, xy_var);
+        }
+        
+        Mat_VarWrite(matfp, points_cell, MAT_COMPRESSION_NONE);
+        Mat_VarFree(points_cell);
+    }
+    
+    // Write CorCoeffVec as cell array (300x1, each cell is Nx1 array)
     if (!results.CorCoeffVec.empty()) {
-        std::vector<size_t> dims = {results.CorCoeffVec.size(), 1};
-        writeArrayVariable(matfp, "CorCoeffVec", results.CorCoeffVec.data(), dims, 
-                          MAT_T_DOUBLE, MAT_C_DOUBLE);
+        matvar_t* corcoeff_cell = createCellArrayFromScalars("CorCoeffVec", results.CorCoeffVec, results.CorCoeffVec.size());
+        if (corcoeff_cell) {
+            Mat_VarWrite(matfp, corcoeff_cell, MAT_COMPRESSION_NONE);
+            Mat_VarFree(corcoeff_cell);
+        }
     }
     
     // Write Faces (Nx3 matrix)
@@ -1514,6 +1610,178 @@ bool MatWriter::writeFaceArrays(mat_t* matfp,
     return true;
 }
 
+bool MatWriter::writeCalibrationGroup(mat_t* matfp,
+                                      const CalibrationData& calibration) {
+    if (!matfp) {
+        std::cerr << "Invalid MAT file pointer" << std::endl;
+        return false;
+    }
+    
+    std::cout << "Writing calibration group..." << std::endl;
+    
+    // Determine dimensions (should be 2x2 for stereo pairs)
+    size_t rows = calibration.DLT_paths.size();
+    size_t cols = (rows > 0) ? calibration.DLT_paths[0].size() : 0;
+    
+    if (rows == 0 || cols == 0) {
+        std::cout << "Warning: Empty calibration data, skipping" << std::endl;
+        return true;
+    }
+    
+    // Create DLTpath cell array (2x2 strings)
+    matvar_t* dlt_path_cell = createCellArray2DFromStrings("DLTpath", calibration.DLT_paths, rows, cols);
+    if (!dlt_path_cell) {
+        std::cerr << "Failed to create DLTpath cell array" << std::endl;
+        return false;
+    }
+    
+    // Create DLTparameters cell array (2x2 double vectors)
+    matvar_t* dlt_params_cell = createCellArray2DFromVectors("DLTparameters", calibration.DLT_params, rows, cols);
+    if (!dlt_params_cell) {
+        std::cerr << "Failed to create DLTparameters cell array" << std::endl;
+        Mat_VarFree(dlt_path_cell);
+        return false;
+    }
+    
+    // Write both to file
+    Mat_VarWrite(matfp, dlt_path_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, dlt_params_cell, MAT_COMPRESSION_NONE);
+    
+    // Free cell arrays
+    Mat_VarFree(dlt_path_cell);
+    Mat_VarFree(dlt_params_cell);
+    
+    std::cout << "Successfully wrote calibration group (DLTpath, DLTparameters)" << std::endl;
+    return true;
+}
+
+bool MatWriter::writeDistortionGroup(mat_t* matfp,
+                                    const DistortionData& distortion) {
+    if (!matfp) {
+        std::cerr << "Invalid MAT file pointer" << std::endl;
+        return false;
+    }
+    
+    std::cout << "Writing distortion group..." << std::endl;
+    
+    // Determine dimensions (should be 2x2 for stereo pairs)
+    size_t rows = distortion.distortion_models.size();
+    size_t cols = (rows > 0) ? distortion.distortion_models[0].size() : 0;
+    
+    if (rows == 0 || cols == 0) {
+        std::cout << "Warning: Empty distortion data, skipping" << std::endl;
+        return true;
+    }
+    
+    // Create distortionModel cell array (2x2 strings)
+    matvar_t* dist_model_cell = createCellArray2DFromStrings("distortionModel", distortion.distortion_models, rows, cols);
+    if (!dist_model_cell) {
+        std::cerr << "Failed to create distortionModel cell array" << std::endl;
+        return false;
+    }
+    
+    // Create distortionPath cell array (2x2 strings)
+    matvar_t* dist_path_cell = createCellArray2DFromStrings("distortionPath", distortion.distortion_paths, rows, cols);
+    if (!dist_path_cell) {
+        std::cerr << "Failed to create distortionPath cell array" << std::endl;
+        Mat_VarFree(dist_model_cell);
+        return false;
+    }
+    
+    // Write both to file
+    Mat_VarWrite(matfp, dist_model_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, dist_path_cell, MAT_COMPRESSION_NONE);
+    
+    // Free cell arrays
+    Mat_VarFree(dist_model_cell);
+    Mat_VarFree(dist_path_cell);
+    
+    std::cout << "Successfully wrote distortion group (distortionModel, distortionPath)" << std::endl;
+    return true;
+}
+
+bool MatWriter::writeAllPairsResults(mat_t* matfp,
+                                    const std::vector<DIC3Dcombined>& all_pairs) {
+    if (!matfp) {
+        std::cerr << "Invalid MAT file pointer" << std::endl;
+        return false;
+    }
+    
+    std::cout << "Writing AllPairsResults with " << all_pairs.size() << " pairs..." << std::endl;
+    
+    if (all_pairs.empty()) {
+        std::cout << "Warning: Empty AllPairsResults, skipping" << std::endl;
+        return true;
+    }
+    
+    // Create cell array (1 x n_pairs)
+    size_t n_pairs = all_pairs.size();
+    std::vector<size_t> cell_dims = {1, n_pairs};
+    matvar_t* cell_array = Mat_VarCreate("AllPairsResults", MAT_C_CELL, MAT_T_CELL,
+                                         2, cell_dims.data(), nullptr, 0);
+    
+    if (!cell_array) {
+        std::cerr << "Failed to create AllPairsResults cell array" << std::endl;
+        return false;
+    }
+    
+    // TODO: Implement recursive struct writing for each pair
+    // For now, create empty cells as placeholders
+    for (size_t i = 0; i < n_pairs; ++i) {
+        // Each cell should contain a complete DIC3Dcombined structure
+        // This requires recursive writing of all fields
+        Mat_VarSetCell(cell_array, i, nullptr);  // Placeholder
+    }
+    
+    // Write to file
+    Mat_VarWrite(matfp, cell_array, MAT_COMPRESSION_NONE);
+    Mat_VarFree(cell_array);
+    
+    std::cout << "Note: AllPairsResults written as placeholder (recursive struct writing not yet implemented)" << std::endl;
+    return true;
+}
+
+bool MatWriter::writeDIC2Dinfo(mat_t* matfp,
+                              const std::vector<DIC2DPairResults>& dic2d_info) {
+    if (!matfp) {
+        std::cerr << "Invalid MAT file pointer" << std::endl;
+        return false;
+    }
+    
+    std::cout << "Writing DIC2Dinfo with " << dic2d_info.size() << " entries..." << std::endl;
+    
+    if (dic2d_info.empty()) {
+        std::cout << "Warning: Empty DIC2Dinfo, skipping" << std::endl;
+        return true;
+    }
+    
+    // Create object array (n_entries x 1)
+    size_t n_entries = dic2d_info.size();
+    std::vector<size_t> array_dims = {n_entries, 1};
+    matvar_t* obj_array = Mat_VarCreate("DIC2Dinfo", MAT_C_CELL, MAT_T_CELL,
+                                        2, array_dims.data(), nullptr, 0);
+    
+    if (!obj_array) {
+        std::cerr << "Failed to create DIC2Dinfo object array" << std::endl;
+        return false;
+    }
+    
+    // TODO: Implement struct writing for each DIC2DPairResults entry
+    // For now, create empty cells as placeholders
+    for (size_t i = 0; i < n_entries; ++i) {
+        // Each cell should contain a DIC2DPairResults structure
+        // This requires writing all fields: nCamRef, nCamDef, nImages, ROImask, ncorrInfo, Points, CorCoeffVec, Faces, FaceColors
+        Mat_VarSetCell(obj_array, i, nullptr);  // Placeholder
+    }
+    
+    // Write to file
+    Mat_VarWrite(matfp, obj_array, MAT_COMPRESSION_NONE);
+    Mat_VarFree(obj_array);
+    
+    std::cout << "Note: DIC2Dinfo written as placeholder (struct array writing not yet implemented)" << std::endl;
+    return true;
+}
+
 // Helper function implementations ============================================
 
 ncorr::ROI2D MatWriter::convertMatToROI2D(const cv::Mat& mask) {
@@ -1671,6 +1939,84 @@ matvar_t* MatWriter::createCellArrayFromMatrices(
                                            2, dims.data(), flat_data.data(), 0);
         
         Mat_VarSetCell(cell_array, i, cell_data);
+    }
+    
+    return cell_array;
+}
+
+matvar_t* MatWriter::createCellArray2DFromStrings(
+    const std::string& name,
+    const std::vector<std::vector<std::string>>& data,
+    size_t rows,
+    size_t cols) {
+    
+    // Create 2D cell array (rows x cols)
+    std::vector<size_t> cell_dims = {rows, cols};
+    matvar_t* cell_array = Mat_VarCreate(name.c_str(), MAT_C_CELL, MAT_T_CELL,
+                                         2, cell_dims.data(), nullptr, 0);
+    
+    if (!cell_array) {
+        std::cerr << "Failed to create 2D cell array: " << name << std::endl;
+        return nullptr;
+    }
+    
+    // Fill each cell with string
+    for (size_t i = 0; i < rows && i < data.size(); ++i) {
+        for (size_t j = 0; j < cols && j < data[i].size(); ++j) {
+            const std::string& str = data[i][j];
+            
+            if (str.empty()) {
+                // Empty cell
+                Mat_VarSetCell(cell_array, i * cols + j, nullptr);
+                continue;
+            }
+            
+            // Create string variable
+            std::vector<size_t> dims = {1, str.length()};
+            matvar_t* str_var = Mat_VarCreate(nullptr, MAT_C_CHAR, MAT_T_UINT8,
+                                             2, dims.data(), (void*)str.c_str(), 0);
+            
+            Mat_VarSetCell(cell_array, i * cols + j, str_var);
+        }
+    }
+    
+    return cell_array;
+}
+
+matvar_t* MatWriter::createCellArray2DFromVectors(
+    const std::string& name,
+    const std::vector<std::vector<std::vector<double>>>& data,
+    size_t rows,
+    size_t cols) {
+    
+    // Create 2D cell array (rows x cols)
+    std::vector<size_t> cell_dims = {rows, cols};
+    matvar_t* cell_array = Mat_VarCreate(name.c_str(), MAT_C_CELL, MAT_T_CELL,
+                                         2, cell_dims.data(), nullptr, 0);
+    
+    if (!cell_array) {
+        std::cerr << "Failed to create 2D cell array: " << name << std::endl;
+        return nullptr;
+    }
+    
+    // Fill each cell with double vector
+    for (size_t i = 0; i < rows && i < data.size(); ++i) {
+        for (size_t j = 0; j < cols && j < data[i].size(); ++j) {
+            const auto& vec = data[i][j];
+            
+            if (vec.empty()) {
+                // Empty cell
+                Mat_VarSetCell(cell_array, i * cols + j, nullptr);
+                continue;
+            }
+            
+            // Create double array
+            std::vector<size_t> dims = {vec.size(), 1};
+            matvar_t* vec_var = Mat_VarCreate(nullptr, MAT_C_DOUBLE, MAT_T_DOUBLE,
+                                             2, dims.data(), (void*)vec.data(), 0);
+            
+            Mat_VarSetCell(cell_array, i * cols + j, vec_var);
+        }
     }
     
     return cell_array;

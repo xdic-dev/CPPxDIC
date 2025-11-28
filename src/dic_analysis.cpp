@@ -920,8 +920,9 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
 
                 // Finalize combined structure for this pair
                 combined.Faces = faces;
-                combined.calibration.DLT_paths = {calib_cam1, calib_cam2};
-                combined.calibration.DLT_params = {L1, L2};
+                // Create 2x1 calibration arrays (2 cameras, 1 pair)
+                combined.calibration.DLT_paths = {{calib_cam1}, {calib_cam2}};
+                combined.calibration.DLT_params = {{L1}, {L2}};
                 combined.pairIndices = {pair * 2 - 1, pair * 2};  // Camera indices for this pair
                 
                 // Store this pair's result

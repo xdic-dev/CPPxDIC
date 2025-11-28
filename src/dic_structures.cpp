@@ -98,49 +98,78 @@ void readDispData(std::ifstream& ifs, DispData& disp) {
 }
 
 void writeCalibrationData(std::ofstream& ofs, const CalibrationData& calib) {
-    // Write DLT_paths
-    size_t num_paths = calib.DLT_paths.size();
-    writePOD(ofs, num_paths);
-    for (const auto& path : calib.DLT_paths) {
-        writeString(ofs, path);
+    // Write DLT_paths (2D array of strings)
+    size_t rows = calib.DLT_paths.size();
+    writePOD(ofs, rows);
+    for (const auto& row : calib.DLT_paths) {
+        size_t cols = row.size();
+        writePOD(ofs, cols);
+        for (const auto& path : row) {
+            writeString(ofs, path);
+        }
     }
     
-    // Write DLT_params
-    writeVector2D(ofs, calib.DLT_params);
-    
-    // Write distortion model and params
-    writeString(ofs, calib.distortion_model);
-    size_t num_dist_params = calib.distortion_params.size();
-    writePOD(ofs, num_dist_params);
-    for (const auto& [key, value] : calib.distortion_params) {
-        writeString(ofs, key);
-        writePOD(ofs, value);
+    // Write DLT_params (3D array: rows x cols x params)
+    size_t param_rows = calib.DLT_params.size();
+    writePOD(ofs, param_rows);
+    for (const auto& row : calib.DLT_params) {
+        size_t param_cols = row.size();
+        writePOD(ofs, param_cols);
+        for (const auto& params : row) {
+            writeVector(ofs, params);
+        }
     }
 }
 
 void readCalibrationData(std::ifstream& ifs, CalibrationData& calib) {
-    // Read DLT_paths
-    size_t num_paths;
-    readPOD(ifs, num_paths);
-    calib.DLT_paths.resize(num_paths);
-    for (auto& path : calib.DLT_paths) {
-        readString(ifs, path);
+    // Read DLT_paths (2D array of strings)
+    size_t rows;
+    readPOD(ifs, rows);
+    calib.DLT_paths.resize(rows);
+    for (auto& row : calib.DLT_paths) {
+        size_t cols;
+        readPOD(ifs, cols);
+        row.resize(cols);
+        for (auto& path : row) {
+            readString(ifs, path);
+        }
     }
     
-    // Read DLT_params
-    readVector2D(ifs, calib.DLT_params);
+    // Read DLT_params (3D array)
+    size_t param_rows;
+    readPOD(ifs, param_rows);
+    calib.DLT_params.resize(param_rows);
+    for (auto& row : calib.DLT_params) {
+        size_t param_cols;
+        readPOD(ifs, param_cols);
+        row.resize(param_cols);
+        for (auto& params : row) {
+            readVector(ifs, params);
+        }
+    }
+}
+
+void writeDistortionData(std::ofstream& ofs, const DistortionData& dist) {
+    // Write distortion_models (2D array of strings)
+    size_t rows = dist.distortion_models.size();
+    writePOD(ofs, rows);
+    for (const auto& row : dist.distortion_models) {
+        size_t cols = row.size();
+        writePOD(ofs, cols);
+        for (const auto& model : row) {
+            writeString(ofs, model);
+        }
+    }
     
-    // Read distortion model and params
-    readString(ifs, calib.distortion_model);
-    size_t num_dist_params;
-    readPOD(ifs, num_dist_params);
-    calib.distortion_params.clear();
-    for (size_t i = 0; i < num_dist_params; ++i) {
-        std::string key;
-        double value;
-        readString(ifs, key);
-        readPOD(ifs, value);
-        calib.distortion_params[key] = value;
+    // Write distortion_paths (2D array of strings)
+    size_t path_rows = dist.distortion_paths.size();
+    writePOD(ofs, path_rows);
+    for (const auto& row : dist.distortion_paths) {
+        size_t cols = row.size();
+        writePOD(ofs, cols);
+        for (const auto& path : row) {
+            writeString(ofs, path);
+        }
     }
 }
 
@@ -150,6 +179,34 @@ void writeStringMap(std::ofstream& ofs, const std::map<std::string, std::string>
     for (const auto& [key, value] : map) {
         writeString(ofs, key);
         writeString(ofs, value);
+    }
+}
+
+void readDistortionData(std::ifstream& ifs, DistortionData& dist) {
+    // Read distortion_models (2D array of strings)
+    size_t rows;
+    readPOD(ifs, rows);
+    dist.distortion_models.resize(rows);
+    for (auto& row : dist.distortion_models) {
+        size_t cols;
+        readPOD(ifs, cols);
+        row.resize(cols);
+        for (auto& model : row) {
+            readString(ifs, model);
+        }
+    }
+    
+    // Read distortion_paths (2D array of strings)
+    size_t path_rows;
+    readPOD(ifs, path_rows);
+    dist.distortion_paths.resize(path_rows);
+    for (auto& row : dist.distortion_paths) {
+        size_t cols;
+        readPOD(ifs, cols);
+        row.resize(cols);
+        for (auto& path : row) {
+            readString(ifs, path);
+        }
     }
 }
 
@@ -195,7 +252,7 @@ void DIC3Dcombined::saveBinary(const std::string& filepath) const {
     writeVector2D(ofs, FaceCentroids);
     writeDispData(ofs, Disp);
     writeCalibrationData(ofs, calibration);
-    writeStringMap(ofs, distortion);
+    writeDistortionData(ofs, distortion);
     writeVector(ofs, FacePairInds);
     writeVector(ofs, PointPairInds);
     
@@ -251,7 +308,7 @@ DIC3Dcombined DIC3Dcombined::loadBinary(const std::string& filepath) {
     readVector2D(ifs, combined.FaceCentroids);
     readDispData(ifs, combined.Disp);
     readCalibrationData(ifs, combined.calibration);
-    readStringMap(ifs, combined.distortion);
+    readDistortionData(ifs, combined.distortion);
     readVector(ifs, combined.FacePairInds);
     readVector(ifs, combined.PointPairInds);
     

@@ -217,6 +217,46 @@ public:
                                const std::vector<std::vector<double>>& face_corr_comb,
                                const std::vector<std::vector<double>>& face_iso_ind,
                                size_t n_frames);
+    
+    /**
+     * Write calibration group (DLTparameters, DLTpath)
+     * 
+     * @param matfp MAT file pointer (must be open for writing)
+     * @param calibration Calibration data structure
+     * @return Success status
+     */
+    static bool writeCalibrationGroup(mat_t* matfp,
+                                      const CalibrationData& calibration);
+    
+    /**
+     * Write distortion group (distortionModel, distortionPath)
+     * 
+     * @param matfp MAT file pointer (must be open for writing)
+     * @param distortion Distortion data structure
+     * @return Success status
+     */
+    static bool writeDistortionGroup(mat_t* matfp,
+                                    const DistortionData& distortion);
+    
+    /**
+     * Write AllPairsResults as cell array of DIC3Dcombined structures
+     * 
+     * @param matfp MAT file pointer (must be open for writing)
+     * @param all_pairs Vector of DIC3Dcombined results for each pair
+     * @return Success status
+     */
+    static bool writeAllPairsResults(mat_t* matfp,
+                                    const std::vector<DIC3Dcombined>& all_pairs);
+    
+    /**
+     * Write DIC2Dinfo as object array of DIC2DPairResults
+     * 
+     * @param matfp MAT file pointer (must be open for writing)
+     * @param dic2d_info Vector of 2D DIC results
+     * @return Success status
+     */
+    static bool writeDIC2Dinfo(mat_t* matfp,
+                              const std::vector<DIC2DPairResults>& dic2d_info);
 
 private:
     /**
@@ -431,6 +471,36 @@ private:
         const std::string& name,
         const std::vector<std::vector<Eigen::Matrix3d>>& data,
         size_t n_frames);
+    
+    /**
+     * Create 2D cell array from strings
+     * 
+     * @param name Variable name
+     * @param data 2D vector of strings (rows x cols)
+     * @param rows Number of rows
+     * @param cols Number of columns
+     * @return Cell array variable
+     */
+    static matvar_t* createCellArray2DFromStrings(
+        const std::string& name,
+        const std::vector<std::vector<std::string>>& data,
+        size_t rows,
+        size_t cols);
+    
+    /**
+     * Create 2D cell array from double vectors
+     * 
+     * @param name Variable name
+     * @param data 2D vector of double vectors (rows x cols, each element is a vector)
+     * @param rows Number of rows
+     * @param cols Number of columns
+     * @return Cell array variable
+     */
+    static matvar_t* createCellArray2DFromVectors(
+        const std::string& name,
+        const std::vector<std::vector<std::vector<double>>>& data,
+        size_t rows,
+        size_t cols);
 };
 
 } // namespace cppxdic

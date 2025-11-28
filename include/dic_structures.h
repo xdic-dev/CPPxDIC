@@ -15,18 +15,22 @@ namespace cppxdic {
 
 /**
  * DIC Info structure (parameters)
+ * Matches MATLAB ncorrInfo structure
  */
 struct DICInfo {
-    double cutoff_corrcoef;
+    std::vector<double> cutoff_corrcoef;  // Array of cutoff values (301 elements)
     double cutoff_diffnorm;
     int cutoff_iteration;
+    std::vector<std::string> imgcorr;  // Cell array of image names (length 2)
+    int lenscoef;
+    double pixtounits;  // Pixels to units conversion
     int radius;
     int spacing;
+    // stepanalysis struct (placeholder - can be expanded if needed)
     bool subsettrunc;
     int total_threads;
     std::string type;
     std::string units;
-    double units_per_pixel;
 };
 
 /**
@@ -58,10 +62,9 @@ struct DispData {
  * Calibration data
  */
 struct CalibrationData {
-    std::vector<std::string> DLT_paths;
-    std::vector<std::vector<double>> DLT_params;  // Per camera
-    std::string distortion_model;
-    std::map<std::string, double> distortion_params;
+    // 2x2 arrays for stereo pairs (rows=cameras, cols=pairs)
+    std::vector<std::vector<std::string>> DLT_paths;  // 2x2 cell array of paths
+    std::vector<std::vector<std::vector<double>>> DLT_params;  // 2x2 cell array of parameter vectors
 };
 
 /**
@@ -74,10 +77,19 @@ struct DIC2DPairResults {
     int nImages;        // Number of images
     cv::Mat ROImask;    // ROI mask
     DICInfo ncorrInfo;  // DIC parameters
-    std::vector<Points2D> Points;  // Points per frame (cell array in MATLAB)
-    std::vector<double> CorCoeffVec;  // Correlation coefficients
+    std::vector<Points2D> Points;  // Points per frame (cell array in MATLAB: each cell is Nx2 array)
+    std::vector<std::vector<double>> CorCoeffVec;  // Correlation coefficients per frame (cell array: each cell is Nx1 array)
     std::vector<int> Faces;  // Triangular mesh faces (Nx3 flattened)
     std::vector<double> FaceColors;  // Face color values
+};
+
+/**
+ * Distortion data
+ */
+struct DistortionData {
+    // 2x2 arrays for stereo pairs (rows=cameras, cols=pairs)
+    std::vector<std::vector<std::string>> distortion_models;  // 2x2 cell array of model names
+    std::vector<std::vector<std::string>> distortion_paths;   // 2x2 cell array of paths
 };
 
 /**
@@ -94,7 +106,7 @@ struct DIC3Dcombined {
     std::vector<std::vector<double>> FaceCentroids;  // Triangle centroids per frame (nFrames x nFaces x 3)
     DispData Disp;  // Displacement data
     CalibrationData calibration;  // Calibration info
-    std::map<std::string, std::string> distortion;  // Distortion model
+    DistortionData distortion;  // Distortion model and paths
     
     // Multi-pair stitching metadata
     std::vector<int> FacePairInds;  // Which stereo pair each face belongs to (1-indexed)
