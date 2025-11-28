@@ -145,6 +145,26 @@ else()
     message(WARNING "HDF5 not found. MAT v7.3 (HDF5) format may not work. Install with: brew install hdf5")
 endif()
 
+# Add Eigen library (required by mat_writer.h for matrix operations)
+find_package(Eigen3 REQUIRED)
+if(Eigen3_FOUND)
+    # Prefer imported target when available
+    if(TARGET Eigen3::Eigen)
+        target_link_libraries(test_ncorr_to_mat Eigen3::Eigen)
+        message(STATUS "Found Eigen3 target: Eigen3::Eigen")
+    endif()
+    # Also add include dirs for header-only usage
+    if(DEFINED EIGEN3_INCLUDE_DIRS)
+        target_include_directories(test_ncorr_to_mat PRIVATE ${EIGEN3_INCLUDE_DIRS})
+        message(STATUS "Eigen3 include dirs: ${EIGEN3_INCLUDE_DIRS}")
+    elseif(DEFINED EIGEN3_INCLUDE_DIR)
+        target_include_directories(test_ncorr_to_mat PRIVATE ${EIGEN3_INCLUDE_DIR})
+        message(STATUS "Eigen3 include dir: ${EIGEN3_INCLUDE_DIR}")
+    endif()
+else()
+    message(FATAL_ERROR "Eigen3 not found. Please install it: brew install eigen")
+endif()
+
 # Add ncorr library (following parent project pattern)
 find_library(NCORR_LIBRARY NAMES ncorr PATHS ${CMAKE_SOURCE_DIR}/../Tools/CppNCorr/lib)
 if(NCORR_LIBRARY)
@@ -195,9 +215,24 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(test_ncorr_to_mat OpenMP::OpenMP_CXX)
 endif()
 
+# Test 3: test_mat_comparator - Compare MAT files
+add_executable(test_mat_comparator
+    src/test_mat_comparator.cpp
+)
+
+# Link matio library
+target_link_libraries(test_mat_comparator ${MATIO_LIBRARY})
+
+# Link HDF5 library
+if(HDF5_FOUND)
+    target_include_directories(test_mat_comparator PRIVATE ${HDF5_INCLUDE_DIRS})
+    target_link_libraries(test_mat_comparator ${HDF5_C_LIBRARIES})
+endif()
+
 # Compiler flags
 target_compile_options(test_ncorr_bin PRIVATE -Wall -Wextra -O2)
 target_compile_options(test_ncorr_to_mat PRIVATE -Wall -Wextra -O2)
+target_compile_options(test_mat_comparator PRIVATE -Wall -Wextra -O2)
 
 # Print configuration
 message(STATUS "CPPxDIC Tests Configuration:")

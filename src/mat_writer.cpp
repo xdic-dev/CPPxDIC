@@ -7,6 +7,9 @@
 #include "mat_writer.h"
 #include <iostream>
 #include <cstring>
+#include <vector>
+#include <stdexcept>
+#include <Eigen/Dense>
 #include <filesystem>
 #include <algorithm>
 
@@ -1156,7 +1159,10 @@ bool MatWriter::write3DPPresults(const std::string& filename,
         return false;
     }
     
-    // Write Deformation structure
+    // NOTE: This function currently writes placeholder deformation data
+    // To write full deformation fields, use writeDeformationGroup() with FrameDeformationResult
+    
+    // Write Deformation structure (placeholder)
     std::vector<std::string> deform_fields = {"F", "strain", "princStrain", "maxShearStrain"};
     matvar_t* deform_struct = createStructVariable("Deform", deform_fields);
     Mat_VarWrite(matfp, deform_struct, MAT_COMPRESSION_NONE);
@@ -1174,6 +1180,337 @@ bool MatWriter::write3DPPresults(const std::string& filename,
     
     Mat_Close(matfp);
     std::cout << "Wrote DIC3DPPresults: " << filename << std::endl;
+    return true;
+}
+
+bool MatWriter::writeDeformationGroup(mat_t* matfp,
+                                      const std::string& group_name,
+                                      const FrameDeformationResult& deform_data) {
+    if (!matfp) {
+        std::cerr << "Invalid MAT file pointer" << std::endl;
+        return false;
+    }
+    
+    size_t n_frames = deform_data.n_frames;
+    size_t n_faces = deform_data.n_faces;
+    
+    std::cout << "Writing deformation group '" << group_name << "' with " 
+              << n_frames << " frames and " << n_faces << " faces" << std::endl;
+    
+    // Prepare data in format: vector<vector<T>> where outer = frames, inner = faces
+    // Scalars
+    std::vector<std::vector<double>> Area_data(n_frames);
+    std::vector<std::vector<double>> Lamda1_data(n_frames);
+    std::vector<std::vector<double>> Lamda2_data(n_frames);
+    std::vector<std::vector<double>> J_data(n_frames);
+    std::vector<std::vector<double>> Emgn_data(n_frames);
+    std::vector<std::vector<double>> emgn_data(n_frames);
+    std::vector<std::vector<double>> Epc1_data(n_frames);
+    std::vector<std::vector<double>> Epc2_data(n_frames);
+    std::vector<std::vector<double>> epc1_data(n_frames);
+    std::vector<std::vector<double>> epc2_data(n_frames);
+    std::vector<std::vector<double>> EShearMax_data(n_frames);
+    std::vector<std::vector<double>> eShearMax_data(n_frames);
+    std::vector<std::vector<double>> Eeq_data(n_frames);
+    std::vector<std::vector<double>> eeq_data(n_frames);
+    std::vector<std::vector<double>> Dnorm_data(n_frames);
+    
+    // Vectors (3D)
+    std::vector<std::vector<Eigen::Vector3d>> D1_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> D2_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> D3_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> d1_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> d2_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> d3_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> Drec1_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> Drec2_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> Epc1vec_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> Epc2vec_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> Epc1vecCur_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> Epc2vecCur_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> epc1vec_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> epc2vec_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> EShearMaxVec1_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> EShearMaxVec2_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> EShearMaxVecCur1_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> EShearMaxVecCur2_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> eShearMaxVec1_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> eShearMaxVec2_data(n_frames);
+    
+    // Matrices (3x3)
+    std::vector<std::vector<Eigen::Matrix3d>> Fmat_data(n_frames);
+    std::vector<std::vector<Eigen::Matrix3d>> Cmat_data(n_frames);
+    std::vector<std::vector<Eigen::Matrix3d>> Emat_data(n_frames);
+    std::vector<std::vector<Eigen::Matrix3d>> emat_data(n_frames);
+    
+    // Copy data from frames
+    for (size_t i = 0; i < n_frames && i < deform_data.frames.size(); ++i) {
+        const auto& frame = deform_data.frames[i];
+        
+        Area_data[i] = frame.Area;
+        Lamda1_data[i] = frame.Lamda1;
+        Lamda2_data[i] = frame.Lamda2;
+        J_data[i] = frame.J;
+        Emgn_data[i] = frame.Emgn;
+        emgn_data[i] = frame.emgn;
+        Epc1_data[i] = frame.Epc1;
+        Epc2_data[i] = frame.Epc2;
+        epc1_data[i] = frame.epc1;
+        epc2_data[i] = frame.epc2;
+        EShearMax_data[i] = frame.EShearMax;
+        eShearMax_data[i] = frame.eShearMax;
+        Eeq_data[i] = frame.Eeq;
+        eeq_data[i] = frame.eeq;
+        Dnorm_data[i] = frame.Dnorm;
+        
+        D1_data[i] = frame.D1;
+        D2_data[i] = frame.D2;
+        D3_data[i] = frame.D3;
+        d1_data[i] = frame.d1;
+        d2_data[i] = frame.d2;
+        d3_data[i] = frame.d3;
+        Drec1_data[i] = frame.Drec1;
+        Drec2_data[i] = frame.Drec2;
+        Epc1vec_data[i] = frame.Epc1vec;
+        Epc2vec_data[i] = frame.Epc2vec;
+        Epc1vecCur_data[i] = frame.Epc1vecCur;
+        Epc2vecCur_data[i] = frame.Epc2vecCur;
+        epc1vec_data[i] = frame.epc1vec;
+        epc2vec_data[i] = frame.epc2vec;
+        EShearMaxVec1_data[i] = frame.EShearMaxVec1;
+        EShearMaxVec2_data[i] = frame.EShearMaxVec2;
+        EShearMaxVecCur1_data[i] = frame.EShearMaxVecCur1;
+        EShearMaxVecCur2_data[i] = frame.EShearMaxVecCur2;
+        eShearMaxVec1_data[i] = frame.eShearMaxVec1;
+        eShearMaxVec2_data[i] = frame.eShearMaxVec2;
+        
+        Fmat_data[i] = frame.Fmat;
+        Cmat_data[i] = frame.Cmat;
+        Emat_data[i] = frame.Emat;
+        emat_data[i] = frame.emat;
+    }
+    
+    // Create and write cell arrays for all 36 fields
+    // Scalars (15 fields)
+    matvar_t* Area_cell = createCellArrayFromScalars("Area", Area_data, n_frames);
+    matvar_t* Lamda1_cell = createCellArrayFromScalars("Lamda1", Lamda1_data, n_frames);
+    matvar_t* Lamda2_cell = createCellArrayFromScalars("Lamda2", Lamda2_data, n_frames);
+    matvar_t* J_cell = createCellArrayFromScalars("J", J_data, n_frames);
+    matvar_t* Emgn_cell = createCellArrayFromScalars("Emgn", Emgn_data, n_frames);
+    matvar_t* emgn_cell = createCellArrayFromScalars("emgn", emgn_data, n_frames);
+    matvar_t* Epc1_cell = createCellArrayFromScalars("Epc1", Epc1_data, n_frames);
+    matvar_t* Epc2_cell = createCellArrayFromScalars("Epc2", Epc2_data, n_frames);
+    matvar_t* epc1_cell = createCellArrayFromScalars("epc1", epc1_data, n_frames);
+    matvar_t* epc2_cell = createCellArrayFromScalars("epc2", epc2_data, n_frames);
+    matvar_t* EShearMax_cell = createCellArrayFromScalars("EShearMax", EShearMax_data, n_frames);
+    matvar_t* eShearMax_cell = createCellArrayFromScalars("eShearMax", eShearMax_data, n_frames);
+    matvar_t* Eeq_cell = createCellArrayFromScalars("Eeq", Eeq_data, n_frames);
+    matvar_t* eeq_cell = createCellArrayFromScalars("eeq", eeq_data, n_frames);
+    matvar_t* Dnorm_cell = createCellArrayFromScalars("Dnorm", Dnorm_data, n_frames);
+    
+    // Vectors (20 fields)
+    matvar_t* D1_cell = createCellArrayFromVectors("D1", D1_data, n_frames);
+    matvar_t* D2_cell = createCellArrayFromVectors("D2", D2_data, n_frames);
+    matvar_t* D3_cell = createCellArrayFromVectors("D3", D3_data, n_frames);
+    matvar_t* d1_cell = createCellArrayFromVectors("d1", d1_data, n_frames);
+    matvar_t* d2_cell = createCellArrayFromVectors("d2", d2_data, n_frames);
+    matvar_t* d3_cell = createCellArrayFromVectors("d3", d3_data, n_frames);
+    matvar_t* Drec1_cell = createCellArrayFromVectors("Drec1", Drec1_data, n_frames);
+    matvar_t* Drec2_cell = createCellArrayFromVectors("Drec2", Drec2_data, n_frames);
+    matvar_t* Epc1vec_cell = createCellArrayFromVectors("Epc1vec", Epc1vec_data, n_frames);
+    matvar_t* Epc2vec_cell = createCellArrayFromVectors("Epc2vec", Epc2vec_data, n_frames);
+    matvar_t* Epc1vecCur_cell = createCellArrayFromVectors("Epc1vecCur", Epc1vecCur_data, n_frames);
+    matvar_t* Epc2vecCur_cell = createCellArrayFromVectors("Epc2vecCur", Epc2vecCur_data, n_frames);
+    matvar_t* epc1vec_cell = createCellArrayFromVectors("epc1vec", epc1vec_data, n_frames);
+    matvar_t* epc2vec_cell = createCellArrayFromVectors("epc2vec", epc2vec_data, n_frames);
+    matvar_t* EShearMaxVec1_cell = createCellArrayFromVectors("EShearMaxVec1", EShearMaxVec1_data, n_frames);
+    matvar_t* EShearMaxVec2_cell = createCellArrayFromVectors("EShearMaxVec2", EShearMaxVec2_data, n_frames);
+    matvar_t* EShearMaxVecCur1_cell = createCellArrayFromVectors("EShearMaxVecCur1", EShearMaxVecCur1_data, n_frames);
+    matvar_t* EShearMaxVecCur2_cell = createCellArrayFromVectors("EShearMaxVecCur2", EShearMaxVecCur2_data, n_frames);
+    matvar_t* eShearMaxVec1_cell = createCellArrayFromVectors("eShearMaxVec1", eShearMaxVec1_data, n_frames);
+    matvar_t* eShearMaxVec2_cell = createCellArrayFromVectors("eShearMaxVec2", eShearMaxVec2_data, n_frames);
+    
+    // Matrices (4 fields)
+    matvar_t* Fmat_cell = createCellArrayFromMatrices("Fmat", Fmat_data, n_frames);
+    matvar_t* Cmat_cell = createCellArrayFromMatrices("Cmat", Cmat_data, n_frames);
+    matvar_t* Emat_cell = createCellArrayFromMatrices("Emat", Emat_data, n_frames);
+    matvar_t* emat_cell = createCellArrayFromMatrices("emat", emat_data, n_frames);
+    
+    // Write all cell arrays to file
+    Mat_VarWrite(matfp, Area_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, Lamda1_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, Lamda2_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, J_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, Emgn_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, emgn_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, Epc1_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, Epc2_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, epc1_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, epc2_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, EShearMax_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, eShearMax_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, Eeq_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, eeq_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, Dnorm_cell, MAT_COMPRESSION_NONE);
+    
+    Mat_VarWrite(matfp, D1_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, D2_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, D3_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, d1_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, d2_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, d3_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, Drec1_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, Drec2_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, Epc1vec_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, Epc2vec_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, Epc1vecCur_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, Epc2vecCur_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, epc1vec_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, epc2vec_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, EShearMaxVec1_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, EShearMaxVec2_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, EShearMaxVecCur1_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, EShearMaxVecCur2_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, eShearMaxVec1_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, eShearMaxVec2_cell, MAT_COMPRESSION_NONE);
+    
+    Mat_VarWrite(matfp, Fmat_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, Cmat_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, Emat_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, emat_cell, MAT_COMPRESSION_NONE);
+    
+    // Free all cell arrays
+    Mat_VarFree(Area_cell);
+    Mat_VarFree(Lamda1_cell);
+    Mat_VarFree(Lamda2_cell);
+    Mat_VarFree(J_cell);
+    Mat_VarFree(Emgn_cell);
+    Mat_VarFree(emgn_cell);
+    Mat_VarFree(Epc1_cell);
+    Mat_VarFree(Epc2_cell);
+    Mat_VarFree(epc1_cell);
+    Mat_VarFree(epc2_cell);
+    Mat_VarFree(EShearMax_cell);
+    Mat_VarFree(eShearMax_cell);
+    Mat_VarFree(Eeq_cell);
+    Mat_VarFree(eeq_cell);
+    Mat_VarFree(Dnorm_cell);
+    
+    Mat_VarFree(D1_cell);
+    Mat_VarFree(D2_cell);
+    Mat_VarFree(D3_cell);
+    Mat_VarFree(d1_cell);
+    Mat_VarFree(d2_cell);
+    Mat_VarFree(d3_cell);
+    Mat_VarFree(Drec1_cell);
+    Mat_VarFree(Drec2_cell);
+    Mat_VarFree(Epc1vec_cell);
+    Mat_VarFree(Epc2vec_cell);
+    Mat_VarFree(Epc1vecCur_cell);
+    Mat_VarFree(Epc2vecCur_cell);
+    Mat_VarFree(epc1vec_cell);
+    Mat_VarFree(epc2vec_cell);
+    Mat_VarFree(EShearMaxVec1_cell);
+    Mat_VarFree(EShearMaxVec2_cell);
+    Mat_VarFree(EShearMaxVecCur1_cell);
+    Mat_VarFree(EShearMaxVecCur2_cell);
+    Mat_VarFree(eShearMaxVec1_cell);
+    Mat_VarFree(eShearMaxVec2_cell);
+    
+    Mat_VarFree(Fmat_cell);
+    Mat_VarFree(Cmat_cell);
+    Mat_VarFree(Emat_cell);
+    Mat_VarFree(emat_cell);
+    
+    std::cout << "Successfully wrote all 39 deformation fields to '" << group_name << "'" << std::endl;
+    return true;
+}
+
+bool MatWriter::writeDisplacementGroup(mat_t* matfp,
+                                       const std::vector<std::vector<Eigen::Vector3d>>& disp_vec,
+                                       const std::vector<std::vector<double>>& disp_mgn,
+                                       size_t n_frames) {
+    if (!matfp) {
+        std::cerr << "Invalid MAT file pointer" << std::endl;
+        return false;
+    }
+    
+    std::cout << "Writing displacement group with " << n_frames << " frames" << std::endl;
+    
+    // Create DispVec cell array (Nx3 per frame)
+    matvar_t* disp_vec_cell = createCellArrayFromVectors("DispVec", disp_vec, n_frames);
+    if (!disp_vec_cell) {
+        std::cerr << "Failed to create DispVec cell array" << std::endl;
+        return false;
+    }
+    
+    // Create DispMgn cell array (Nx1 per frame)
+    matvar_t* disp_mgn_cell = createCellArrayFromScalars("DispMgn", disp_mgn, n_frames);
+    if (!disp_mgn_cell) {
+        std::cerr << "Failed to create DispMgn cell array" << std::endl;
+        Mat_VarFree(disp_vec_cell);
+        return false;
+    }
+    
+    // Write both to file
+    Mat_VarWrite(matfp, disp_vec_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, disp_mgn_cell, MAT_COMPRESSION_NONE);
+    
+    // Free cell arrays
+    Mat_VarFree(disp_vec_cell);
+    Mat_VarFree(disp_mgn_cell);
+    
+    std::cout << "Successfully wrote displacement fields (DispVec, DispMgn)" << std::endl;
+    return true;
+}
+
+bool MatWriter::writeFaceArrays(mat_t* matfp,
+                               const std::vector<std::vector<Eigen::Vector3d>>& face_centroids,
+                               const std::vector<std::vector<double>>& face_corr_comb,
+                               const std::vector<std::vector<double>>& face_iso_ind,
+                               size_t n_frames) {
+    if (!matfp) {
+        std::cerr << "Invalid MAT file pointer" << std::endl;
+        return false;
+    }
+    
+    std::cout << "Writing face-based arrays with " << n_frames << " frames" << std::endl;
+    
+    // Create FaceCentroids cell array (Mx3 per frame)
+    matvar_t* face_centroids_cell = createCellArrayFromVectors("FaceCentroids", face_centroids, n_frames);
+    if (!face_centroids_cell) {
+        std::cerr << "Failed to create FaceCentroids cell array" << std::endl;
+        return false;
+    }
+    
+    // Create FaceCorrComb cell array (Mx1 per frame)
+    matvar_t* face_corr_comb_cell = createCellArrayFromScalars("FaceCorrComb", face_corr_comb, n_frames);
+    if (!face_corr_comb_cell) {
+        std::cerr << "Failed to create FaceCorrComb cell array" << std::endl;
+        Mat_VarFree(face_centroids_cell);
+        return false;
+    }
+    
+    // Create FaceIsoInd cell array (Mx1 per frame)
+    matvar_t* face_iso_ind_cell = createCellArrayFromScalars("FaceIsoInd", face_iso_ind, n_frames);
+    if (!face_iso_ind_cell) {
+        std::cerr << "Failed to create FaceIsoInd cell array" << std::endl;
+        Mat_VarFree(face_centroids_cell);
+        Mat_VarFree(face_corr_comb_cell);
+        return false;
+    }
+    
+    // Write all to file
+    Mat_VarWrite(matfp, face_centroids_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, face_corr_comb_cell, MAT_COMPRESSION_NONE);
+    Mat_VarWrite(matfp, face_iso_ind_cell, MAT_COMPRESSION_NONE);
+    
+    // Free cell arrays
+    Mat_VarFree(face_centroids_cell);
+    Mat_VarFree(face_corr_comb_cell);
+    Mat_VarFree(face_iso_ind_cell);
+    
+    std::cout << "Successfully wrote face arrays (FaceCentroids, FaceCorrComb, FaceIsoInd)" << std::endl;
     return true;
 }
 
@@ -1207,6 +1544,136 @@ cv::Mat MatWriter::convertROI2DToMat(const ncorr::ROI2D& roi) {
     }
     
     return mask;
+}
+
+// Cell Array Helper Functions ================================================
+
+matvar_t* MatWriter::createCellArrayFromScalars(
+    const std::string& name,
+    const std::vector<std::vector<double>>& data,
+    size_t n_frames) {
+    
+    // Create cell array (1 x n_frames)
+    std::vector<size_t> cell_dims = {1, n_frames};
+    matvar_t* cell_array = Mat_VarCreate(name.c_str(), MAT_C_CELL, MAT_T_CELL, 
+                                         2, cell_dims.data(), nullptr, 0);
+    
+    if (!cell_array) {
+        std::cerr << "Failed to create cell array: " << name << std::endl;
+        return nullptr;
+    }
+    
+    // Fill each cell with scalar array
+    for (size_t i = 0; i < n_frames && i < data.size(); ++i) {
+        const auto& frame_data = data[i];
+        size_t n_elements = frame_data.size();
+        
+        if (n_elements == 0) {
+            // Empty cell
+            Mat_VarSetCell(cell_array, i, nullptr);
+            continue;
+        }
+        
+        // Create double array for this frame
+        std::vector<size_t> dims = {n_elements, 1};
+        matvar_t* cell_data = Mat_VarCreate(nullptr, MAT_C_DOUBLE, MAT_T_DOUBLE,
+                                           2, dims.data(), (void*)frame_data.data(), 0);
+        
+        Mat_VarSetCell(cell_array, i, cell_data);
+    }
+    
+    return cell_array;
+}
+
+matvar_t* MatWriter::createCellArrayFromVectors(
+    const std::string& name,
+    const std::vector<std::vector<Eigen::Vector3d>>& data,
+    size_t n_frames) {
+    
+    // Create cell array (1 x n_frames)
+    std::vector<size_t> cell_dims = {1, n_frames};
+    matvar_t* cell_array = Mat_VarCreate(name.c_str(), MAT_C_CELL, MAT_T_CELL,
+                                         2, cell_dims.data(), nullptr, 0);
+    
+    if (!cell_array) {
+        std::cerr << "Failed to create cell array: " << name << std::endl;
+        return nullptr;
+    }
+    
+    // Fill each cell with Nx3 array
+    for (size_t i = 0; i < n_frames && i < data.size(); ++i) {
+        const auto& frame_data = data[i];
+        size_t n_vectors = frame_data.size();
+        
+        if (n_vectors == 0) {
+            Mat_VarSetCell(cell_array, i, nullptr);
+            continue;
+        }
+        
+        // Convert vector<Vector3d> to flat double array (Nx3)
+        std::vector<double> flat_data(n_vectors * 3);
+        for (size_t j = 0; j < n_vectors; ++j) {
+            flat_data[j * 3 + 0] = frame_data[j](0);
+            flat_data[j * 3 + 1] = frame_data[j](1);
+            flat_data[j * 3 + 2] = frame_data[j](2);
+        }
+        
+        // Create Nx3 array
+        std::vector<size_t> dims = {n_vectors, 3};
+        matvar_t* cell_data = Mat_VarCreate(nullptr, MAT_C_DOUBLE, MAT_T_DOUBLE,
+                                           2, dims.data(), flat_data.data(), 0);
+        
+        Mat_VarSetCell(cell_array, i, cell_data);
+    }
+    
+    return cell_array;
+}
+
+matvar_t* MatWriter::createCellArrayFromMatrices(
+    const std::string& name,
+    const std::vector<std::vector<Eigen::Matrix3d>>& data,
+    size_t n_frames) {
+    
+    // Create cell array (1 x n_frames)
+    std::vector<size_t> cell_dims = {1, n_frames};
+    matvar_t* cell_array = Mat_VarCreate(name.c_str(), MAT_C_CELL, MAT_T_CELL,
+                                         2, cell_dims.data(), nullptr, 0);
+    
+    if (!cell_array) {
+        std::cerr << "Failed to create cell array: " << name << std::endl;
+        return nullptr;
+    }
+    
+    // Fill each cell with Nx9 array (3x3 matrices flattened)
+    for (size_t i = 0; i < n_frames && i < data.size(); ++i) {
+        const auto& frame_data = data[i];
+        size_t n_matrices = frame_data.size();
+        
+        if (n_matrices == 0) {
+            Mat_VarSetCell(cell_array, i, nullptr);
+            continue;
+        }
+        
+        // Convert vector<Matrix3d> to flat double array (Nx9)
+        std::vector<double> flat_data(n_matrices * 9);
+        for (size_t j = 0; j < n_matrices; ++j) {
+            // Flatten in column-major order (MATLAB convention)
+            for (int col = 0; col < 3; ++col) {
+                for (int row = 0; row < 3; ++row) {
+                    flat_data[j * 9 + col * 3 + row] = frame_data[j](row, col);
+                }
+            }
+        }
+        
+        // Create Nx9 array
+        std::vector<size_t> dims = {n_matrices, 9};
+        matvar_t* cell_data = Mat_VarCreate(nullptr, MAT_C_DOUBLE, MAT_T_DOUBLE,
+                                           2, dims.data(), flat_data.data(), 0);
+        
+        Mat_VarSetCell(cell_array, i, cell_data);
+    }
+    
+    return cell_array;
 }
 
 } // namespace cppxdic

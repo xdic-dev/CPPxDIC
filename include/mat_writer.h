@@ -10,10 +10,12 @@
 #include <matio.h>
 #include <ncorr.h>
 #include <opencv2/opencv.hpp>
+#include <Eigen/Dense>
 #include <string>
 #include <vector>
 #include <map>
 #include "dic_structures.h"
+#include "strain_computation.h"
 
 namespace cppxdic {
 
@@ -172,6 +174,49 @@ public:
      */
     static bool write3DPPresults(const std::string& filename,
                                 const DIC3DPPresults& ppresults);
+    
+    /**
+     * Write deformation fields to HDF5 group
+     * Writes all 36 deformation measures as cell arrays
+     * 
+     * @param matfp MAT file pointer (must be open for writing)
+     * @param group_name Name of the group (e.g., "Deform")
+     * @param deform_data Frame-based deformation results
+     * @return Success status
+     */
+    static bool writeDeformationGroup(mat_t* matfp,
+                                      const std::string& group_name,
+                                      const FrameDeformationResult& deform_data);
+    
+    /**
+     * Write displacement group (DispVec, DispMgn)
+     * 
+     * @param matfp MAT file pointer (must be open for writing)
+     * @param disp_vec Displacement vectors per frame (Nx3 per frame)
+     * @param disp_mgn Displacement magnitudes per frame (Nx1 per frame)
+     * @param n_frames Number of frames
+     * @return Success status
+     */
+    static bool writeDisplacementGroup(mat_t* matfp,
+                                       const std::vector<std::vector<Eigen::Vector3d>>& disp_vec,
+                                       const std::vector<std::vector<double>>& disp_mgn,
+                                       size_t n_frames);
+    
+    /**
+     * Write face-based cell arrays (FaceCentroids, FaceCorrComb, FaceIsoInd)
+     * 
+     * @param matfp MAT file pointer (must be open for writing)
+     * @param face_centroids Face centroids per frame (Mx3 per frame)
+     * @param face_corr_comb Face correlation coefficients per frame (Mx1 per frame)
+     * @param face_iso_ind Face isotropy indices per frame (Mx1 per frame)
+     * @param n_frames Number of frames
+     * @return Success status
+     */
+    static bool writeFaceArrays(mat_t* matfp,
+                               const std::vector<std::vector<Eigen::Vector3d>>& face_centroids,
+                               const std::vector<std::vector<double>>& face_corr_comb,
+                               const std::vector<std::vector<double>>& face_iso_ind,
+                               size_t n_frames);
 
 private:
     /**
@@ -347,6 +392,45 @@ private:
                                  matvar_t* dispinfo_var,
                                  matvar_t* displacements_var,
                                  const ncorr::DIC_analysis_output& dic_output);
+    
+    /**
+     * Create cell array from scalar data (per frame)
+     * 
+     * @param name Variable name
+     * @param data Vector of vectors (frame x elements)
+     * @param n_frames Number of frames
+     * @return Cell array variable
+     */
+    static matvar_t* createCellArrayFromScalars(
+        const std::string& name,
+        const std::vector<std::vector<double>>& data,
+        size_t n_frames);
+    
+    /**
+     * Create cell array from 3D vectors (per frame)
+     * 
+     * @param name Variable name
+     * @param data Vector of vectors of Vector3d (frame x elements)
+     * @param n_frames Number of frames
+     * @return Cell array variable
+     */
+    static matvar_t* createCellArrayFromVectors(
+        const std::string& name,
+        const std::vector<std::vector<Eigen::Vector3d>>& data,
+        size_t n_frames);
+    
+    /**
+     * Create cell array from 3x3 matrices (per frame)
+     * 
+     * @param name Variable name
+     * @param data Vector of vectors of Matrix3d (frame x elements)
+     * @param n_frames Number of frames
+     * @return Cell array variable
+     */
+    static matvar_t* createCellArrayFromMatrices(
+        const std::string& name,
+        const std::vector<std::vector<Eigen::Matrix3d>>& data,
+        size_t n_frames);
 };
 
 } // namespace cppxdic
