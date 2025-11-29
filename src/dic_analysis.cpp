@@ -151,6 +151,105 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                           << vertices_all_frames.size() << ")" << std::endl;
             }
             
+            // Update Points3D with filtered data (matching MATLAB line 115)
+            std::cout << "\nUpdating Points3D with filtered data..." << std::endl;
+            dic3d.Points3D.clear();
+            dic3d.Points3D.resize(vertices_all_frames.size());
+            for (size_t iframe = 0; iframe < vertices_all_frames.size(); ++iframe) {
+                Points3D& frame_pts = dic3d.Points3D[iframe];
+                frame_pts.x.resize(nPoints);
+                frame_pts.y.resize(nPoints);
+                frame_pts.z.resize(nPoints);
+                for (size_t ipt = 0; ipt < nPoints; ++ipt) {
+                    frame_pts.x[ipt] = vertices_all_frames[iframe][ipt].x();
+                    frame_pts.y[ipt] = vertices_all_frames[iframe][ipt].y();
+                    frame_pts.z[ipt] = vertices_all_frames[iframe][ipt].z();
+                }
+            }
+            std::cout << "  ✓ Points3D updated with filtered data" << std::endl;
+            
+            // Recompute displacement based on filtered Points3D (matching MATLAB lines 69-71)
+            std::cout << "\nRecomputing displacement after filtering..." << std::endl;
+            dic3d.Disp.DispVec.clear();
+            dic3d.Disp.DispMgn.clear();
+            dic3d.Disp.DispVec.resize(vertices_all_frames.size());
+            dic3d.Disp.DispMgn.resize(vertices_all_frames.size());
+            
+            for (size_t iframe = 0; iframe < vertices_all_frames.size(); ++iframe) {
+                std::vector<double>& disp_vec = dic3d.Disp.DispVec[iframe];
+                std::vector<double>& disp_mgn = dic3d.Disp.DispMgn[iframe];
+                
+                disp_vec.resize(nPoints * 3);
+                disp_mgn.resize(nPoints);
+                
+                for (size_t ipt = 0; ipt < nPoints; ++ipt) {
+                    double dx = vertices_all_frames[iframe][ipt].x() - vertices_ref[ipt].x();
+                    double dy = vertices_all_frames[iframe][ipt].y() - vertices_ref[ipt].y();
+                    double dz = vertices_all_frames[iframe][ipt].z() - vertices_ref[ipt].z();
+                    
+                    disp_vec[ipt * 3 + 0] = dx;
+                    disp_vec[ipt * 3 + 1] = dy;
+                    disp_vec[ipt * 3 + 2] = dz;
+                    
+                    disp_mgn[ipt] = std::sqrt(dx*dx + dy*dy + dz*dz);
+                }
+            }
+            std::cout << "  ✓ Displacement recomputed for " << vertices_all_frames.size() << " frames" << std::endl;
+            
+            // Recompute face centroids based on filtered Points3D (matching MATLAB lines 64-66)
+            std::cout << "\nRecomputing face centroids after filtering..." << std::endl;
+            dic3d.FaceCentroids.clear();
+            dic3d.FaceCentroids.resize(vertices_all_frames.size());
+            
+            size_t nFaces = dic3d.Faces.size() / 3;
+            for (size_t iframe = 0; iframe < vertices_all_frames.size(); ++iframe) {
+                std::vector<double>& centroids = dic3d.FaceCentroids[iframe];
+                centroids.resize(nFaces * 3);
+                
+                for (size_t iface = 0; iface < nFaces; ++iface) {
+                    int v0 = dic3d.Faces[iface * 3 + 0];
+                    int v1 = dic3d.Faces[iface * 3 + 1];
+                    int v2 = dic3d.Faces[iface * 3 + 2];
+                    
+                    double cx = (vertices_all_frames[iframe][v0].x() + 
+                                 vertices_all_frames[iframe][v1].x() + 
+                                 vertices_all_frames[iframe][v2].x()) / 3.0;
+                    double cy = (vertices_all_frames[iframe][v0].y() + 
+                                 vertices_all_frames[iframe][v1].y() + 
+                                 vertices_all_frames[iframe][v2].y()) / 3.0;
+                    double cz = (vertices_all_frames[iframe][v0].z() + 
+                                 vertices_all_frames[iframe][v1].z() + 
+                                 vertices_all_frames[iframe][v2].z()) / 3.0;
+                    
+                    centroids[iface * 3 + 0] = cx;
+                    centroids[iface * 3 + 1] = cy;
+                    centroids[iface * 3 + 2] = cz;
+                }
+            }
+            std::cout << "  ✓ Face centroids recomputed for " << vertices_all_frames.size() << " frames" << std::endl;
+            
+            // Recompute face correlation (worst of 3 vertices) (matching MATLAB line 61)
+            std::cout << "\nRecomputing face correlation after filtering..." << std::endl;
+            dic3d.FaceCorrComb.clear();
+            dic3d.FaceCorrComb.resize(vertices_all_frames.size());
+            
+            for (size_t iframe = 0; iframe < vertices_all_frames.size(); ++iframe) {
+                std::vector<double>& face_corr = dic3d.FaceCorrComb[iframe];
+                face_corr.resize(nFaces);
+                
+                const auto& point_corr = dic3d.corrComb[iframe];
+                
+                for (size_t iface = 0; iface < nFaces; ++iface) {
+                    int v0 = dic3d.Faces[iface * 3 + 0];
+                    int v1 = dic3d.Faces[iface * 3 + 1];
+                    int v2 = dic3d.Faces[iface * 3 + 2];
+                    
+                    // Take worst (max) correlation of 3 vertices
+                    face_corr[iface] = std::max({point_corr[v0], point_corr[v1], point_corr[v2]});
+                }
+            }
+            std::cout << "  ✓ Face correlation recomputed for " << vertices_all_frames.size() << " frames" << std::endl;
+            
             // Compute rigid body motion (RBM) removal (matching MATLAB STEP4 lines 61-70)
             std::cout << "\nComputing rigid body motion (RBM) transformations..." << std::endl;
             std::vector<Utils::RigidTransform> rbm_transforms(vertices_all_frames.size());
@@ -210,6 +309,9 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
             std::cout << "\nBuilding DIC3DPPresults structure..." << std::endl;
             DIC3DPPresults ppresults;
             
+            // Store full deformation result for MAT file writing (all 36 fields)
+            ppresults.deform_full = deform_result;
+            
             // Compute face isotropy index for each frame
             std::cout << "\nComputing face isotropy index..." << std::endl;
             ppresults.FaceIsoInd.resize(vertices_all_frames.size());
@@ -248,7 +350,7 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
             ppresults.Deform.princStrain.resize(deform_result.n_frames);
             ppresults.Deform.maxShearStrain.resize(deform_result.n_frames);
             
-            size_t nFaces = dic3d.Faces.size() / 3;
+            // nFaces already defined above (line 204)
             
             for (size_t iframe = 0; iframe < deform_result.n_frames; ++iframe) {
                 const auto& frame = deform_result.frames[iframe];
@@ -610,8 +712,9 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
         };
 
         for (int trial : trial_target) {
-            // Collect all pairs for this trial before stitching
-            std::vector<DIC3Dcombined> all_pairs;
+            // Collect all individual pair results before stitching
+            std::vector<DIC3DpairResults> all_pairs;
+            std::vector<DIC2DPairResults> dic2d_info;
             
             // Format trial as 3-digit string (e.g., "005")
             std::ostringstream trial_str;
@@ -689,11 +792,11 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 
                 // Load distortion parameters (if available)
                 Utils::CameraParameters distortion_cam1, distortion_cam2;
+                std::string distortion_cam1_path, distortion_cam2_path;
                 bool use_distortion_removal = false;
                 
                 // Look for distortion parameter files in calibration directory
                 if (std::filesystem::exists(calib_dir)) {
-                    std::string distortion_cam1_path, distortion_cam2_path;
                     // Build search strings for this camera pair
                     std::string cam_1_search = "cam_" + std::to_string(cam_1);
                     std::string cam_2_search = "cam_" + std::to_string(cam_2);
@@ -759,9 +862,12 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 std::vector<int> faces; std::vector<int> indexLUT; int W=0,H=0;
                 build_faces_from_roi(dic1.disps.front().get_roi(), faces, indexLUT, W, H);
 
-                // Accumulate 3D data (NO per-frame .bin files)
-                DIC3Dcombined combined;
-                combined.pairIndices = {1, 2};  // Camera pair
+                // Create individual pair result structure
+                DIC3DpairResults pair_result;
+                pair_result.cameraPairInd = {cam_1, cam_2};  // Camera pair indices
+                pair_result.DLTpath = {calib_cam1, calib_cam2};
+                pair_result.DLTparameters = {L1, L2};
+                
                 std::vector<double> P3D_ref; // frame 1 reference
                 
                 // Extract correlation coefficients from both cameras (for combined corr)
@@ -856,14 +962,14 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                         frame_pts.y.push_back(pts3d[k*3+1]);
                         frame_pts.z.push_back(pts3d[k*3+2]);
                     }
-                    combined.Points3D.push_back(frame_pts);
+                    pair_result.Points3D.push_back(frame_pts);
 
                     // Compute combined correlation (max of cam1 and cam2 - worst case)
                     std::vector<double> corr_comb;
                     for (size_t k=0; k<N; ++k) {
                         corr_comb.push_back(std::max(corrCam1[fi][k], corrCam2[fi][k]));
                     }
-                    combined.corrComb.push_back(corr_comb);
+                    pair_result.corrComb.push_back(corr_comb);
                     
                     // Compute face-based correlation (max of 3 vertices)
                     size_t nFaces = faces.size() / 3;
@@ -879,7 +985,7 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                             face_corr.push_back(std::numeric_limits<double>::quiet_NaN());
                         }
                     }
-                    combined.FaceCorrComb.push_back(face_corr);
+                    pair_result.FaceCorrComb.push_back(face_corr);
                     
                     // Compute face centroids
                     std::vector<double> face_centroids;
@@ -900,7 +1006,7 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                             face_centroids.push_back(std::numeric_limits<double>::quiet_NaN());
                         }
                     }
-                    combined.FaceCentroids.push_back(face_centroids);
+                    pair_result.FaceCentroids.push_back(face_centroids);
 
                     // Compute displacement from frame 1
                     if (fi==0) P3D_ref = pts3d;
@@ -914,22 +1020,26 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                         dispmgn[k]=std::sqrt(dx*dx+dy*dy+dz*dz);
                     }
                     // Accumulate displacement data
-                    combined.Disp.DispVec.push_back(dispvec);
-                    combined.Disp.DispMgn.push_back(dispmgn);
+                    pair_result.Disp.DispVec.push_back(dispvec);
+                    pair_result.Disp.DispMgn.push_back(dispmgn);
                 }
 
-                // Finalize combined structure for this pair
-                combined.Faces = faces;
-                // Create 2x1 calibration arrays (2 cameras, 1 pair)
-                combined.calibration.DLT_paths = {{calib_cam1}, {calib_cam2}};
-                combined.calibration.DLT_params = {{L1}, {L2}};
-                combined.pairIndices = {pair * 2 - 1, pair * 2};  // Camera indices for this pair
+                // Finalize pair result structure
+                pair_result.Faces = faces;
+                // Set distortion info (if available)
+                if (use_distortion_removal) {
+                    pair_result.distortionModel = {"distortion", "distortion"};  // Placeholder
+                    pair_result.distortionPath = {distortion_cam1_path, distortion_cam2_path};
+                } else {
+                    pair_result.distortionModel = {"none", "none"};
+                    pair_result.distortionPath = {"none", "none"};
+                }
                 
                 // Store this pair's result
-                all_pairs.push_back(combined);
+                all_pairs.push_back(pair_result);
                 
                 std::cout << "✓ Pair " << pair << " complete: " 
-                          << combined.Points3D[0].x.size() << " points, "
+                          << pair_result.Points3D[0].x.size() << " points, "
                           << faces.size() / 3 << " faces" << std::endl;
             }
             
@@ -941,6 +1051,48 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 continue;
             } else {
                 stitched = stitchPairsSimple(all_pairs);
+                
+                // Store individual pair results in stitched structure
+                stitched.AllPairsResults = all_pairs;
+                
+                // Load DIC2D pair results from Step 2 output files
+                std::cout << "\n=== Loading DIC2D pair results ===" << std::endl;
+                std::string output_dir = config_.dic_path + "/" + config_.subject_id + "/" + config_.material;
+                for (int pair = 1; pair <= config_.num_pair; ++pair) {
+                    int cam_1 = (pair - 1) * 2 + 1;
+                    int cam_2 = (pair - 1) * 2 + 2;
+                    
+                    std::string dic2d_file = output_dir + "/myDIC2DpairResults_C_" + 
+                        std::to_string(cam_1) + "_C_" + std::to_string(cam_2) + ".mat";
+                    
+                    if (std::filesystem::exists(dic2d_file)) {
+                        // Load full DIC2D data from MAT file
+                        DIC2DPairResults dic2d_result;
+                        if (MatReader::readDIC2DPairResults(dic2d_file, dic2d_result)) {
+                            dic2d_info.push_back(dic2d_result);
+                            std::cout << "  ✓ Loaded full DIC2D data for pair " << pair << std::endl;
+                        } else {
+                            // Fallback to placeholder if loading fails
+                            std::cerr << "  ! Failed to load DIC2D file, using placeholder: " << dic2d_file << std::endl;
+                            dic2d_result.nCamRef = cam_1;
+                            dic2d_result.nCamDef = cam_2;
+                            dic2d_result.nImages = all_pairs[pair-1].Points3D.size();
+                            dic2d_info.push_back(dic2d_result);
+                        }
+                    } else {
+                        std::cout << "  ! DIC2D file not found (creating placeholder): " << dic2d_file << std::endl;
+                        // Create placeholder when file doesn't exist
+                        DIC2DPairResults dic2d_result;
+                        dic2d_result.nCamRef = cam_1;
+                        dic2d_result.nCamDef = cam_2;
+                        dic2d_result.nImages = all_pairs[pair-1].Points3D.size();
+                        dic2d_info.push_back(dic2d_result);
+                    }
+                }
+                
+                // Store DIC2D info in stitched structure
+                stitched.DIC2Dinfo = dic2d_info;
+                std::cout << "  Stored " << stitched.DIC2Dinfo.size() << " DIC2D pair results" << std::endl;
             }
             
             // Write stitched result to binary file (always saved for Step F)

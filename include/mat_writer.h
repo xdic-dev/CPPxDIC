@@ -264,14 +264,13 @@ public:
                                     const DistortionData& distortion);
     
     /**
-     * Write AllPairsResults as cell array of DIC3Dcombined structures
-     * 
-     * @param matfp MAT file pointer (must be open for writing)
-     * @param all_pairs Vector of DIC3Dcombined results for each pair
+     * Write AllPairsResults cell array with full DIC3DpairResults structs
+     * @param matfp MAT file pointer
+     * @param all_pairs Vector of DIC3DpairResults (individual pair results)
      * @return Success status
      */
     static bool writeAllPairsResults(mat_t* matfp,
-                                    const std::vector<DIC3Dcombined>& all_pairs);
+                                    const std::vector<DIC3DpairResults>& all_pairs);
     
     /**
      * Write DIC2Dinfo as object array of DIC2DPairResults

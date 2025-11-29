@@ -21,18 +21,34 @@ namespace cppxdic {
  * Simple append-based stitching (no geometric overlap removal)
  * Equivalent to Matlab lines 450-479 (when pairIndList is empty)
  */
-DIC3Dcombined stitchPairsSimple(const std::vector<DIC3Dcombined>& all_pairs) {
+DIC3Dcombined stitchPairsSimple(const std::vector<DIC3DpairResults>& all_pairs) {
     if (all_pairs.empty()) {
         return DIC3Dcombined();
     }
     
     if (all_pairs.size() == 1) {
-        // Single pair - just return it with pair indices set
-        DIC3Dcombined result = all_pairs[0];
+        // Single pair - convert to DIC3Dcombined with pair indices set
+        DIC3Dcombined result;
+        const auto& pair = all_pairs[0];
+        
+        result.Points3D = pair.Points3D;
+        result.Faces = pair.Faces;
+        result.FaceColors = pair.FaceColors;
+        result.corrComb = pair.corrComb;
+        result.FaceCorrComb = pair.FaceCorrComb;
+        result.FaceCentroids = pair.FaceCentroids;
+        result.Disp = pair.Disp;
+        
         size_t nFaces = result.Faces.size() / 3;
         size_t nPoints = result.Points3D.empty() ? 0 : result.Points3D[0].x.size();
         result.FacePairInds.assign(nFaces, 1);
         result.PointPairInds.assign(nPoints, 1);
+        
+        // Set pairIndices from cameraPairInd
+        if (pair.cameraPairInd.size() >= 2) {
+            result.pairIndices = pair.cameraPairInd;
+        }
+        
         return result;
     }
     
@@ -41,7 +57,15 @@ DIC3Dcombined stitchPairsSimple(const std::vector<DIC3Dcombined>& all_pairs) {
     size_t nFrames = all_pairs[0].Points3D.size();
     
     // Initialize with first pair
-    stitched = all_pairs[0];
+    const auto& first_pair = all_pairs[0];
+    stitched.Points3D = first_pair.Points3D;
+    stitched.Faces = first_pair.Faces;
+    stitched.FaceColors = first_pair.FaceColors;
+    stitched.corrComb = first_pair.corrComb;
+    stitched.FaceCorrComb = first_pair.FaceCorrComb;
+    stitched.FaceCentroids = first_pair.FaceCentroids;
+    stitched.Disp = first_pair.Disp;
+    
     size_t nFaces = stitched.Faces.size() / 3;
     size_t nPoints = stitched.Points3D[0].x.size();
     stitched.FacePairInds.assign(nFaces, 1);  // Pair 1
@@ -49,9 +73,9 @@ DIC3Dcombined stitchPairsSimple(const std::vector<DIC3Dcombined>& all_pairs) {
     
     // Initialize pairIndices matrix (nPairs x 2)
     stitched.pairIndices.resize(all_pairs.size() * 2);
-    if (all_pairs[0].pairIndices.size() >= 2) {
-        stitched.pairIndices[0] = all_pairs[0].pairIndices[0];
-        stitched.pairIndices[1] = all_pairs[0].pairIndices[1];
+    if (first_pair.cameraPairInd.size() >= 2) {
+        stitched.pairIndices[0] = first_pair.cameraPairInd[0];
+        stitched.pairIndices[1] = first_pair.cameraPairInd[1];
     }
     
     std::cout << "  Pair 1: " << nPoints << " points, " << nFaces << " faces" << std::endl;
@@ -155,27 +179,27 @@ DIC3Dcombined stitchPairsSimple(const std::vector<DIC3Dcombined>& all_pairs) {
         );
         
         // Update pairIndices matrix
-        if (pair.pairIndices.size() >= 2) {
-            stitched.pairIndices[(ipair) * 2] = pair.pairIndices[0];
-            stitched.pairIndices[(ipair) * 2 + 1] = pair.pairIndices[1];
+        if (pair.cameraPairInd.size() >= 2) {
+            stitched.pairIndices[(ipair) * 2] = pair.cameraPairInd[0];
+            stitched.pairIndices[(ipair) * 2 + 1] = pair.cameraPairInd[1];
         }
         
         std::cout << "  Pair " << (ipair + 1) << ": " << pair_nPoints << " points, " 
                   << pair_nFaces << " faces (appended)" << std::endl;
     }
     
-    // Merge calibration data
+    // Merge calibration data from individual pairs
     for (const auto& pair : all_pairs) {
-        stitched.calibration.DLT_paths.insert(
-            stitched.calibration.DLT_paths.end(),
-            pair.calibration.DLT_paths.begin(),
-            pair.calibration.DLT_paths.end()
-        );
-        stitched.calibration.DLT_params.insert(
-            stitched.calibration.DLT_params.end(),
-            pair.calibration.DLT_params.begin(),
-            pair.calibration.DLT_params.end()
-        );
+        // Each pair has DLTpath and DLTparameters as vectors (2 cameras)
+        // Convert to 2D structure for DIC3Dcombined
+        stitched.calibration.DLT_paths.push_back(pair.DLTpath);
+        stitched.calibration.DLT_params.push_back(pair.DLTparameters);
+    }
+    
+    // Merge distortion data from individual pairs
+    for (const auto& pair : all_pairs) {
+        stitched.distortion.distortion_models.push_back(pair.distortionModel);
+        stitched.distortion.distortion_paths.push_back(pair.distortionPath);
     }
     
     size_t total_points = stitched.Points3D[0].x.size();
@@ -362,7 +386,7 @@ std::pair<std::vector<bool>, std::vector<bool>> removeOverlapSurfaces(
 // Geometric Stitching Implementation
 // ============================================================================
 
-DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3Dcombined>& all_pairs,
+DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3DpairResults>& all_pairs,
                                     const std::vector<int>& pair_order) {
     if (all_pairs.empty()) {
         return DIC3Dcombined();
@@ -386,7 +410,17 @@ DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3Dcombined>& all_pairs,
         return DIC3Dcombined();
     }
     
-    DIC3Dcombined stitched = all_pairs[first_idx];
+    // Convert first pair to DIC3Dcombined
+    DIC3Dcombined stitched;
+    const auto& first_pair = all_pairs[first_idx];
+    stitched.Points3D = first_pair.Points3D;
+    stitched.Faces = first_pair.Faces;
+    stitched.FaceColors = first_pair.FaceColors;
+    stitched.corrComb = first_pair.corrComb;
+    stitched.FaceCorrComb = first_pair.FaceCorrComb;
+    stitched.FaceCentroids = first_pair.FaceCentroids;
+    stitched.Disp = first_pair.Disp;
+    
     size_t nFrames = stitched.Points3D.size();
     size_t nFaces = stitched.Faces.size() / 3;
     size_t nPoints = stitched.Points3D[0].x.size();
@@ -553,18 +587,16 @@ DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3Dcombined>& all_pairs,
                   << pair_nPoints << " points, " << pair_nFaces << " faces" << std::endl;
     }
     
-    // Merge calibration data
+    // Merge calibration data from individual pairs
     for (const auto& pair : all_pairs) {
-        stitched.calibration.DLT_paths.insert(
-            stitched.calibration.DLT_paths.end(),
-            pair.calibration.DLT_paths.begin(),
-            pair.calibration.DLT_paths.end()
-        );
-        stitched.calibration.DLT_params.insert(
-            stitched.calibration.DLT_params.end(),
-            pair.calibration.DLT_params.begin(),
-            pair.calibration.DLT_params.end()
-        );
+        stitched.calibration.DLT_paths.push_back(pair.DLTpath);
+        stitched.calibration.DLT_params.push_back(pair.DLTparameters);
+    }
+    
+    // Merge distortion data from individual pairs
+    for (const auto& pair : all_pairs) {
+        stitched.distortion.distortion_models.push_back(pair.distortionModel);
+        stitched.distortion.distortion_paths.push_back(pair.distortionPath);
     }
     
     size_t total_points = stitched.Points3D[0].x.size();

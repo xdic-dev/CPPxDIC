@@ -729,8 +729,9 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
     std::cout << "  Loading cached DIC outputs..." << std::endl;
     ncorr::DIC_analysis_output dic1 = ncorr::DIC_analysis_output::load(ncorr1_bin);
     ncorr::DIC_analysis_output dic2 = ncorr::DIC_analysis_output::load(ncorr2_bin);
+    ncorr::DIC_analysis_output dic12 = ncorr::DIC_analysis_output::load(ncorr12_bin);
     
-    if (dic1.disps.empty() || dic2.disps.empty()) {
+    if (dic1.disps.empty() || dic2.disps.empty() || dic12.disps.empty()) {
         std::cerr << "Error: DIC outputs are empty" << std::endl;
         return;
     }
@@ -738,6 +739,8 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
     int n_frames = dic1.disps.size();
     int Factor = dic1.disps[0].get_scalefactor() + 1;
     std::cout << "  Processing " << n_frames << " frames, Factor=" << Factor << std::endl;
+    std::cout << "  Total frames: " << (n_frames * 2 + 1) << " (cam1: " << n_frames 
+              << " + matching: 1 + cam2: " << n_frames << ")" << std::endl;
     
     DIC2DPairResults results;
     results.nCamRef = cam_1;
@@ -763,8 +766,9 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
     }
     std::cout << "  Reference points: " << Pref.size() << std::endl;
     
-    results.Points.resize(n_frames * 2);
-    results.CorCoeffVec.resize(n_frames * 2);
+    // Resize for cam1 frames + matching frame + cam2 frames
+    results.Points.resize(n_frames * 2 + 1);
+    results.CorCoeffVec.resize(n_frames * 2 + 1);
     
     std::cout << "  Processing cam1 frames..." << std::endl;
     for (int ii = 0; ii < n_frames; ++ii) {
@@ -807,6 +811,46 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
         results.CorCoeffVec[ii] = corrcoef;
     }
     
+    std::cout << "  Processing matching frame (ncorr12)..." << std::endl;
+    // Matching frame goes at index n_frames (between cam1 and cam2)
+    {
+        const auto& disp12 = dic12.disps[0];  // Matching has only 1 frame
+        const auto& u12_array = disp12.get_u().get_array();
+        const auto& v12_array = disp12.get_v().get_array();
+        
+        std::vector<cv::Point2f> points;
+        std::vector<double> corrcoef;
+        points.reserve(Pref.size());
+        corrcoef.reserve(Pref.size());
+        
+        int idx = 0;
+        for (int y = 0; y < roi_mask.height(); ++y) {
+            for (int x = 0; x < roi_mask.width(); ++x) {
+                if (roi_mask(y, x)) {
+                    double u = u12_array(y, x);
+                    double v = v12_array(y, x);
+                    if (u == 0.0 && v == 0.0) {
+                        points.push_back(cv::Point2f(NAN, NAN));
+                        corrcoef.push_back(NAN);
+                    } else {
+                        points.push_back(cv::Point2f(Pref[idx].x + u, Pref[idx].y + v));
+                        corrcoef.push_back(0.95);
+                    }
+                    idx++;
+                }
+            }
+        }
+        Points2D pts2d12;
+        pts2d12.x.reserve(points.size());
+        pts2d12.y.reserve(points.size());
+        for (const auto& p : points) {
+            pts2d12.x.push_back(static_cast<double>(p.x));
+            pts2d12.y.push_back(static_cast<double>(p.y));
+        }
+        results.Points[n_frames] = std::move(pts2d12);
+        results.CorCoeffVec[n_frames] = corrcoef;
+    }
+    
     std::cout << "  Processing cam2 frames..." << std::endl;
     for (int ii = 0; ii < n_frames; ++ii) {
         const auto& disp2 = dic2.disps[ii];
@@ -835,9 +879,10 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
             pts2d2.x.push_back(static_cast<double>(p.x));
             pts2d2.y.push_back(static_cast<double>(p.y));
         }
-        results.Points[n_frames + ii] = std::move(pts2d2);
+        // Cam2 frames start at index n_frames + 1 (after matching frame)
+        results.Points[n_frames + 1 + ii] = std::move(pts2d2);
         // Store correlation coefficients as vector per frame
-        results.CorCoeffVec[n_frames + ii] = corrcoef;
+        results.CorCoeffVec[n_frames + 1 + ii] = corrcoef;
     }
     
     std::cout << "  Creating Delaunay triangulation..." << std::endl;

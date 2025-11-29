@@ -10,8 +10,23 @@
 #include <vector>
 #include <string>
 #include <map>
+#include "strain_computation.h"  // For FrameDeformationResult
 
 namespace cppxdic {
+
+/**
+ * Step Analysis parameters (for high strain analysis)
+ */
+struct StepAnalysisInfo {
+    bool enabled;           // high_strain_analysis
+    std::string type;       // seed_propagation type
+    bool auto_update;       // auto_ref_change
+    int step;              // step_ref_change
+    
+    StepAnalysisInfo() : 
+        enabled(true), type("seed"), 
+        auto_update(true), step(10) {}
+};
 
 /**
  * DIC Info structure (parameters)
@@ -26,7 +41,7 @@ struct DICInfo {
     double pixtounits;  // Pixels to units conversion
     int radius;
     int spacing;
-    // stepanalysis struct (placeholder - can be expanded if needed)
+    StepAnalysisInfo stepanalysis;  // Step analysis parameters
     bool subsettrunc;
     int total_threads;
     std::string type;
@@ -93,8 +108,37 @@ struct DistortionData {
 };
 
 /**
+ * DIC 3D Pair Results (Individual stereo pair)
+ * Equivalent to MATLAB's DIC3DpairResults
+ * This represents the 3D reconstruction for a single stereo pair
+ */
+struct DIC3DpairResults {
+    std::vector<int> cameraPairInd;  // [cam1, cam2] - Camera pair indices
+    
+    // Calibration for this pair (2x1 cell arrays)
+    std::vector<std::string> DLTpath;  // {path_cam1, path_cam2}
+    std::vector<std::vector<double>> DLTparameters;  // {L1, L2}
+    
+    // Distortion for this pair (2x1 cell arrays)
+    std::vector<std::string> distortionModel;  // {model_cam1, model_cam2}
+    std::vector<std::string> distortionPath;  // {path_cam1, path_cam2}
+    
+    // Geometry
+    std::vector<int> Faces;  // Triangle connectivity (3 x nFaces flattened)
+    std::vector<double> FaceColors;  // Face colors (1 x nFaces)
+    
+    // Per-frame data (cell arrays nImages x 1)
+    std::vector<Points3D> Points3D;  // 3D points per frame
+    DispData Disp;  // DispVec, DispMgn per frame
+    std::vector<std::vector<double>> FaceCentroids;  // Face centroids per frame (nFrames x (nFaces*3))
+    std::vector<std::vector<double>> corrComb;  // Combined correlation per frame
+    std::vector<std::vector<double>> FaceCorrComb;  // Face correlation per frame
+};
+
+/**
  * DIC 3D Combined Results
  * Equivalent to MATLAB's DIC3Dcombined
+ * This represents stitched results from multiple stereo pairs
  */
 struct DIC3Dcombined {
     std::vector<int> pairIndices;  // Camera pair indices
@@ -112,11 +156,11 @@ struct DIC3Dcombined {
     std::vector<int> FacePairInds;  // Which stereo pair each face belongs to (1-indexed)
     std::vector<int> PointPairInds; // Which stereo pair each point belongs to (1-indexed)
     
-    // Original DIC 2D info
+    // Original DIC 2D info (cell array nPairs x 1)
     std::vector<DIC2DPairResults> DIC2Dinfo;
     
-    // Individual pair results (for multiple pairs)
-    std::vector<DIC3Dcombined> AllPairsResults;
+    // Individual pair results before stitching (cell array 1 x nPairs)
+    std::vector<DIC3DpairResults> AllPairsResults;
     
     // Binary serialization methods
     void saveBinary(const std::string& filepath) const;
@@ -164,7 +208,7 @@ struct RBMData {
  * Equivalent to MATLAB's DIC3DPPresults
  */
 struct DIC3DPPresults : DIC3Dcombined {
-    DeformData Deform;         // Deformation and strain data (with RBM)
+    DeformData Deform;         // Deformation and strain data (with RBM) - simplified format
     DeformData Deform_ARBM;    // Deformation and strain data after RBM removal
     RBMData RBM;               // Rigid body motion transformation data
     std::vector<std::vector<double>> Points3D_ARBM_x;  // 3D points after RBM per frame
@@ -173,6 +217,9 @@ struct DIC3DPPresults : DIC3Dcombined {
     std::vector<std::vector<double>> FaceIsoInd;  // Face isotropy index per frame
     std::string deftype;  // "cum" (cumulative) or "rate"
     size_t n_frames;  // Number of frames processed
+    
+    // Full deformation result (all 36 fields) for MAT file writing
+    FrameDeformationResult deform_full;
 };
 
 } // namespace cppxdic

@@ -136,6 +136,25 @@ public:
      */
     static bool readDIC3Dcombined(const std::string& mat_path, 
                                   struct DIC3Dcombined& combined);
+    
+    /**
+     * Read DIC2DPairResults structure from MAT file
+     * Loads myDIC2DpairResults_C_X_C_Y.mat files
+     * 
+     * @param mat_path Path to MAT file containing DIC2DpairResults
+     * @param result Output: DIC2DPairResults structure
+     * @return True if successful
+     */
+    static bool readDIC2DPairResults(const std::string& mat_path,
+                                     struct DIC2DPairResults& result);
+    
+    /**
+     * Read integer array from matvar
+     * 
+     * @param var MAT variable
+     * @return Vector of integers
+     */
+    static std::vector<int> readIntArray(matvar_t* var);
 };
 
 } // namespace cppxdic

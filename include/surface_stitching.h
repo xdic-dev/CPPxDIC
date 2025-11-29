@@ -17,20 +17,20 @@ namespace cppxdic {
  * Concatenates all pairs together with proper index offsetting.
  * Does not perform geometric overlap removal.
  * 
- * @param all_pairs Vector of DIC3Dcombined structures, one per stereo pair
+ * @param all_pairs Vector of DIC3DpairResults structures, one per stereo pair
  * @return Stitched DIC3Dcombined structure with all pairs combined
  */
-DIC3Dcombined stitchPairsSimple(const std::vector<DIC3Dcombined>& all_pairs);
+DIC3Dcombined stitchPairsSimple(const std::vector<DIC3DpairResults>& all_pairs);
 
 /**
  * Geometric stitching with overlap removal and boundary zipping
  * Matches MATLAB's DIC3DsurfaceStitch.m with geometric stitching enabled
  * 
- * @param all_pairs Vector of DIC3Dcombined structures, one per stereo pair
+ * @param all_pairs Vector of DIC3DpairResults structures, one per stereo pair
  * @param pair_order Order in which to stitch pairs (1-indexed, matching MATLAB pairIndList)
  * @return Stitched DIC3Dcombined structure with overlaps removed
  */
-DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3Dcombined>& all_pairs,
+DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3DpairResults>& all_pairs,
                                     const std::vector<int>& pair_order);
 
 // ============================================================================
