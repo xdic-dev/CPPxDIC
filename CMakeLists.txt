@@ -30,6 +30,11 @@ add_executable(cppxdic
     src/temporal_filter.cpp
     src/face_isotropy.cpp
     src/visualization.cpp
+    # New workflow classes (refactored)
+    src/preprocessing_workflow.cpp
+    src/dic2d_workflow.cpp
+    src/reconstruction3d_workflow.cpp
+    src/deformation_workflow.cpp
 )
 
 # Find OpenCV (following ncorr pattern)

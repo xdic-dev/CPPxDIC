@@ -46,6 +46,14 @@ endif()
 # Find pthreads early
 find_package(Threads)
 
+# Find Eigen3 early (required by dic_structures.h -> strain_computation.h)
+find_package(Eigen3 REQUIRED)
+if(Eigen3_FOUND)
+    if(TARGET Eigen3::Eigen)
+        message(STATUS "Found Eigen3 target: Eigen3::Eigen")
+    endif()
+endif()
+
 # Test 1: test_ncorr_bin - Analyze .bin files (now supports both ncorr and DIC3Dcombined formats)
 add_executable(test_ncorr_bin
     src/test_ncorr_bin.cpp
@@ -110,6 +118,11 @@ endif()
 
 # Add pthreads
 target_link_libraries(test_ncorr_bin ${CMAKE_THREAD_LIBS_INIT})
+
+# Add Eigen3 (required by dic_structures.h -> strain_computation.h)
+if(TARGET Eigen3::Eigen)
+    target_link_libraries(test_ncorr_bin Eigen3::Eigen)
+endif()
 
 # Test 2: test_ncorr_to_mat - Convert .bin to .mat
 add_executable(test_ncorr_to_mat
@@ -274,11 +287,79 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(test_mat_writers OpenMP::OpenMP_CXX)
 endif()
 
+# Test 5: test_var_test2 - Test StepD workflow intermediate outputs
+add_executable(test_var_test2
+    src/test_var_test2.cpp
+)
+
+# Link matio library
+target_link_libraries(test_var_test2 ${MATIO_LIBRARY})
+
+# Link HDF5 library
+if(HDF5_FOUND)
+    target_include_directories(test_var_test2 PRIVATE ${HDF5_INCLUDE_DIRS})
+    target_link_libraries(test_var_test2 ${HDF5_C_LIBRARIES})
+endif()
+
+# Link OpenCV
+target_link_libraries(test_var_test2 ${OpenCV_LIBS})
+
+# Test 6: test_var_parity - Parity test for StepD workflow vs MATLAB
+add_executable(test_var_parity
+    src/test_var_parity.cpp
+    ${CMAKE_SOURCE_DIR}/../src/config.cpp
+    ${CMAKE_SOURCE_DIR}/../src/image_processor.cpp
+    ${CMAKE_SOURCE_DIR}/../src/roi_manager.cpp
+    ${CMAKE_SOURCE_DIR}/../src/utils.cpp
+    ${CMAKE_SOURCE_DIR}/../src/dic_structures.cpp
+    ${CMAKE_SOURCE_DIR}/../src/mat_reader.cpp
+)
+
+# Link matio library
+target_link_libraries(test_var_parity ${MATIO_LIBRARY})
+
+# Link HDF5 library
+if(HDF5_FOUND)
+    target_include_directories(test_var_parity PRIVATE ${HDF5_INCLUDE_DIRS})
+    target_link_libraries(test_var_parity ${HDF5_C_LIBRARIES})
+endif()
+
+# Link OpenCV
+target_link_libraries(test_var_parity ${OpenCV_LIBS})
+
+# Link ncorr library (needed for DIC_analysis_output::load)
+if(NCORR_LIBRARY)
+    target_link_libraries(test_var_parity ${NCORR_LIBRARY})
+endif()
+
+# Link Eigen3
+if(TARGET Eigen3::Eigen)
+    target_link_libraries(test_var_parity Eigen3::Eigen)
+endif()
+
+# Link other dependencies (needed by ncorr)
+if(FFTW_LIBRARY)
+    target_link_libraries(test_var_parity ${FFTW_LIBRARY})
+endif()
+target_link_libraries(test_var_parity ${SUITESPARSE_LIBRARY1})
+target_link_libraries(test_var_parity ${SUITESPARSE_LIBRARY2})
+target_link_libraries(test_var_parity ${SUITESPARSE_LIBRARY3})
+target_link_libraries(test_var_parity ${SUITESPARSE_LIBRARY4})
+target_link_libraries(test_var_parity ${SUITESPARSE_LIBRARY5})
+target_link_libraries(test_var_parity ${LAPACK_LIBRARY})
+target_link_libraries(test_var_parity ${BLAS_LIBRARY})
+target_link_libraries(test_var_parity ${CMAKE_THREAD_LIBS_INIT})
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(test_var_parity OpenMP::OpenMP_CXX)
+endif()
+
 # Compiler flags
 target_compile_options(test_ncorr_bin PRIVATE -Wall -Wextra -O2)
 target_compile_options(test_ncorr_to_mat PRIVATE -Wall -Wextra -O2)
 target_compile_options(test_mat_comparator PRIVATE -Wall -Wextra -O2)
 target_compile_options(test_mat_writers PRIVATE -Wall -Wextra -O2)
+target_compile_options(test_var_test2 PRIVATE -Wall -Wextra -O2)
+target_compile_options(test_var_parity PRIVATE -Wall -Wextra -O2)
 
 # Print configuration
 message(STATUS "CPPxDIC Tests Configuration:")

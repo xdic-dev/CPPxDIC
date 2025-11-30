@@ -35,6 +35,164 @@ using namespace cppxdic;
 DicAnalysis::DicAnalysis(const Config& config) : config_(config) {
 }
 
+// ============================================================================
+// Workflow Accessors (lazy initialization)
+// ============================================================================
+
+PreprocessingWorkflow& DicAnalysis::getPreprocessingWorkflow() {
+    if (!preprocessing_) {
+        preprocessing_ = std::make_unique<PreprocessingWorkflow>(config_);
+    }
+    return *preprocessing_;
+}
+
+DIC2DWorkflow& DicAnalysis::getDIC2DWorkflow() {
+    if (!dic2d_) {
+        dic2d_ = std::make_unique<DIC2DWorkflow>(config_);
+    }
+    return *dic2d_;
+}
+
+Reconstruction3DWorkflow& DicAnalysis::getReconstruction3DWorkflow() {
+    if (!reconstruction3d_) {
+        reconstruction3d_ = std::make_unique<Reconstruction3DWorkflow>(config_);
+    }
+    return *reconstruction3d_;
+}
+
+DeformationWorkflow& DicAnalysis::getDeformationWorkflow() {
+    if (!deformation_) {
+        deformation_ = std::make_unique<DeformationWorkflow>(config_);
+    }
+    return *deformation_;
+}
+
+// ============================================================================
+// Refactored Run Method (using new workflow classes)
+// ============================================================================
+
+bool DicAnalysis::runRefactored() {
+    std::cout << "========================================" << std::endl;
+    std::cout << "DIC Analysis Pipeline (Refactored)" << std::endl;
+    std::cout << "========================================" << std::endl;
+    
+    // Step 0: Preprocessing
+    std::cout << "\n=== PREPROCESSING ===" << std::endl;
+    auto& preprocessing = getPreprocessingWorkflow();
+    if (!preprocessing.execute()) {
+        std::cerr << "Preprocessing failed!" << std::endl;
+        return false;
+    }
+    
+    const auto& trial_target = preprocessing.getTargetTrials();
+    std::cout << "Target trials: [";
+    for (size_t i = 0; i < trial_target.size(); ++i) {
+        std::cout << trial_target[i];
+        if (i < trial_target.size() - 1) std::cout << ", ";
+    }
+    std::cout << "]" << std::endl;
+    
+    // Step D: 2D DIC Analysis
+    std::cout << "\n=== STEP D: 2D DIC Analysis ===" << std::endl;
+    if (!check2DOutputsExist(trial_target)) {
+        auto& dic2d = getDIC2DWorkflow();
+        
+        for (int trial : trial_target) {
+            for (int pair = 1; pair <= config_.num_pair; ++pair) {
+                std::ostringstream trial_str;
+                trial_str << std::setw(3) << std::setfill('0') << trial;
+                
+                std::cout << "\nProcessing Trial " << trial << ", Pair " << pair << std::endl;
+                
+                auto outputs = dic2d.execute(trial_str.str(), pair);
+                if (!outputs.isValid()) {
+                    std::cerr << "DIC 2D failed for trial " << trial << ", pair " << pair << std::endl;
+                    return false;
+                }
+                
+                std::cout << "✓ Trial " << trial << ", pair " << pair << " complete" << std::endl;
+            }
+        }
+    } else {
+        std::cout << "✓ Checkpoint detected: All 2D DIC outputs exist" << std::endl;
+    }
+    
+    // Step E: 3D Reconstruction
+    std::cout << "\n=== STEP E: 3D Reconstruction ===" << std::endl;
+    if (!check3DOutputsExist(trial_target)) {
+        auto& reconstruction = getReconstruction3DWorkflow();
+        if (!reconstruction.execute(trial_target)) {
+            std::cerr << "3D Reconstruction failed!" << std::endl;
+            return false;
+        }
+    } else {
+        std::cout << "✓ Checkpoint detected: All 3D reconstruction outputs exist" << std::endl;
+    }
+    
+    // Step F: Deformation Analysis
+    std::cout << "\n=== STEP F: Deformation Analysis ===" << std::endl;
+    if (!checkDeformationOutputsExist()) {
+        auto& deformation = getDeformationWorkflow();
+        if (!deformation.execute(trial_target)) {
+            std::cerr << "Deformation Analysis failed!" << std::endl;
+            return false;
+        }
+    } else {
+        std::cout << "✓ Checkpoint detected: Deformation analysis outputs exist" << std::endl;
+    }
+    
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "✓ All DIC analysis steps complete!" << std::endl;
+    std::cout << "========================================" << std::endl;
+    
+    return true;
+}
+
+// ============================================================================
+// Checkpoint Helpers
+// ============================================================================
+
+bool DicAnalysis::check2DOutputsExist(const std::vector<int>& trial_target) {
+    for (int trial : trial_target) {
+        for (int pair = 1; pair <= config_.num_pair; ++pair) {
+            int cam1 = (pair - 1) * 2 + 1;
+            int cam2 = (pair - 1) * 2 + 2;
+            
+            std::ostringstream trial_str;
+            trial_str << std::setw(3) << std::setfill('0') << trial;
+            
+            std::string output_path = config_.dic_path + "/" + config_.subject_id + "/" + 
+                config_.material + "/" + trial_str.str() + "/" + config_.phase_id;
+            
+            std::string cam1_bin = output_path + "/.cache/ncorr" + std::to_string(cam1) + ".mat.bin";
+            std::string cam2_bin = output_path + "/.cache/ncorr" + std::to_string(cam2) + ".mat.bin";
+            
+            if (!std::filesystem::exists(cam1_bin) || !std::filesystem::exists(cam2_bin)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool DicAnalysis::check3DOutputsExist(const std::vector<int>& /*trial_target*/) {
+    std::ostringstream dic3d_path;
+    dic3d_path << config_.dic_path << "/" << config_.subject_id << "/" << config_.material 
+               << "/DIC3Dcombined_" << config_.num_pair << "Pairs_stitched.bin";
+    return std::filesystem::exists(dic3d_path.str());
+}
+
+bool DicAnalysis::checkDeformationOutputsExist() {
+    std::ostringstream ppresults_path;
+    ppresults_path << config_.dic_path << "/" << config_.subject_id << "/" << config_.material 
+                   << "/DIC3DPPresults_" << config_.num_pair << "Pairs_cum_v1.mat";
+    return std::filesystem::exists(ppresults_path.str());
+}
+
+// ============================================================================
+// Legacy Methods (kept for backward compatibility)
+// ============================================================================
+
 bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
     std::cout << "Starting Deformation/Strain Analysis (Step F)..." << std::endl;
     std::cout << "NOTE: This requires DIC3Dcombined from Step E" << std::endl;

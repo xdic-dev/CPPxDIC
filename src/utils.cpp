@@ -313,18 +313,38 @@ bool Utils::importRawVid(const Config& config,
             return false;
         }
 
-        // Extract frames
+        // Extract frames - MATLAB's readvid uses iloc(:,:,1) which takes only the first channel (R)
+        // OpenCV reads as BGR, so we need to extract the R channel (index 2 in BGR)
         for (int f = frameStart; f <= frameEnd; f += frameJump) {
             cap1.set(cv::CAP_PROP_POS_FRAMES, f - 1);
             cap2.set(cv::CAP_PROP_POS_FRAMES, f - 1);
             cv::Mat im1, im2;
             if (!cap1.read(im1) || !cap2.read(im2)) break;
 
+            // Extract R channel to match MATLAB's iloc(:,:,1)
+            // OpenCV reads as BGR, so R is at index 2
+            cv::Mat gray1, gray2;
+            if (im1.channels() == 3) {
+                std::vector<cv::Mat> channels1;
+                cv::split(im1, channels1);
+                gray1 = channels1[2];  // R channel (BGR -> index 2)
+            } else {
+                gray1 = im1;
+            }
+            
+            if (im2.channels() == 3) {
+                std::vector<cv::Mat> channels2;
+                cv::split(im2, channels2);
+                gray2 = channels2[2];  // R channel (BGR -> index 2)
+            } else {
+                gray2 = im2;
+            }
+
             std::ostringstream f1, f2;
             f1 << cam1_dir << "/frame_" << std::setw(6) << std::setfill('0') << f << ".png";
             f2 << cam2_dir << "/frame_" << std::setw(6) << std::setfill('0') << f << ".png";
-            cv::imwrite(f1.str(), im1);
-            cv::imwrite(f2.str(), im2);
+            cv::imwrite(f1.str(), gray1);
+            cv::imwrite(f2.str(), gray2);
             cam1Frames.push_back(f1.str());
             cam2Frames.push_back(f2.str());
         }

@@ -41,23 +41,15 @@ cv::Mat ImageProcessor::saturate(const cv::Mat& input, int level) {
     
     cv::Mat output = gray.clone();
     
-    // Saturate: clip values at level threshold
-    // MATLAB satur.m: pixels >= level become 255
+    // Saturate: clip values above level to level
+    // MATLAB satur.m: var(var > level) = level
     for (int y = 0; y < output.rows; ++y) {
         for (int x = 0; x < output.cols; ++x) {
             uint8_t val = output.at<uint8_t>(y, x);
-            if (val >= level) {
-                output.at<uint8_t>(y, x) = 255;
+            if (val > level) {
+                output.at<uint8_t>(y, x) = static_cast<uint8_t>(level);
             }
         }
-    }
-    
-    // Stretch histogram to use full [0, 255] range
-    double minVal, maxVal;
-    cv::minMaxLoc(output, &minVal, &maxVal);
-    
-    if (maxVal > minVal) {
-        output.convertTo(output, CV_8UC1, 255.0 / (maxVal - minVal), -minVal * 255.0 / (maxVal - minVal));
     }
     
     return output;
@@ -97,58 +89,71 @@ ImageProcessor::filterLikeBen(const std::vector<cv::Mat>& input,
 
 cv::Mat ImageProcessor::applyBandpassFilter(const cv::Mat& input,
                                             const std::vector<int>& param_filt) {
-    // Convert to float for processing
+    // Convert to float for processing (like MATLAB's double)
     cv::Mat float_img;
-    input.convertTo(float_img, CV_32F);
+    input.convertTo(float_img, CV_64F);
     
-    // Apply bandpass filter using FFT
-    // param_filt = [low_freq, high_freq] in pixel units
-    int low_freq = param_filt[0];
-    int high_freq = param_filt[1];
+    // Apply Gaussian bandpass filter using FFT
+    // param_filt = [r1, r2] where r1 is high-pass threshold, r2 is low-pass threshold
+    // MATLAB: filter = exp(-r^2/(2*r2^2)) * (1 - exp(-r^2/(2*r1^2)))
+    double r1 = static_cast<double>(param_filt[0]);
+    double r2 = static_cast<double>(param_filt[1]);
     
-    // Perform DFT
-    cv::Mat padded;
-    int m = cv::getOptimalDFTSize(float_img.rows);
-    int n = cv::getOptimalDFTSize(float_img.cols);
-    cv::copyMakeBorder(float_img, padded, 0, m - float_img.rows, 0, n - float_img.cols, 
-                       cv::BORDER_CONSTANT, cv::Scalar::all(0));
+    int rows = float_img.rows;
+    int cols = float_img.cols;
     
-    cv::Mat planes[] = {cv::Mat_<float>(padded), cv::Mat::zeros(padded.size(), CV_32F)};
+    // Create Gaussian bandpass filter (matching MATLAB bandpassfft.m)
+    cv::Mat filter_mask(rows, cols, CV_64F);
+    int cx = cols / 2;
+    int cy = rows / 2;
+    
+    for (int y = 0; y < rows; ++y) {
+        for (int x = 0; x < cols; ++x) {
+            double dx = x - cx;
+            double dy = y - cy;
+            double r_sq = dx * dx + dy * dy;
+            
+            // Gaussian bandpass: exp(-r^2/(2*r2^2)) * (1 - exp(-r^2/(2*r1^2)))
+            double low_pass = std::exp(-r_sq / (2.0 * r2 * r2));
+            double high_pass = (r1 != 0) ? (1.0 - std::exp(-r_sq / (2.0 * r1 * r1))) : 1.0;
+            filter_mask.at<double>(y, x) = low_pass * high_pass;
+        }
+    }
+    
+    // Perform FFT (matching MATLAB: out = real(ifft2(fft2(in).*fftshift(filter))))
+    cv::Mat planes[] = {float_img, cv::Mat::zeros(float_img.size(), CV_64F)};
     cv::Mat complex_img;
     cv::merge(planes, 2, complex_img);
     cv::dft(complex_img, complex_img);
     
-    // Create bandpass filter mask
-    cv::Mat filter_mask = cv::Mat::ones(complex_img.size(), CV_32F);
-    int cx = filter_mask.cols / 2;
-    int cy = filter_mask.rows / 2;
+    // fftshift the filter to match MATLAB's fftshift(filter)
+    cv::Mat filter_shifted;
+    int cx2 = filter_mask.cols / 2;
+    int cy2 = filter_mask.rows / 2;
+    cv::Mat q0(filter_mask, cv::Rect(0, 0, cx2, cy2));
+    cv::Mat q1(filter_mask, cv::Rect(cx2, 0, cols - cx2, cy2));
+    cv::Mat q2(filter_mask, cv::Rect(0, cy2, cx2, rows - cy2));
+    cv::Mat q3(filter_mask, cv::Rect(cx2, cy2, cols - cx2, rows - cy2));
     
-    for (int y = 0; y < filter_mask.rows; ++y) {
-        for (int x = 0; x < filter_mask.cols; ++x) {
-            double dx = x - cx;
-            double dy = y - cy;
-            double dist = std::sqrt(dx * dx + dy * dy);
-            
-            // Bandpass: pass frequencies between low and high
-            if (dist < low_freq || dist > high_freq) {
-                filter_mask.at<float>(y, x) = 0.0f;
-            }
-        }
-    }
+    cv::Mat tmp;
+    filter_shifted = cv::Mat(rows, cols, CV_64F);
+    q3.copyTo(filter_shifted(cv::Rect(0, 0, cols - cx2, rows - cy2)));
+    q0.copyTo(filter_shifted(cv::Rect(cols - cx2, rows - cy2, cx2, cy2)));
+    q1.copyTo(filter_shifted(cv::Rect(0, rows - cy2, cols - cx2, cy2)));
+    q2.copyTo(filter_shifted(cv::Rect(cols - cx2, 0, cx2, rows - cy2)));
     
     // Apply filter in frequency domain
-    cv::Mat filtered_complex;
     cv::split(complex_img, planes);
-    planes[0] = planes[0].mul(filter_mask);
-    planes[1] = planes[1].mul(filter_mask);
-    cv::merge(planes, 2, filtered_complex);
+    planes[0] = planes[0].mul(filter_shifted);
+    planes[1] = planes[1].mul(filter_shifted);
+    cv::merge(planes, 2, complex_img);
     
     // Inverse DFT
     cv::Mat filtered_img;
-    cv::idft(filtered_complex, filtered_img, cv::DFT_SCALE | cv::DFT_REAL_OUTPUT);
-    filtered_img = filtered_img(cv::Rect(0, 0, input.cols, input.rows));
+    cv::idft(complex_img, filtered_img, cv::DFT_SCALE);
+    cv::split(filtered_img, planes);
     
-    return filtered_img;
+    return planes[0];  // Return real part
 }
 
 std::pair<double, double> ImageProcessor::computeGrayscaleBoundaries(const cv::Mat& image,
@@ -178,12 +183,20 @@ std::pair<double, double> ImageProcessor::computePercentileBoundaries(const cv::
                                                                       double lower_percentile,
                                                                       double upper_percentile) {
     // Collect all pixel values within masked region
-    std::vector<float> values;
+    std::vector<double> values;
     
-    for (int y = 0; y < image.rows; ++y) {
-        for (int x = 0; x < image.cols; ++x) {
+    // Convert to double if needed
+    cv::Mat double_img;
+    if (image.type() == CV_64F) {
+        double_img = image;
+    } else {
+        image.convertTo(double_img, CV_64F);
+    }
+    
+    for (int y = 0; y < double_img.rows; ++y) {
+        for (int x = 0; x < double_img.cols; ++x) {
             if (mask.at<uint8_t>(y, x) > 0) {
-                values.push_back(image.at<float>(y, x));
+                values.push_back(double_img.at<double>(y, x));
             }
         }
     }
@@ -210,16 +223,25 @@ cv::Mat ImageProcessor::normalizeAndClamp(const cv::Mat& image,
                                          const std::pair<double, double>& boundaries) {
     // Normalize: ((image - min) / (max - min))
     // Then saturate to [0, 1] and scale to [0, 255]
-    cv::Mat normalized;
+    // MATLAB: imbdp_norm = ((imbdp-y(1))/(y(2)-y(1)));
+    //         imbdp_norm = satur(satur(imbdp_norm,'method','low','level',0),'method','high','level',1);
     
+    cv::Mat double_img;
+    if (image.type() == CV_64F) {
+        double_img = image;
+    } else {
+        image.convertTo(double_img, CV_64F);
+    }
+    
+    cv::Mat normalized;
     double range = boundaries.second - boundaries.first;
     if (range > 0) {
-        normalized = (image - boundaries.first) / range;
-        // Saturate (clamp) to [0, 1]
+        normalized = (double_img - boundaries.first) / range;
+        // Saturate (clamp) to [0, 1] - matching MATLAB's satur calls
         cv::threshold(normalized, normalized, 1.0, 1.0, cv::THRESH_TRUNC);
         cv::threshold(normalized, normalized, 0.0, 0.0, cv::THRESH_TOZERO);
     } else {
-        normalized = cv::Mat::zeros(image.size(), CV_32F);
+        normalized = cv::Mat::zeros(image.size(), CV_64F);
     }
     
     // Convert to uint8 [0, 255]
