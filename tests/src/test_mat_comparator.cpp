@@ -167,23 +167,45 @@ std::string getStringFromVar(matvar_t* var) {
     return "";
 }
 
-// Compare dimensions
-bool compareDimensions(matvar_t* ref, matvar_t* test, ComparisonResult& result, const std::string& path) {
+// Compare dimensions - returns: 0=match, 1=mismatch but can compare first element, -1=cannot compare
+int compareDimensionsEx(matvar_t* ref, matvar_t* test, ComparisonResult& result, const std::string& path) {
+    bool has_mismatch = false;
+    bool can_compare_first = true;
+    
     if (ref->rank != test->rank) {
         result.addError(path + ": Rank mismatch (ref=" + std::to_string(ref->rank) + 
                        ", test=" + std::to_string(test->rank) + ")");
-        return false;
+        has_mismatch = true;
     }
     
-    for (int i = 0; i < ref->rank; ++i) {
+    int min_rank = std::min(ref->rank, test->rank);
+    for (int i = 0; i < min_rank; ++i) {
         if (ref->dims[i] != test->dims[i]) {
             result.addError(path + ": Dimension[" + std::to_string(i) + "] mismatch (ref=" + 
                            std::to_string(ref->dims[i]) + ", test=" + std::to_string(test->dims[i]) + ")");
-            return false;
+            has_mismatch = true;
+        }
+        // Check if either dimension is 0 - cannot compare first element
+        if (ref->dims[i] == 0 || test->dims[i] == 0) {
+            can_compare_first = false;
         }
     }
     
-    return true;
+    // Check remaining dimensions for zeros
+    for (int i = min_rank; i < ref->rank; ++i) {
+        if (ref->dims[i] == 0) can_compare_first = false;
+    }
+    for (int i = min_rank; i < test->rank; ++i) {
+        if (test->dims[i] == 0) can_compare_first = false;
+    }
+    
+    if (!has_mismatch) return 0;  // Match
+    return can_compare_first ? 1 : -1;  // Mismatch but can/cannot compare first element
+}
+
+// Compare dimensions (legacy wrapper)
+bool compareDimensions(matvar_t* ref, matvar_t* test, ComparisonResult& result, const std::string& path) {
+    return compareDimensionsEx(ref, test, result, path) == 0;
 }
 
 // Compare scalar values with tolerance
@@ -263,29 +285,72 @@ bool compareStructs(matvar_t* ref, matvar_t* test, ComparisonResult& result,
     int n_fields_ref = Mat_VarGetNumberOfFields(ref);
     int n_fields_test = Mat_VarGetNumberOfFields(test);
     
-    if (n_fields_ref != n_fields_test) {
-        result.addError(path + ": Number of fields mismatch (ref=" + 
-                       std::to_string(n_fields_ref) + ", test=" + std::to_string(n_fields_test) + ")");
-        return false;
+    // Get field names from both
+    char* const* ref_field_names = Mat_VarGetStructFieldnames(ref);
+    char* const* test_field_names = Mat_VarGetStructFieldnames(test);
+    
+    // Build sets of field names
+    std::vector<std::string> ref_fields, test_fields;
+    for (int i = 0; i < n_fields_ref; ++i) {
+        ref_fields.push_back(ref_field_names[i]);
+    }
+    for (int i = 0; i < n_fields_test; ++i) {
+        test_fields.push_back(test_field_names[i]);
     }
     
-    // Get field names
-    char* const* field_names = Mat_VarGetStructFieldnames(ref);
+    // Find missing fields (in ref but not in test)
+    std::vector<std::string> missing_fields;
+    for (const auto& field : ref_fields) {
+        if (std::find(test_fields.begin(), test_fields.end(), field) == test_fields.end()) {
+            missing_fields.push_back(field);
+        }
+    }
     
-    for (int i = 0; i < n_fields_ref; ++i) {
-        std::string field_name = field_names[i];
+    // Find extra fields (in test but not in ref)
+    std::vector<std::string> extra_fields;
+    for (const auto& field : test_fields) {
+        if (std::find(ref_fields.begin(), ref_fields.end(), field) == ref_fields.end()) {
+            extra_fields.push_back(field);
+        }
+    }
+    
+    // Report field count mismatch with details
+    if (n_fields_ref != n_fields_test) {
+        std::string msg = path + ": Number of fields mismatch (ref=" + 
+                         std::to_string(n_fields_ref) + ", test=" + std::to_string(n_fields_test) + ")";
+        if (!missing_fields.empty()) {
+            msg += " | Missing in test: [";
+            for (size_t i = 0; i < missing_fields.size(); ++i) {
+                if (i > 0) msg += ", ";
+                msg += missing_fields[i];
+            }
+            msg += "]";
+        }
+        if (!extra_fields.empty()) {
+            msg += " | Extra in test: [";
+            for (size_t i = 0; i < extra_fields.size(); ++i) {
+                if (i > 0) msg += ", ";
+                msg += extra_fields[i];
+            }
+            msg += "]";
+        }
+        result.addError(msg);
+    }
+    
+    // Compare common fields
+    for (const auto& field_name : ref_fields) {
+        // Skip fields that are missing in test
+        if (std::find(test_fields.begin(), test_fields.end(), field_name) == test_fields.end()) {
+            continue;
+        }
+        
         std::string field_path = path + "/" + field_name;
         
         matvar_t* ref_field = Mat_VarGetStructFieldByName(ref, field_name.c_str(), 0);
         matvar_t* test_field = Mat_VarGetStructFieldByName(test, field_name.c_str(), 0);
         
-        if (!test_field) {
-            result.addError(field_path + ": Field missing in test file");
-            continue;
-        }
-        
-        if (!ref_field) {
-            result.addWarning(field_path + ": Field missing in reference but present in test");
+        if (!ref_field || !test_field) {
+            result.addWarning(field_path + ": Could not retrieve field from one of the structs");
             continue;
         }
         
@@ -363,7 +428,39 @@ bool compareVariables(matvar_t* ref, matvar_t* test, ComparisonResult& result,
     }
     
     // Compare dimensions
-    if (!compareDimensions(ref, test, result, path)) {
+    int dim_result = compareDimensionsEx(ref, test, result, path);
+    if (dim_result != 0) {
+        // Dimension mismatch - try to compare first element if possible
+        if (dim_result == 1) {
+            result.addInfo(path + ": Attempting to compare first element despite dimension mismatch");
+            // For numeric types, try to compare first element
+            if (ref->class_type == MAT_C_DOUBLE || ref->class_type == MAT_C_SINGLE ||
+                ref->class_type == MAT_C_INT32 || ref->class_type == MAT_C_UINT32) {
+                if (ref->data && test->data) {
+                    if (ref->data_type == MAT_T_DOUBLE && test->data_type == MAT_T_DOUBLE) {
+                        double ref_val = *static_cast<double*>(ref->data);
+                        double test_val = *static_cast<double*>(test->data);
+                        double diff = std::abs(ref_val - test_val);
+                        if (diff <= tolerance) {
+                            result.addInfo(path + ": First element matches (ref=" + std::to_string(ref_val) + 
+                                          ", test=" + std::to_string(test_val) + ")");
+                        } else {
+                            result.addError(path + ": First element differs (ref=" + std::to_string(ref_val) + 
+                                           ", test=" + std::to_string(test_val) + ", diff=" + std::to_string(diff) + ")");
+                        }
+                    } else if (ref->data_type == MAT_T_INT32 && test->data_type == MAT_T_INT32) {
+                        int32_t ref_val = *static_cast<int32_t*>(ref->data);
+                        int32_t test_val = *static_cast<int32_t*>(test->data);
+                        if (ref_val == test_val) {
+                            result.addInfo(path + ": First element matches (value=" + std::to_string(ref_val) + ")");
+                        } else {
+                            result.addError(path + ": First element differs (ref=" + std::to_string(ref_val) + 
+                                           ", test=" + std::to_string(test_val) + ")");
+                        }
+                    }
+                }
+            }
+        }
         return false;
     }
     

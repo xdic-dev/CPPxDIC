@@ -988,16 +988,16 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     
     // Step 1: Apply correlation filtering (optional, controlled by config)
     double correlation_cutoff = 0.3;  // TODO: make this configurable
-    ncorr::DIC_analysis_output dic_filtered = ncorr::filter_by_correlation(dic_output_raw, correlation_cutoff);
+    //ncorr::DIC_analysis_output dic_filtered = ncorr::filter_by_correlation(dic_output_raw, correlation_cutoff);
     
     // Step 2: Convert to Eulerian perspective with sign inversion (still in pixels)
     ncorr::DIC_analysis_output dic_eulerian_pixels = ncorr::change_perspective_with_inversion(
-        dic_filtered, 
+        dic_output_raw, 
         ncorr::INTERP::CUBIC_KEYS  // Use cubic interpolation for perspective change
     );
     
     // Step 3: Apply units to BOTH perspectives
-    ncorr::DIC_analysis_output dic_lagrangian = ncorr::set_units(dic_filtered, "mm", config_.units_per_pixel);
+    ncorr::DIC_analysis_output dic_lagrangian = ncorr::set_units(dic_output_raw, "mm", config_.units_per_pixel);
     ncorr::DIC_analysis_output dic_eulerian = ncorr::set_units(dic_eulerian_pixels, "mm", config_.units_per_pixel);
     
     std::cout << "  Created both Lagrangian and Eulerian perspectives" << std::endl;
