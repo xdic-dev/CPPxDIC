@@ -1,0 +1,230 @@
+# ============================================================================
+# DIC Parameters Configuration File
+# Main configuration for global and DIC analysis parameters
+# Lines starting with # are comments
+# Format: key = value
+# ============================================================================
+
+# ============================================================================
+# GLOBAL PARAMETERS
+# ============================================================================
+
+# Frictional conditions (comma-separated list)
+frictional_conditions = glass,coating,coating_oil
+
+# Number of stereo pairs
+num_pair = 2
+
+# Sampling frequencies
+robot_sample_freq = 1000.0
+vid_sample_freq = 50.0
+
+# ============================================================================
+# PATH DEFINITIONS
+# ============================================================================
+
+# Base path for the project
+base_path = /Users/jaoga/devlab/MultiDIC
+
+# Data path (location of video files and protocol files)
+# Leave empty to use default: <base_path>/Data
+data_path = 
+
+# DIC path (location of output data from DIC)
+# Leave empty to use default: <base_path>/DIC_Output
+dic_path = 
+
+# ============================================================================
+# PROCESSING FLAGS
+# ============================================================================
+
+# Image filter mode
+im_filter_mode = false
+
+# Automatic processing flag
+automatic_process = true
+
+# Parallel processing flag
+parallel_processing = false
+
+# Debug mode (enables additional output and logging)
+debug_mode = true
+
+# ============================================================================
+# DIC ANALYSIS PARAMETERS
+# ============================================================================
+
+# Subject identifier
+subject_id = S09
+
+# Phase identifier (e.g., loading, unloading)
+phase_id = loading
+
+# Material identifier (index into frictional_conditions, 0-based)
+# 0=glass, 1=coating, 2=coating_oil
+material_id = 2
+
+# Number of conditions (comma-separated list)
+nfcond_set = 5
+
+# Speed conditions (comma-separated list)
+spddxlcond_set = 0.04,0.08
+
+# Calibration folder set
+calib_folder_set = 2
+
+# Reference trial number
+ref_trial_id = 5
+
+# ============================================================================
+# FRAME SETTINGS
+# ============================================================================
+
+# Starting frame index
+idx_frame_start = 1
+
+# Ending frame index
+idx_frame_end = 150
+
+# Frame jump (process every Nth frame)
+frame_jump = 1
+
+# ============================================================================
+# STEP D PARAMETERS (Initial Tracking)
+# ============================================================================
+
+# Analysis direction type: regular, reverse
+step_d_analysis_type = regular
+
+# Subset radius for tracking (pixels)
+step_d_radius = 40
+
+# Subset spacing (pixels)
+step_d_spacing = 10
+
+# Cutoff threshold for convergence
+step_d_cutoff_diffnorm = 1e-5
+
+# Number of iterations for solver
+step_d_cutoff_iteration = 100
+
+# Number of threads
+step_d_total_threads = 1
+
+# High strain analysis enabled
+step_d_high_strain_enabled = true
+
+# Seed propagation type: seed, roi
+step_d_seed_type = seed
+
+# Auto reference change
+step_d_auto_update = true
+
+# Step for reference change
+step_d_step_ref_change = 10
+
+# Initial seed point (pixel world coordinates: x,y)
+# Leave empty for automatic seed selection
+step_d_initial_seed = 
+
+# ============================================================================
+# STEP E PARAMETERS (Matching)
+# ============================================================================
+
+# Analysis direction type: regular, reverse
+step_e_analysis_type = regular
+
+# Subset radius for matching (pixels)
+step_e_radius = 60
+
+# Subset spacing (pixels)
+step_e_spacing = 10
+
+# Cutoff threshold for convergence
+step_e_cutoff_diffnorm = 1e-5
+
+# Number of iterations for solver
+step_e_cutoff_iteration = 100
+
+# Number of threads
+step_e_total_threads = 1
+
+# High strain analysis enabled
+step_e_high_strain_enabled = true
+
+# Seed propagation type: seed, roi
+step_e_seed_type = seed
+
+# Auto reference change
+step_e_auto_update = true
+
+# Step for reference change
+step_e_step_ref_change = 10
+
+# Initial seed point (pixel world coordinates: x,y)
+# Leave empty for automatic seed selection
+step_e_initial_seed = 
+
+# ============================================================================
+# STEP F PARAMETERS (Combined/Final)
+# ============================================================================
+
+# Analysis direction type: regular, reverse
+step_f_analysis_type = regular
+
+# Subset radius (pixels)
+step_f_radius = 40
+
+# Subset spacing (pixels)
+step_f_spacing = 10
+
+# Cutoff threshold for convergence
+step_f_cutoff_diffnorm = 1e-5
+
+# Number of iterations for solver
+step_f_cutoff_iteration = 100
+
+# Number of threads
+step_f_total_threads = 1
+
+# High strain analysis enabled
+step_f_high_strain_enabled = true
+
+# Seed propagation type: seed, roi
+step_f_seed_type = seed
+
+# Auto reference change
+step_f_auto_update = true
+
+# Step for reference change
+step_f_step_ref_change = 10
+
+# Initial seed point (pixel world coordinates: x,y)
+# Leave empty for automatic seed selection
+step_f_initial_seed = 
+
+# ============================================================================
+# UNITS AND CALIBRATION
+# ============================================================================
+
+# Units per pixel conversion factor (e.g., mm per pixel)
+units_per_pixel = 0.2
+
+# Default subset radius for general use (pixels)
+subregion_radius = 20
+
+# Grayscale limit threshold
+limit_grayscale = 70
+
+# ============================================================================
+# OUTPUT CONTROL
+# ============================================================================
+
+# File version identifier
+fileversion = v2
+
+# Generate MATLAB .mat files
+generate_mat_files = true
+
+# Delete cached .bin files after use
+cleanup_cache_bins = false

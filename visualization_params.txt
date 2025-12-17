@@ -1,0 +1,262 @@
+# ============================================================================
+# Visualization Parameters Configuration File
+# Configuration for plot and visualization settings after DIC analysis
+# Based on Config class visualization parameters
+# Lines starting with # are comments
+# Format: key = value
+# ============================================================================
+
+# ============================================================================
+# GENERAL VISUALIZATION SETTINGS
+# ============================================================================
+
+# Enable visualization output (default: false)
+showvisu = false
+
+# ============================================================================
+# 3D MAP PLOTTING
+# ============================================================================
+
+# Enable 3D map plotting (default: true)
+mapLogic = true
+
+# Face measurement plot options (comma-separated list)
+# Options: Epc1, Epc2, J, DispX, DispY, DispZ, Exx, Eyy, Ezz, Exy, Exz, Eyz
+# Epc1 = First principal strain
+# Epc2 = Second principal strain
+# J = Jacobian (volume change)
+# Disp* = Displacement components
+# E** = Strain tensor components
+plotopt = Epc1,Epc2
+
+# Derivative order type (default: both)
+# Options: cum (cumulative), rate (rate of change), both
+deftype = both
+
+# Initial plot perspective (default: below)
+# Options: lateralR, below, lateralL, front
+viewplot = below
+
+# ============================================================================
+# FILTERING AND QUALITY CONTROL
+# ============================================================================
+
+# Contact area delimitation (default: false)
+# Enables special handling for contact regions
+contactAreaLogic = false
+
+# Suppress stitched pair boundary (default: true)
+# Removes artifacts at stereo pair boundaries
+gapLogic = true
+
+# Maximum admissible correlation coefficient (default: 10.0)
+# Points with correlation above this are filtered out
+maxCorrCoeff = 10.0
+
+# ============================================================================
+# TEMPORAL FILTERING (TIME SMOOTHING)
+# ============================================================================
+
+# Enable temporal smoothing of maps (default: true)
+smoothTimeLogic = true
+
+# Cut-off frequency for temporal filter in Hz (default: 5.0)
+# Lower values = more smoothing
+filterFreq = 5.0
+
+# ============================================================================
+# SPATIAL FILTERING (SPACE SMOOTHING)
+# ============================================================================
+
+# Enable spatial smoothing of maps (default: true)
+smoothSpaceLogic = true
+
+# Space filtering parameter 1 (default: 30)
+# Controls the neighborhood size for spatial smoothing
+smoothPar_n = 30
+
+# Space filtering parameter 2 (default: 2.0)
+# Controls the smoothing strength (sigma)
+smoothPar_sigma = 2.0
+
+# ============================================================================
+# ADDITIONAL PLOT OVERLAYS
+# ============================================================================
+
+# Plot kinematic/dynamic robot data (default: true)
+showRobotLogic = true
+
+# Plot reference image overlay (default: false)
+showImgLogic = false
+
+# Camera number for image overlay (default: 0)
+# 0 = use default, or specify camera number
+camNbr = 0
+
+# Plot traces - deprecated (default: false)
+tracesLogic = false
+
+# ============================================================================
+# PLOT APPEARANCE SETTINGS
+# ============================================================================
+
+# Face transparency (0.0 = fully transparent, 1.0 = fully opaque)
+# Default: 1.0
+FaceAlpha = 1.0
+
+# Line color for mesh edges (default: none)
+# Options: none, k (black), b (blue), r (red), g (green), w (white)
+lineColor = none
+
+# Arrow scale factor for vector plots (default: 20.0)
+# Controls the size of displacement/velocity vectors
+quiverScaleFactor = 20.0
+
+# Plot format size (default: small)
+# Options: small, normal
+# Controls the overall size and resolution of plots
+format = small
+
+# ============================================================================
+# EXPORT SETTINGS
+# ============================================================================
+
+# Export format (default: vtk)
+# Options: vtk (ParaView/VisIt), ply (MeshLab/CloudCompare), csv (custom analysis)
+export_format = vtk
+
+# Export each frame separately (default: false)
+# If true, creates one file per frame
+# If false, creates time-series files where supported
+export_each_frame = false
+
+# Specific frames to export (comma-separated list)
+# Leave empty to export all frames
+# Example: 1,10,20,30,50
+export_frame_list = 
+
+# ============================================================================
+# VTK EXPORT OPTIONS
+# ============================================================================
+
+# VTK file format (default: legacy)
+# Options: legacy, xml
+vtk_format = legacy
+
+# Include scalar fields in VTK output (default: true)
+vtk_include_scalars = true
+
+# Include vector fields in VTK output (default: true)
+vtk_include_vectors = true
+
+# ============================================================================
+# PLY EXPORT OPTIONS
+# ============================================================================
+
+# PLY file format (default: binary)
+# Options: ascii, binary
+ply_format = binary
+
+# Include color information in PLY (default: true)
+ply_include_colors = true
+
+# ============================================================================
+# CSV EXPORT OPTIONS
+# ============================================================================
+
+# CSV delimiter (default: comma)
+# Options: comma, tab, semicolon
+csv_delimiter = comma
+
+# Include header row in CSV (default: true)
+csv_include_header = true
+
+# ============================================================================
+# VIDEO GENERATION SETTINGS
+# ============================================================================
+
+# Generate visualization videos (default: false)
+generate_videos = false
+
+# Video frame rate (fps) (default: 15)
+video_fps = 15
+
+# Video codec (default: MJPG)
+# Options: MJPG, H264, XVID
+video_codec = MJPG
+
+# Video quality/bitrate (default: high)
+# Options: low, medium, high
+video_quality = high
+
+# Video overlay alpha (transparency) (default: 0.5)
+video_alpha = 0.5
+
+# ============================================================================
+# COLORMAP SETTINGS
+# ============================================================================
+
+# Colormap for scalar fields (default: jet)
+# Options: jet, viridis, plasma, inferno, magma, parula, hot, cool, rainbow
+colormap = jet
+
+# Colormap range mode (default: auto)
+# Options: auto (automatic from data), manual (use min/max below), symmetric
+colormap_range_mode = auto
+
+# Manual colormap minimum (used if colormap_range_mode = manual)
+# colormap_min = -0.1
+
+# Manual colormap maximum (used if colormap_range_mode = manual)
+# colormap_max = 0.1
+
+# Number of colormap levels (default: 256)
+colormap_levels = 256
+
+# ============================================================================
+# STATISTICS AND SUMMARY
+# ============================================================================
+
+# Generate summary statistics file (default: true)
+generate_summary_stats = true
+
+# Statistics output format (default: txt)
+# Options: txt, json, csv
+stats_format = txt
+
+# Include per-frame statistics (default: true)
+stats_per_frame = true
+
+# Include spatial statistics (min, max, mean, std) (default: true)
+stats_spatial = true
+
+# Include temporal statistics (default: true)
+stats_temporal = true
+
+# ============================================================================
+# ADVANCED VISUALIZATION OPTIONS
+# ============================================================================
+
+# Mesh decimation factor (default: 1.0, no decimation)
+# Values < 1.0 reduce mesh density for faster rendering
+# Example: 0.5 = reduce to 50% of original points
+mesh_decimation = 1.0
+
+# Enable mesh smoothing (default: false)
+mesh_smoothing = false
+
+# Mesh smoothing iterations (default: 5)
+mesh_smoothing_iterations = 5
+
+# Show coordinate axes in 3D plots (default: true)
+show_axes = true
+
+# Show colorbar/legend (default: true)
+show_colorbar = true
+
+# Show grid (default: false)
+show_grid = false
+
+# Background color (default: white)
+# Options: white, black, gray
+background_color = white

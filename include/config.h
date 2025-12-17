@@ -102,8 +102,22 @@ public:
     void loadDicParams();
     void updateVariables();
     
+    // New parameter file loading methods
+    bool loadFromDicParamsFile(const std::string& filepath = "dic_params.txt");
+    bool loadFromNcorrParamsFile(const std::string& filepath = "ncorr_params.txt");
+    bool loadFromVisualizationParamsFile(const std::string& filepath = "visualization_params.txt");
+    
+    // Command-line override methods
+    void overrideSubject(const std::string& subject);
+    void overrideRefTrial(int trial);
+    
 private:
     void setDefaultPaths();
+    std::string parseConfigValue(const std::string& line, const std::string& key);
+    std::vector<std::string> parseStringList(const std::string& value);
+    std::vector<int> parseIntList(const std::string& value);
+    std::vector<double> parseDoubleList(const std::string& value);
+    bool parseBool(const std::string& value);
 };
 
 #endif // CONFIG_H

@@ -1,0 +1,201 @@
+# ============================================================================
+# NCorr Parameters Configuration File
+# Configuration for NCorr DIC analysis engine parameters
+# Based on DIC_analysis_input class and proxyncorr configuration
+# Lines starting with # are comments
+# Format: key = value
+# ============================================================================
+
+# ============================================================================
+# IMAGE AND ROI PATHS
+# ============================================================================
+
+# Folder containing the image frames (required)
+folder = images
+
+# ROI image path (optional, defaults to <folder>/roi.png)
+# roi = images/roi.png
+
+# Reference image path (optional, defaults to ref.png if exists, else first frame)
+# ref = images/ref.png
+
+# Output directory (optional, defaults to "output")
+output = output
+
+# ============================================================================
+# DIC ANALYSIS PARAMETERS
+# ============================================================================
+
+# Scale factor for analysis (default: 3)
+# Determines the resolution of the displacement field
+scalefactor = 3
+
+# Interpolation type (default: QUINTIC_BSPLINE_PRECOMPUTE)
+# Options: NEAREST, LINEAR, CUBIC_KEYS, CUBIC_KEYS_PRECOMPUTE, 
+#          QUINTIC_BSPLINE, QUINTIC_BSPLINE_PRECOMPUTE
+interp = QUINTIC_BSPLINE_PRECOMPUTE
+
+# Subregion shape (default: CIRCLE)
+# Options: CIRCLE, SQUARE
+subregion = CIRCLE
+
+# Subregion radius in pixels (default: 20)
+radius = 20
+
+# Number of threads for parallel processing (default: 4)
+threads = 4
+
+# ============================================================================
+# DIC CONFIGURATION AND CONVERGENCE
+# ============================================================================
+
+# DIC configuration for reference image updates (default: NO_UPDATE)
+# Options: NO_UPDATE, KEEP_MOST_POINTS, REMOVE_BAD_POINTS
+dic_config = NO_UPDATE
+
+# Cutoff correlation coefficient threshold (default: 0.5)
+# Points with correlation coefficient above this are considered bad
+cutoff_corrcoef = 0.5
+
+# Update correlation coefficient threshold (default: 0.5)
+# Used for reference image update decisions
+update_corrcoef = 0.5
+
+# Percentile for correlation coefficient filtering (default: 0.1)
+# Used to determine adaptive thresholds
+prctile_corrcoef = 0.1
+
+# Enable debug output (default: false)
+debug = false
+
+# ============================================================================
+# ROI UPDATE MODE
+# ============================================================================
+
+# ROI update mode (default: SKIP_ALL)
+# Options: 
+#   SKIP_ALL - Original behavior: if ANY boundary point returns NaN, 
+#              the entire boundary is discarded
+#   SKIP_INVALID - Skip individual NaN points and out-of-bounds points,
+#                  keeping valid points. Only returns empty if ALL points are invalid
+roi_update_mode = SKIP_ALL
+
+# ============================================================================
+# ACCUMULATION MODE
+# ============================================================================
+
+# Accumulation mode (default: ON_THE_FLY)
+# Options:
+#   ON_THE_FLY - Original C++ behavior: accumulate displacements during analysis
+#                Fast but can fail when ROI changes shape during updates
+#   POST_PROCESS - MATLAB-like approach: store individual step displacements,
+#                  then add them all at the end with their matching ROIs
+#                  More robust when ROI updates occur frequently
+accumulation_mode = ON_THE_FLY
+
+# Save step displacements for debugging (default: false)
+# If true, saves individual step displacement data
+# Automatically enabled when debug = true
+save_disps_steps = false
+
+# ============================================================================
+# PERSPECTIVE AND UNITS
+# ============================================================================
+
+# Interpolation type for perspective change (default: CUBIC_KEYS)
+# Used when converting between Lagrangian and Eulerian perspectives
+perspective_interp = CUBIC_KEYS
+
+# Units string (default: mm)
+units = mm
+
+# Units per pixel conversion factor (default: 0.2)
+units_per_pixel = 0.2
+
+# ============================================================================
+# STRAIN ANALYSIS PARAMETERS
+# ============================================================================
+
+# Strain subregion shape (default: CIRCLE)
+# Options: CIRCLE, SQUARE
+strain_subregion = CIRCLE
+
+# Strain subregion radius (default: 5)
+strain_radius = 5
+
+# ============================================================================
+# ALGORITHM MODE AND SEEDS
+# ============================================================================
+
+# Algorithm mode (default: auto)
+# Options: auto, sequential, parallel
+# - auto: uses parallel if no seeds, sequential if seeds provided
+# - sequential: single-threaded RGDIC analysis
+# - parallel: multi-threaded RGDIC analysis
+algorithm_mode = auto
+
+# Path to seeds JSON file (optional)
+# Format: [{"x": 100, "y": 200, "u": 0.0, "v": 0.0}, ...]
+# seeds_file = seeds.json
+
+# Whether seeds are pre-optimized (default: false)
+# If true, skips the seed optimization step
+seeds_are_optimized = false
+
+# ============================================================================
+# SEED-BASED PARALLELIZATION PARAMETERS
+# ============================================================================
+
+# Diffnorm threshold for failure prediction (default: 0.1)
+# Used in parallel mode to predict when reference update is needed
+cutoff_max_diffnorm = 0.1
+
+# Corrcoef threshold for failure prediction (default: 0.5)
+# Used in parallel mode to predict when reference update is needed
+cutoff_max_corrcoef = 0.5
+
+# ============================================================================
+# VIDEO OUTPUT PARAMETERS
+# ============================================================================
+
+# Overlay alpha for video output (default: 0.5)
+# Controls transparency of displacement/strain overlay on images
+alpha = 0.5
+
+# Frames per second for video output (default: 15)
+fps = 15
+
+# ============================================================================
+# OUTPUT OPTIONS
+# ============================================================================
+
+# Save JSON output (default: true)
+save_json = true
+
+# Save binary output (default: true)
+save_binary = true
+
+# Save video output (default: true)
+save_videos = true
+
+# ============================================================================
+# ADVANCED PARAMETERS (from DIC_analysis_input)
+# ============================================================================
+
+# Cutoff for iterative solver (convergence threshold)
+# This is the diffnorm threshold for Newton iterations
+# Default: 1e-6
+cutoff_norm = 1e-6
+
+# Maximum number of iterations for solver
+# Default: 100
+cutoff_iterations = 100
+
+# ============================================================================
+# CORRELATION FILTERING
+# ============================================================================
+
+# Maximum admissible correlation coefficient for filtering
+# Points with correlation above this value are filtered out
+# Default: 10.0 (effectively disabled)
+max_corr_coef_filter = 10.0
