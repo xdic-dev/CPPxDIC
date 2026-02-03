@@ -68,10 +68,56 @@ DIC2DOutputs DIC2DWorkflow::execute(const std::string& trial, int stereopair) {
     
     // Determine reference trial
     std::string reftrial;
-    if (config_.ref_trial_id > 0) {
-        std::ostringstream oss;
-        oss << std::setw(3) << std::setfill('0') << config_.ref_trial_id;
-        reftrial = oss.str();
+    if (config_.ref_mode) {
+        // Check if we should auto-select from protocol
+        if (config_.ref_trial_id == 0) {
+            // Auto-select reference trial where force == 0
+            std::string protocol_path = config_.data_path + "/rawdata/" + config_.subject_id + "/speckles/" +
+                                        config_.material + "/protocol/";
+            std::vector<std::string> protocol_files;
+            if (std::filesystem::exists(protocol_path)) {
+                for (const auto& entry : std::filesystem::directory_iterator(protocol_path)) {
+                    if (entry.path().extension() == ".mat") {
+                        protocol_files.push_back(entry.path().string());
+                    }
+                }
+            }
+            
+            if (!protocol_files.empty()) {
+                ProtocolData protocol;
+                if (MatReader::loadProtocol(protocol_files[0], protocol)) {
+                    // Find trial with force == 0 (or closest to 0)
+                    int ref_trial_num = 1;  // Default to trial 1
+                    double min_force = std::numeric_limits<double>::max();
+                    for (const auto& trial_info : protocol.trials) {
+                        if (std::abs(trial_info.force) < min_force) {
+                            min_force = std::abs(trial_info.force);
+                            ref_trial_num = trial_info.trial_number;
+                        }
+                    }
+                    std::ostringstream oss;
+                    oss << std::setw(3) << std::setfill('0') << ref_trial_num;
+                    reftrial = oss.str();
+                    std::cout << "Auto-selected reference trial " << reftrial 
+                              << " (force = " << min_force << " N)" << std::endl;
+                } else {
+                    // Fallback to config value
+                    std::ostringstream oss;
+                    oss << std::setw(3) << std::setfill('0') << 1;  // Default to trial 1
+                    reftrial = oss.str();
+                }
+            } else {
+                // Fallback to config value
+                std::ostringstream oss;
+                oss << std::setw(3) << std::setfill('0') << 1;  // Default to trial 1
+                reftrial = oss.str();
+            }
+        } else {
+            // Use specified reference trial
+            std::ostringstream oss;
+            oss << std::setw(3) << std::setfill('0') << config_.ref_trial_id;
+            reftrial = oss.str();
+        }
     } else {
         reftrial = trial;
     }
