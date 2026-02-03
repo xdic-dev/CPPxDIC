@@ -6,3 +6,5 @@ tests/examples/
 reports/
 .DS_Store
 compile_commands.json
+outputs/
+newreport/
