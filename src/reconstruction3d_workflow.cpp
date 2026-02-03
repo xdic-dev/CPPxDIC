@@ -558,11 +558,19 @@ std::vector<double> Reconstruction3DWorkflow::computeFaceCentroids(
 std::vector<double> Reconstruction3DWorkflow::computeCombinedCorrelation(
     const std::vector<double>& corr_cam1,
     const std::vector<double>& corr_cam2) {
+    std::vector<double> combined;
+    combined.reserve(corr_cam1.size());
     
-    std::vector<double> combined(corr_cam1.size());
+    // Take the maximum (worst) correlation coefficient from both cameras
+    // MATLAB: DIC3D.FaceCorrComb{ii}=max(DIC3D.corrComb{ii}(F),[],2);
     for (size_t i = 0; i < corr_cam1.size(); ++i) {
-        combined[i] = std::max(corr_cam1[i], corr_cam2[i]);
+        if (i < corr_cam2.size()) {
+            combined.push_back(std::max(corr_cam1[i], corr_cam2[i]));
+        } else {
+            combined.push_back(corr_cam1[i]);
+        }
     }
+    
     return combined;
 }
 
