@@ -66,66 +66,19 @@ DIC2DOutputs DIC2DWorkflow::execute(const std::string& trial, int stereopair) {
     std::cout << "DIC 2D Analysis - Trial " << trial << ", Pair " << stereopair << std::endl;
     std::cout << "-------------------------------------------" << std::endl;
     
-    // Determine reference trial
+    // Determine reference trial from config
     std::string reftrial;
-    if (config_.ref_mode) {
-        // Check if we should auto-select from protocol
-        if (config_.ref_trial_id == 0) {
-            // Auto-select reference trial where force == 0
-            std::string protocol_path = config_.data_path + "/rawdata/" + config_.subject_id + "/speckles/" +
-                                        config_.material + "/protocol/";
-            std::vector<std::string> protocol_files;
-            if (std::filesystem::exists(protocol_path)) {
-                for (const auto& entry : std::filesystem::directory_iterator(protocol_path)) {
-                    if (entry.path().extension() == ".mat") {
-                        protocol_files.push_back(entry.path().string());
-                    }
-                }
-            }
-            
-            if (!protocol_files.empty()) {
-                ProtocolData protocol;
-                if (MatReader::loadProtocol(protocol_files[0], protocol)) {
-                    // Find trial with force == 0 (or closest to 0)
-                    int ref_trial_num = 1;  // Default to trial 1
-                    double min_force = std::numeric_limits<double>::max();
-                    for (const auto& trial_info : protocol.trials) {
-                        if (std::abs(trial_info.force) < min_force) {
-                            min_force = std::abs(trial_info.force);
-                            ref_trial_num = trial_info.trial_number;
-                        }
-                    }
-                    std::ostringstream oss;
-                    oss << std::setw(3) << std::setfill('0') << ref_trial_num;
-                    reftrial = oss.str();
-                    std::cout << "Auto-selected reference trial " << reftrial 
-                              << " (force = " << min_force << " N)" << std::endl;
-                } else {
-                    // Fallback to config value
-                    std::ostringstream oss;
-                    oss << std::setw(3) << std::setfill('0') << 1;  // Default to trial 1
-                    reftrial = oss.str();
-                }
-            } else {
-                // Fallback to config value
-                std::ostringstream oss;
-                oss << std::setw(3) << std::setfill('0') << 1;  // Default to trial 1
-                reftrial = oss.str();
-            }
-        } else {
-            // Use specified reference trial
-            std::ostringstream oss;
-            oss << std::setw(3) << std::setfill('0') << config_.ref_trial_id;
-            reftrial = oss.str();
-        }
-    } else {
-        reftrial = trial;
-    }
+    std::ostringstream oss;
+    oss << std::setw(3) << std::setfill('0') << config_.ref_trial_id;
+    reftrial = oss.str();
     
     // Build inputs
     DIC2DInputs inputs = buildInputs(trial, stereopair, reftrial);
     
-    // Load protocol to determine pair ordering
+    // Execute and get outputs
+    DIC2DOutputs outputs = execute(inputs);
+    
+    // Load protocol to determine pair ordering (stored in outputs)
     std::string protocol_path = config_.data_path + "/rawdata/" + config_.subject_id + "/speckles/" +
                                 config_.material + "/protocol/";
     std::vector<std::string> protocol_files;
@@ -138,36 +91,32 @@ DIC2DOutputs DIC2DWorkflow::execute(const std::string& trial, int stereopair) {
     }
     
     if (!protocol_files.empty()) {
-        ProtocolData protocol;
+        ProtocolFileData protocol;
         if (MatReader::loadProtocol(protocol_files[0], protocol)) {
             int trial_num = std::stoi(trial);
             if (trial_num > 0 && trial_num <= static_cast<int>(protocol.trials.size())) {
                 const auto& trial_info = protocol.trials[trial_num - 1];
                 
                 // Determine pair order based on direction
-                // MATLAB: if strcmp(dircond(str2double(trial)),"Ubnf")
-                //            pairOrder = [2,1]; pairForced = true;
-                //         elseif strcmp(dircond(str2double(trial)),"Rbnf")
-                //            pairOrder = [1,2]; pairForced = true;
                 if (trial_info.direction == "Ubnf") {
-                    inputs.pair_order = {2, 1};
-                    inputs.pair_forced = true;
+                    outputs.pair_order = {2, 1};
+                    outputs.pair_forced = true;
                 } else if (trial_info.direction == "Rbnf") {
-                    inputs.pair_order = {1, 2};
-                    inputs.pair_forced = true;
+                    outputs.pair_order = {1, 2};
+                    outputs.pair_forced = true;
                 } else {
-                    inputs.pair_order = {1, 2};
-                    inputs.pair_forced = false;
+                    outputs.pair_order = {1, 2};
+                    outputs.pair_forced = false;
                 }
                 
                 std::cout << "Trial " << trial << " direction: " << trial_info.direction 
-                          << ", pair order: [" << inputs.pair_order[0] << ", " 
-                          << inputs.pair_order[1] << "]" << std::endl;
+                          << ", pair order: [" << outputs.pair_order[0] << ", " 
+                          << outputs.pair_order[1] << "]" << std::endl;
             }
         }
     }
     
-    return execute(inputs);
+    return outputs;
 }
 
 DIC2DOutputs DIC2DWorkflow::execute(const DIC2DInputs& inputs) {
@@ -404,6 +353,10 @@ bool DIC2DWorkflow::initializeROIAndSeed(const cv::Mat& reference_frame,
     }
     
     // Load or create seed
+    seed_point = ROIManager::loadOrCreateSeed(base_params_, roi_mask);
+    
+    return true;
+}
 
 bool DIC2DWorkflow::performRefToTrialMatching(const cv::Mat& ref_frame,
                                               const cv::Mat& cur_frame,

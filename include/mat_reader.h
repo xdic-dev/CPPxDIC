@@ -14,9 +14,9 @@
 
 namespace cppxdic {
 
-// Protocol data structure
-struct ProtocolData {
-    struct TrialInfo {
+// Protocol file data structure (loaded from MAT file)
+struct ProtocolFileData {
+    struct TrialEntry {
         int trial_number;
         std::string direction;  // "Ubnf", "Rbnf", etc.
         double force;          // Normal force in N
@@ -25,7 +25,7 @@ struct ProtocolData {
     };
     
     std::vector<std::string> titles;  // Column names
-    std::vector<TrialInfo> trials;    // Trial information
+    std::vector<TrialEntry> trials;   // Trial information
     size_t n_trials;
     size_t n_fields;
 };
@@ -37,7 +37,7 @@ struct ProtocolData {
 class MatReader {
 public:
     // Protocol loading
-    static bool loadProtocol(const std::string& protocol_path, ProtocolData& protocol);
+    static bool loadProtocol(const std::string& protocol_path, ProtocolFileData& protocol);
     static std::vector<std::string> readCellStrings(matvar_t* cell_var);
     /**
      * Read a specific field from a struct variable

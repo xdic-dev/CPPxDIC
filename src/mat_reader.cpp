@@ -15,7 +15,7 @@ namespace cppxdic {
 // Protocol Loading
 // ============================================================================
 
-bool MatReader::loadProtocol(const std::string& protocol_path, ProtocolData& protocol) {
+bool MatReader::loadProtocol(const std::string& protocol_path, ProtocolFileData& protocol) {
     mat_t* matfp = Mat_Open(protocol_path.c_str(), MAT_ACC_RDONLY);
     if (!matfp) {
         std::cerr << "Failed to open protocol file: " << protocol_path << std::endl;
@@ -58,7 +58,7 @@ bool MatReader::loadProtocol(const std::string& protocol_path, ProtocolData& pro
             
             // Read trial data
             for (size_t trial = 0; trial < n_trials; ++trial) {
-                ProtocolData::TrialInfo info;
+                ProtocolFileData::TrialEntry info;
                 info.trial_number = trial + 1;  // 1-based indexing
                 
                 // Read direction
