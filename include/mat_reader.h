@@ -7,12 +7,28 @@
 #define MAT_READER_H
 
 #include <matio.h>
-#include <opencv2/opencv.hpp>
+#include <opencv2/core.hpp>
 #include <string>
 #include <vector>
 #include <map>
 
 namespace cppxdic {
+
+// Protocol data structure
+struct ProtocolData {
+    struct TrialInfo {
+        int trial_number;
+        std::string direction;  // "Ubnf", "Rbnf", etc.
+        double force;          // Normal force in N
+        double speed;          // Speed in mm/s
+        int repetition;        // Repetition number
+    };
+    
+    std::vector<std::string> titles;  // Column names
+    std::vector<TrialInfo> trials;    // Trial information
+    size_t n_trials;
+    size_t n_fields;
+};
 
 /**
  * MatReader class
@@ -20,6 +36,9 @@ namespace cppxdic {
  */
 class MatReader {
 public:
+    // Protocol loading
+    static bool loadProtocol(const std::string& protocol_path, ProtocolData& protocol);
+    static std::vector<std::string> readCellStrings(matvar_t* cell_var);
     /**
      * Read a specific field from a struct variable
      * 
