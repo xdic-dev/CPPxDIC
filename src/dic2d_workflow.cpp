@@ -7,6 +7,7 @@
 #include "image_processor.h"
 #include "roi_manager.h"
 #include "mat_writer.h"
+#include "mat_reader.h"
 #include "delaunay_triangulation.h"
 #include "utils.h"
 #include "Array2D.h"
@@ -77,6 +78,48 @@ DIC2DOutputs DIC2DWorkflow::execute(const std::string& trial, int stereopair) {
     
     // Build inputs
     DIC2DInputs inputs = buildInputs(trial, stereopair, reftrial);
+    
+    // Load protocol to determine pair ordering
+    std::string protocol_path = config_.data_path + "/rawdata/" + config_.subject_id + "/speckles/" +
+                                config_.material + "/protocol/";
+    std::vector<std::string> protocol_files;
+    if (std::filesystem::exists(protocol_path)) {
+        for (const auto& entry : std::filesystem::directory_iterator(protocol_path)) {
+            if (entry.path().extension() == ".mat") {
+                protocol_files.push_back(entry.path().string());
+            }
+        }
+    }
+    
+    if (!protocol_files.empty()) {
+        ProtocolData protocol;
+        if (MatReader::loadProtocol(protocol_files[0], protocol)) {
+            int trial_num = std::stoi(trial);
+            if (trial_num > 0 && trial_num <= static_cast<int>(protocol.trials.size())) {
+                const auto& trial_info = protocol.trials[trial_num - 1];
+                
+                // Determine pair order based on direction
+                // MATLAB: if strcmp(dircond(str2double(trial)),"Ubnf")
+                //            pairOrder = [2,1]; pairForced = true;
+                //         elseif strcmp(dircond(str2double(trial)),"Rbnf")
+                //            pairOrder = [1,2]; pairForced = true;
+                if (trial_info.direction == "Ubnf") {
+                    inputs.pair_order = {2, 1};
+                    inputs.pair_forced = true;
+                } else if (trial_info.direction == "Rbnf") {
+                    inputs.pair_order = {1, 2};
+                    inputs.pair_forced = true;
+                } else {
+                    inputs.pair_order = {1, 2};
+                    inputs.pair_forced = false;
+                }
+                
+                std::cout << "Trial " << trial << " direction: " << trial_info.direction 
+                          << ", pair order: [" << inputs.pair_order[0] << ", " 
+                          << inputs.pair_order[1] << "]" << std::endl;
+            }
+        }
+    }
     
     return execute(inputs);
 }
@@ -315,10 +358,6 @@ bool DIC2DWorkflow::initializeROIAndSeed(const cv::Mat& reference_frame,
     }
     
     // Load or create seed
-    seed_point = ROIManager::loadOrCreateSeed(base_params_, roi_mask);
-    
-    return true;
-}
 
 bool DIC2DWorkflow::performRefToTrialMatching(const cv::Mat& ref_frame,
                                               const cv::Mat& cur_frame,
