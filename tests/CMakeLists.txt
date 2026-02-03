@@ -353,6 +353,111 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(test_var_parity OpenMP::OpenMP_CXX)
 endif()
 
+# Test 7: test_pipeline_validation - Integration test for complete DIC pipeline
+add_executable(test_pipeline_validation
+    src/test_pipeline_validation.cpp
+)
+
+# Link matio library
+target_link_libraries(test_pipeline_validation ${MATIO_LIBRARY})
+
+# Link HDF5 library
+if(HDF5_FOUND)
+    target_include_directories(test_pipeline_validation PRIVATE ${HDF5_INCLUDE_DIRS})
+    target_link_libraries(test_pipeline_validation ${HDF5_C_LIBRARIES})
+endif()
+
+# Test 8: test_deformation_validation - Unit test for TCPE deformation algorithm
+add_executable(test_deformation_validation
+    src/test_deformation_validation.cpp
+    ${CMAKE_SOURCE_DIR}/../src/strain_computation.cpp
+    ${CMAKE_SOURCE_DIR}/../src/dic_structures.cpp
+)
+
+# Link matio library
+target_link_libraries(test_deformation_validation ${MATIO_LIBRARY})
+
+# Link HDF5 library
+if(HDF5_FOUND)
+    target_include_directories(test_deformation_validation PRIVATE ${HDF5_INCLUDE_DIRS})
+    target_link_libraries(test_deformation_validation ${HDF5_C_LIBRARIES})
+endif()
+
+# Link Eigen3
+if(TARGET Eigen3::Eigen)
+    target_link_libraries(test_deformation_validation Eigen3::Eigen)
+endif()
+
+# Link ncorr library
+if(NCORR_LIBRARY)
+    target_link_libraries(test_deformation_validation ${NCORR_LIBRARY})
+endif()
+
+# Link OpenCV
+target_link_libraries(test_deformation_validation ${OpenCV_LIBS})
+
+# Link other dependencies
+if(FFTW_LIBRARY)
+    target_link_libraries(test_deformation_validation ${FFTW_LIBRARY})
+endif()
+target_link_libraries(test_deformation_validation ${SUITESPARSE_LIBRARY1})
+target_link_libraries(test_deformation_validation ${SUITESPARSE_LIBRARY2})
+target_link_libraries(test_deformation_validation ${SUITESPARSE_LIBRARY3})
+target_link_libraries(test_deformation_validation ${SUITESPARSE_LIBRARY4})
+target_link_libraries(test_deformation_validation ${SUITESPARSE_LIBRARY5})
+target_link_libraries(test_deformation_validation ${LAPACK_LIBRARY})
+target_link_libraries(test_deformation_validation ${BLAS_LIBRARY})
+target_link_libraries(test_deformation_validation ${CMAKE_THREAD_LIBS_INIT})
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(test_deformation_validation OpenMP::OpenMP_CXX)
+endif()
+
+# Test 9: test_filter_validation - Unit test for Ben's image filter
+add_executable(test_filter_validation
+    src/test_filter_validation.cpp
+    ${CMAKE_SOURCE_DIR}/../src/image_processor.cpp
+    ${CMAKE_SOURCE_DIR}/../src/utils.cpp
+    ${CMAKE_SOURCE_DIR}/../src/dic_structures.cpp
+)
+
+# Link matio library
+target_link_libraries(test_filter_validation ${MATIO_LIBRARY})
+
+# Link HDF5 library
+if(HDF5_FOUND)
+    target_include_directories(test_filter_validation PRIVATE ${HDF5_INCLUDE_DIRS})
+    target_link_libraries(test_filter_validation ${HDF5_C_LIBRARIES})
+endif()
+
+# Link OpenCV
+target_link_libraries(test_filter_validation ${OpenCV_LIBS})
+
+# Link Eigen3
+if(TARGET Eigen3::Eigen)
+    target_link_libraries(test_filter_validation Eigen3::Eigen)
+endif()
+
+# Link ncorr library
+if(NCORR_LIBRARY)
+    target_link_libraries(test_filter_validation ${NCORR_LIBRARY})
+endif()
+
+# Link other dependencies
+if(FFTW_LIBRARY)
+    target_link_libraries(test_filter_validation ${FFTW_LIBRARY})
+endif()
+target_link_libraries(test_filter_validation ${SUITESPARSE_LIBRARY1})
+target_link_libraries(test_filter_validation ${SUITESPARSE_LIBRARY2})
+target_link_libraries(test_filter_validation ${SUITESPARSE_LIBRARY3})
+target_link_libraries(test_filter_validation ${SUITESPARSE_LIBRARY4})
+target_link_libraries(test_filter_validation ${SUITESPARSE_LIBRARY5})
+target_link_libraries(test_filter_validation ${LAPACK_LIBRARY})
+target_link_libraries(test_filter_validation ${BLAS_LIBRARY})
+target_link_libraries(test_filter_validation ${CMAKE_THREAD_LIBS_INIT})
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(test_filter_validation OpenMP::OpenMP_CXX)
+endif()
+
 # Compiler flags
 target_compile_options(test_ncorr_bin PRIVATE -Wall -Wextra -O2)
 target_compile_options(test_ncorr_to_mat PRIVATE -Wall -Wextra -O2)
@@ -360,6 +465,9 @@ target_compile_options(test_mat_comparator PRIVATE -Wall -Wextra -O2)
 target_compile_options(test_mat_writers PRIVATE -Wall -Wextra -O2)
 target_compile_options(test_var_test2 PRIVATE -Wall -Wextra -O2)
 target_compile_options(test_var_parity PRIVATE -Wall -Wextra -O2)
+target_compile_options(test_pipeline_validation PRIVATE -Wall -Wextra -O2)
+target_compile_options(test_deformation_validation PRIVATE -Wall -Wextra -O2)
+target_compile_options(test_filter_validation PRIVATE -Wall -Wextra -O2)
 
 # Print configuration
 message(STATUS "CPPxDIC Tests Configuration:")
