@@ -458,6 +458,101 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(test_filter_validation OpenMP::OpenMP_CXX)
 endif()
 
+# Test 10: test_unit_stitching - Unit tests for surface stitching functions
+add_executable(test_unit_stitching
+    src/test_unit_stitching.cpp
+    ${CMAKE_SOURCE_DIR}/../src/surface_stitching.cpp
+    ${CMAKE_SOURCE_DIR}/../src/dic_structures.cpp
+)
+
+# Link Eigen3
+if(TARGET Eigen3::Eigen)
+    target_link_libraries(test_unit_stitching Eigen3::Eigen)
+endif()
+
+# Link OpenCV (required by dic_structures)
+target_link_libraries(test_unit_stitching ${OpenCV_LIBS})
+
+# Link ncorr library
+if(NCORR_LIBRARY)
+    target_link_libraries(test_unit_stitching ${NCORR_LIBRARY})
+endif()
+
+# Link other dependencies (needed by ncorr / dic_structures)
+if(FFTW_LIBRARY)
+    target_link_libraries(test_unit_stitching ${FFTW_LIBRARY})
+endif()
+target_link_libraries(test_unit_stitching ${SUITESPARSE_LIBRARY1})
+target_link_libraries(test_unit_stitching ${SUITESPARSE_LIBRARY2})
+target_link_libraries(test_unit_stitching ${SUITESPARSE_LIBRARY3})
+target_link_libraries(test_unit_stitching ${SUITESPARSE_LIBRARY4})
+target_link_libraries(test_unit_stitching ${SUITESPARSE_LIBRARY5})
+target_link_libraries(test_unit_stitching ${LAPACK_LIBRARY})
+target_link_libraries(test_unit_stitching ${BLAS_LIBRARY})
+target_link_libraries(test_unit_stitching ${CMAKE_THREAD_LIBS_INIT})
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(test_unit_stitching OpenMP::OpenMP_CXX)
+endif()
+
+# Test 11: test_reconstruction_integration - Integration test for 3D reconstruction
+add_executable(test_reconstruction_integration
+    src/test_reconstruction_integration.cpp
+)
+
+# Link matio library
+target_link_libraries(test_reconstruction_integration ${MATIO_LIBRARY})
+
+# Link HDF5 library
+if(HDF5_FOUND)
+    target_include_directories(test_reconstruction_integration PRIVATE ${HDF5_INCLUDE_DIRS})
+    target_link_libraries(test_reconstruction_integration ${HDF5_C_LIBRARIES})
+endif()
+
+# Test 12: test_deformation_integration - Integration test for deformation analysis
+add_executable(test_deformation_integration
+    src/test_deformation_integration.cpp
+    ${CMAKE_SOURCE_DIR}/../src/strain_computation.cpp
+    ${CMAKE_SOURCE_DIR}/../src/dic_structures.cpp
+)
+
+# Link matio library
+target_link_libraries(test_deformation_integration ${MATIO_LIBRARY})
+
+# Link HDF5 library
+if(HDF5_FOUND)
+    target_include_directories(test_deformation_integration PRIVATE ${HDF5_INCLUDE_DIRS})
+    target_link_libraries(test_deformation_integration ${HDF5_C_LIBRARIES})
+endif()
+
+# Link Eigen3
+if(TARGET Eigen3::Eigen)
+    target_link_libraries(test_deformation_integration Eigen3::Eigen)
+endif()
+
+# Link ncorr library
+if(NCORR_LIBRARY)
+    target_link_libraries(test_deformation_integration ${NCORR_LIBRARY})
+endif()
+
+# Link OpenCV
+target_link_libraries(test_deformation_integration ${OpenCV_LIBS})
+
+# Link other dependencies
+if(FFTW_LIBRARY)
+    target_link_libraries(test_deformation_integration ${FFTW_LIBRARY})
+endif()
+target_link_libraries(test_deformation_integration ${SUITESPARSE_LIBRARY1})
+target_link_libraries(test_deformation_integration ${SUITESPARSE_LIBRARY2})
+target_link_libraries(test_deformation_integration ${SUITESPARSE_LIBRARY3})
+target_link_libraries(test_deformation_integration ${SUITESPARSE_LIBRARY4})
+target_link_libraries(test_deformation_integration ${SUITESPARSE_LIBRARY5})
+target_link_libraries(test_deformation_integration ${LAPACK_LIBRARY})
+target_link_libraries(test_deformation_integration ${BLAS_LIBRARY})
+target_link_libraries(test_deformation_integration ${CMAKE_THREAD_LIBS_INIT})
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(test_deformation_integration OpenMP::OpenMP_CXX)
+endif()
+
 # Compiler flags
 target_compile_options(test_ncorr_bin PRIVATE -Wall -Wextra -O2)
 target_compile_options(test_ncorr_to_mat PRIVATE -Wall -Wextra -O2)
@@ -468,6 +563,9 @@ target_compile_options(test_var_parity PRIVATE -Wall -Wextra -O2)
 target_compile_options(test_pipeline_validation PRIVATE -Wall -Wextra -O2)
 target_compile_options(test_deformation_validation PRIVATE -Wall -Wextra -O2)
 target_compile_options(test_filter_validation PRIVATE -Wall -Wextra -O2)
+target_compile_options(test_unit_stitching PRIVATE -Wall -Wextra -O2)
+target_compile_options(test_reconstruction_integration PRIVATE -Wall -Wextra -O2)
+target_compile_options(test_deformation_integration PRIVATE -Wall -Wextra -O2)
 
 # Print configuration
 message(STATUS "CPPxDIC Tests Configuration:")

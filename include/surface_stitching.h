@@ -73,6 +73,49 @@ std::pair<std::vector<bool>, std::vector<bool>> removeOverlapSurfaces(
     const std::vector<Eigen::Vector3d>& vertices2,
     double min_gap);
 
+/**
+ * Group boundary edges into connected components.
+ * Matches MATLAB: tesgroup(E)
+ * 
+ * @param boundary_edges Boundary edges as pairs [v0,v1, v0,v1, ...]
+ * @return Vector of groups, each group is a list of edge indices
+ */
+std::vector<std::vector<int>> groupBoundaryEdges(const std::vector<int>& boundary_edges);
+
+/**
+ * Convert an unordered list of edges into an ordered curve of vertex indices.
+ * Matches MATLAB: edgeListToCurve(E)
+ * 
+ * @param edges Edge pairs [v0,v1, v0,v1, ...]
+ * @return Ordered list of vertex indices forming the curve
+ */
+std::vector<int> edgeListToCurve(const std::vector<int>& edges);
+
+/**
+ * Zip two boundary curves together by creating a triangle strip.
+ * Simplified equivalent of MATLAB's delaunayZip.
+ * Uses greedy advancing-front: picks the shorter diagonal at each step.
+ * 
+ * @param curve1 Ordered vertex indices of boundary curve 1
+ * @param curve2 Ordered vertex indices of boundary curve 2 (already offset for combined mesh)
+ * @param V_combined Combined vertex positions [V1; V2]
+ * @return New faces (flat array) connecting the two curves
+ */
+std::vector<int> zipBoundaryCurves(const std::vector<int>& curve1,
+                                    const std::vector<int>& curve2,
+                                    const std::vector<Eigen::Vector3d>& V_combined);
+
+/**
+ * Remove faces where all 3 edges are on the boundary (degenerate boundary triangles).
+ * Matches MATLAB DIC3DsurfaceStitch lines 127-160.
+ * 
+ * @param faces Triangle faces (flat: [v0,v1,v2, ...])
+ * @param boundary_edges Boundary edge pairs [v0,v1, ...]
+ * @return Boolean mask per face: true = keep, false = remove
+ */
+std::vector<bool> findAllBoundaryFaces(const std::vector<int>& faces,
+                                        const std::vector<int>& boundary_edges);
+
 } // namespace cppxdic
 
 #endif // SURFACE_STITCHING_H

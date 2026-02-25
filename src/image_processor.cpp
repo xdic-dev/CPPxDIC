@@ -8,6 +8,7 @@
 #include <iostream>
 #include <algorithm>
 #include <cmath>
+#include <opencv2/imgcodecs.hpp>
 #include <sstream>
 #include <iomanip>
 
@@ -25,10 +26,11 @@ std::vector<cv::Mat> ImageProcessor::saturate(const std::vector<cv::Mat>& input,
     return output;
 }
 
-cv::Mat ImageProcessor::saturate(const cv::Mat& input, int level) {
+cv::Mat ImageProcessor::saturate(const cv::Mat& input, int level, const std::string& method) {
     // Convert to grayscale if needed
     cv::Mat gray;
     if (input.channels() == 3) {
+        std::cout << "Warning - Converting to grayscale" << std::endl;
         cv::cvtColor(input, gray, cv::COLOR_BGR2GRAY);
     } else {
         gray = input.clone();
@@ -36,22 +38,18 @@ cv::Mat ImageProcessor::saturate(const cv::Mat& input, int level) {
     
     // Ensure uint8 format
     if (gray.type() != CV_8UC1) {
+        std::cout << "Warning - Converting to uint8" << std::endl;
         gray.convertTo(gray, CV_8UC1);
     }
     
     cv::Mat output = gray.clone();
-    
-    // Saturate: clip values above level to level
-    // MATLAB satur.m: var(var > level) = level
-    for (int y = 0; y < output.rows; ++y) {
-        for (int x = 0; x < output.cols; ++x) {
-            uint8_t val = output.at<uint8_t>(y, x);
-            if (val > level) {
-                output.at<uint8_t>(y, x) = static_cast<uint8_t>(level);
-            }
-        }
+
+    if (method == "high") {
+        cv::threshold(output, output, level, level, cv::THRESH_TRUNC);
+    } else if (method == "low") {
+        output.setTo(level, output < level);
     }
-    
+
     return output;
 }
 
@@ -310,5 +308,24 @@ cv::Mat ImageProcessor::normalizeImage(const cv::Mat& image, double min_val, dou
     
     return output;
 }
+
+
+cv::Mat ImageProcessor::blurOutsideMask(const cv::Mat& img, const cv::Mat& mask, int kwidth, int kheight) {
+    cv::Mat blurred, result;
+    
+    // Apply Gaussian blur to the entire image
+    cv::GaussianBlur(img, blurred, cv::Size(kwidth, kheight), 15);
+
+    // Create result image
+    img.copyTo(result);
+
+    // Define the region to blur: where mask is 0 (or not present)
+    cv::Mat blurRegion = (mask == 0); // Inverted mask
+
+    // Copy blurred pixels to the non-masked area
+    blurred.copyTo(result, blurRegion);
+    
+    return result;
+}       
 
 } // namespace cppxdic

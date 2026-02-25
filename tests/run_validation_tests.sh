@@ -98,47 +98,80 @@ if run_test "Temporal Filtering" "test_temporal_validation" \
     PASSED_TESTS=$((PASSED_TESTS + 1))
 fi
 
+# Test 4: Surface Stitching Unit Tests (no external data needed)
+TOTAL_TESTS=$((TOTAL_TESTS + 1))
+echo -n "Running Surface Stitching Unit Tests... "
+if [ -f "$BUILD_DIR/bin/test_unit_stitching" ]; then
+    if "$BUILD_DIR/bin/test_unit_stitching" > "$REPORT_DIR/unit_stitching.txt" 2>&1; then
+        echo -e "${GREEN}PASSED${NC}"
+        PASSED_TESTS=$((PASSED_TESTS + 1))
+    else
+        echo -e "${RED}FAILED${NC}"
+        echo "  See report: $REPORT_DIR/unit_stitching.txt"
+    fi
+else
+    echo -e "${YELLOW}SKIPPED${NC} (executable not found - build first)"
+fi
+
 echo ""
 echo "=== INTEGRATION TESTS ==="
 echo ""
 
-# Test 4: Complete Pipeline
+# Test 5: Complete Pipeline (generic MAT comparison)
 TOTAL_TESTS=$((TOTAL_TESTS + 1))
 if run_test "Complete Pipeline" "test_pipeline_validation" \
     "." "pipeline_validation.txt"; then
     PASSED_TESTS=$((PASSED_TESTS + 1))
 fi
 
-# Test 5: 3D Reconstruction
+# Test 6: 3D Reconstruction Integration
 TOTAL_TESTS=$((TOTAL_TESTS + 1))
 if [ -f "$TEST_DATA_DIR/DIC3Dcombined_cpp.mat" ] && [ -f "$TEST_DATA_DIR/DIC3Dcombined_matlab.mat" ]; then
-    echo -n "Running 3D Reconstruction comparison... "
-    if "$BUILD_DIR/bin/test_mat_comparator" \
-        "$TEST_DATA_DIR/DIC3Dcombined_cpp.mat" \
-        "$TEST_DATA_DIR/DIC3Dcombined_matlab.mat" > "$REPORT_DIR/3d_comparison.txt" 2>&1; then
+    echo -n "Running 3D Reconstruction Integration... "
+    if "$BUILD_DIR/bin/test_reconstruction_integration" \
+        "$TEST_DATA_DIR" > "$REPORT_DIR/reconstruction_integration.txt" 2>&1; then
         echo -e "${GREEN}PASSED${NC}"
         PASSED_TESTS=$((PASSED_TESTS + 1))
     else
         echo -e "${RED}FAILED${NC}"
+        echo "  See report: $REPORT_DIR/reconstruction_integration.txt"
     fi
 else
-    echo "Running 3D Reconstruction comparison... ${YELLOW}SKIPPED${NC} (data not found)"
+    echo "Running 3D Reconstruction Integration... ${YELLOW}SKIPPED${NC} (data not found)"
+    echo "  Need: $TEST_DATA_DIR/DIC3Dcombined_cpp.mat and DIC3Dcombined_matlab.mat"
 fi
 
-# Test 6: Deformation Results
+# Test 7: Deformation Integration (runs C++ TCPE on MATLAB mesh, compares to MATLAB deformation)
 TOTAL_TESTS=$((TOTAL_TESTS + 1))
-if [ -f "$TEST_DATA_DIR/DIC3DPPresults_cpp.mat" ] && [ -f "$TEST_DATA_DIR/DIC3DPPresults_matlab.mat" ]; then
-    echo -n "Running Deformation Results comparison... "
+if [ -f "$TEST_DATA_DIR/DIC3Dcombined_matlab.mat" ] && [ -f "$TEST_DATA_DIR/DIC3DPPresults_matlab.mat" ]; then
+    echo -n "Running Deformation Integration... "
+    if "$BUILD_DIR/bin/test_deformation_integration" \
+        "$TEST_DATA_DIR" > "$REPORT_DIR/deformation_integration.txt" 2>&1; then
+        echo -e "${GREEN}PASSED${NC}"
+        PASSED_TESTS=$((PASSED_TESTS + 1))
+    else
+        echo -e "${RED}FAILED${NC}"
+        echo "  See report: $REPORT_DIR/deformation_integration.txt"
+    fi
+else
+    echo "Running Deformation Integration... ${YELLOW}SKIPPED${NC} (data not found)"
+    echo "  Need: $TEST_DATA_DIR/DIC3Dcombined_matlab.mat and DIC3DPPresults_matlab.mat"
+fi
+
+# Test 8: MAT File Comparison (generic structure comparison)
+TOTAL_TESTS=$((TOTAL_TESTS + 1))
+if [ -f "$TEST_DATA_DIR/DIC3Dcombined_cpp.mat" ] && [ -f "$TEST_DATA_DIR/DIC3Dcombined_matlab.mat" ]; then
+    echo -n "Running MAT Structure Comparison (3D)... "
     if "$BUILD_DIR/bin/test_mat_comparator" \
-        "$TEST_DATA_DIR/DIC3DPPresults_cpp.mat" \
-        "$TEST_DATA_DIR/DIC3DPPresults_matlab.mat" > "$REPORT_DIR/deform_comparison.txt" 2>&1; then
+        "$TEST_DATA_DIR/DIC3Dcombined_matlab.mat" \
+        "$TEST_DATA_DIR/DIC3Dcombined_cpp.mat" > "$REPORT_DIR/3d_mat_comparison.txt" 2>&1; then
         echo -e "${GREEN}PASSED${NC}"
         PASSED_TESTS=$((PASSED_TESTS + 1))
     else
         echo -e "${RED}FAILED${NC}"
     fi
 else
-    echo "Running Deformation Results comparison... ${YELLOW}SKIPPED${NC} (data not found)"
+    echo "Running MAT Structure Comparison (3D)... ${YELLOW}SKIPPED${NC} (data not found)"
 fi
 
 echo ""

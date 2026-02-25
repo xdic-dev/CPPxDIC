@@ -106,11 +106,11 @@ struct StepParameters {
  * Stores seed points in both pixel world (pw) and subset world (sw) coordinates
  */
 struct SeedPoint {
-    std::vector<double> pw;  // pixel world coordinates [x, y]
-    std::vector<double> sw;  // subset world coordinates [x, y]
+    std::vector<int> pw;  // pixel world coordinates [x, y]
+    std::vector<int> sw;  // subset world coordinates [x, y]
     
-    SeedPoint() : pw(2, 0.0), sw(2, 0.0) {}
-    SeedPoint(double px, double py) : pw{px, py}, sw(2, 0.0) {}
+    SeedPoint() : pw(2, 0), sw(2, 0) {}
+    SeedPoint(int px, int py) : pw{px, py}, sw(2, 0) {}
 };
 
 /**

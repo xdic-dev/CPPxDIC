@@ -240,7 +240,7 @@ static std::string find_video_file(const std::string& base_raw_path,
                                    const std::string& trialname,
                                    int cam_id) {
     std::string vid_dir = base_raw_path + "/" + subject + "/speckles/" + material + "/vid";
-    std::cout << "Video directory: " << vid_dir << std::endl;
+    //std::cout << "Video directory: " << vid_dir << std::endl;
     if (!Utils::directoryExists(vid_dir)) return "";
     // Pattern like: <subject>_<material>_speckles_<trialname with 3 digits>_.*_cam<cam_id>.mp4
     // Example: S09_coating_speckles_007_545_050_trial005_cam_1.mp4
@@ -925,3 +925,59 @@ std::vector<Eigen::Vector3d> Utils::applyRigidTransform(const std::vector<Eigen:
     
     return points_out;
 }
+
+std::string Utils::buildPath(const cppxdic::BaseParameters& parameters, bool with_material, bool with_trial, bool with_phase, bool with_cache) {
+    std::string path = parameters.baseResultPath + "/" + parameters.subject;
+    
+    if (with_material) {
+        path += "/" + parameters.material;
+    }
+    
+    if (with_trial) {
+        path += "/" + parameters.trial;
+    }
+    
+    if (with_phase) {
+        path += "/" + parameters.phase;
+    }
+    
+    if (with_cache) {
+        path += "/.cache";
+    }
+    
+    return path;
+}
+
+
+std::string Utils::buildOutputPath(const cppxdic::BaseParameters& parameters) {
+    return buildPath(parameters, true, true, true, false);
+}
+
+std::string Utils::buildOutputCachePath(const cppxdic::BaseParameters& parameters) {
+    return buildPath(parameters, true, true, true, true);
+}
+
+
+std::string Utils::buildRoiOrSeedLikeFilePath(const cppxdic::BaseParameters& parameters, std::string reftrial, int stereopair, std::string_view prefix, const std::string& extension) {
+    std::ostringstream oss;
+    
+    oss << buildPath(parameters, true, false, false, false) << "/" << prefix
+        << reftrial << "_" << parameters.phase << "_pair" << stereopair << extension;
+    
+    return oss.str();
+}
+
+std::string Utils::buildRoiFilePath(const cppxdic::BaseParameters& parameters, std::string reftrial, int stereopair, const std::string& extension) {
+    return buildRoiOrSeedLikeFilePath(parameters, reftrial, stereopair, "REF_MASK_", extension);
+}
+
+std::string Utils::buildSeedFilePath(const cppxdic::BaseParameters& parameters, std::string reftrial, int stereopair, const std::string& extension) {
+    return buildRoiOrSeedLikeFilePath(parameters, reftrial, stereopair, "REF_SEED_", extension);
+}
+
+std::string Utils::buildMatchingFilePath(const cppxdic::BaseParameters& parameters, std::string reftrial, int stereopair, const std::string& extension) {
+    return parameters.outputPath + "/MATCHING2" + reftrial + "_pair" + std::to_string(stereopair) + extension;
+}
+
+
+

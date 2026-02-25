@@ -34,9 +34,10 @@ public:
      * 
      * @param input Input image
      * @param level Grayscale limit for saturation
+     * @param method Saturation method ('high' or 'low')
      * @return Saturated image
      */
-    static cv::Mat saturate(const cv::Mat& input, int level);
+    static cv::Mat saturate(const cv::Mat& input, int level, const std::string& method = "high");
     
     /**
      * Filter images like Ben's method
@@ -119,6 +120,17 @@ public:
     static bool saveImages(const std::vector<cv::Mat>& images,
                           const std::string& base_path,
                           const std::string& prefix);
+
+    /**
+     * Blur the outside of a mask
+     * 
+     * @param img Input image
+     * @param mask ROI mask
+     * @param kwidth Kernel width for Gaussian blur
+     * @param kheight Kernel height for Gaussian blur
+     * @return Blurred image
+     */
+    static cv::Mat blurOutsideMask(const cv::Mat& img, const cv::Mat& mask, int kwidth = 25, int kheight = 25);
 
 private:
     /**

@@ -8,3 +8,6 @@ reports/
 compile_commands.json
 outputs/
 newreport/
+.windsurf
+tests/test_data
+tests/m-test

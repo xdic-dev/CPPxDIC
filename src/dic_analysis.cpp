@@ -815,16 +815,20 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
         auto extract_points2D = [](const ncorr::Disp2D& disp, std::vector<double>& pts_xy, std::vector<int>& indexLUT, int W, int H){
             const auto& Au = disp.get_u().get_array();
             const auto& Av = disp.get_v().get_array();
+            // get_scalefactor() returns spacing+1 (the stride between subset centers)
+            int sf = disp.get_scalefactor();
             pts_xy.clear(); pts_xy.reserve(std::count_if(indexLUT.begin(), indexLUT.end(), [](int v){return v>=0;})*2);
             // Build in index order
+            // x,y are reduced coords; u,v are full-resolution displacements
+            // Convert to full-resolution pixel coords: px = x*sf + u
             for (int y=0;y<H;++y){
                 for (int x=0;x<W;++x){
                     int idx = indexLUT[y*W+x];
                     if (idx<0) continue;
                     double u = Au(y,x);
                     double v = Av(y,x);
-                    double px = static_cast<double>(x) + u;
-                    double py = static_cast<double>(y) + v;
+                    double px = static_cast<double>(x) * sf + u;
+                    double py = static_cast<double>(y) * sf + v;
                     pts_xy.resize(std::max((size_t)((idx+1)*2), pts_xy.size()));
                     pts_xy[idx*2+0] = px;
                     pts_xy[idx*2+1] = py;
@@ -890,6 +894,7 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 std::string output_dir = config_.dic_path + "/" + config_.subject_id + "/" + config_.material + "/" + trial_str.str() + "/" + config_.phase_id;
                 std::string cam1_bin = output_dir + "/.cache/ncorr" + std::to_string(cam_1) + ".mat.bin";
                 std::string cam2_bin = output_dir + "/.cache/ncorr" + std::to_string(cam_2) + ".mat.bin";
+                std::string matching_bin = output_dir + "/.cache/ncorr" + std::to_string(cam_1) + std::to_string(cam_2) + ".mat.bin";
                 
                 if (!std::filesystem::exists(cam1_bin) || !std::filesystem::exists(cam2_bin)) {
                     std::cerr << "Missing cached 2D outputs for trial " << trial << ", pair " << pair << ". Skipping." << std::endl;
@@ -1015,6 +1020,23 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     std::cerr << "Cam1/Cam2 frame count mismatch for trial " << trial << " pair " << pair << std::endl;
                     continue;
                 }
+                
+                // Load matching displacement (cam1_ref -> cam2_ref) for point correspondence
+                // Without this, cam1 grid position (y,x) would be incorrectly paired with
+                // cam2 grid position (y,x), but they represent different physical points.
+                bool has_matching = false;
+                ncorr::DIC_analysis_output dic12;
+                if (std::filesystem::exists(matching_bin)) {
+                    dic12 = DIC_analysis_output::load(matching_bin);
+                    if (!dic12.disps.empty()) {
+                        has_matching = true;
+                        std::cout << "  ✓ Loaded matching displacement for cam" << cam_1 << "→cam" << cam_2 << " correspondence" << std::endl;
+                    }
+                }
+                if (!has_matching) {
+                    std::cerr << "  WARNING: No matching displacement found (" << matching_bin << ")." << std::endl;
+                    std::cerr << "           cam2 points will use direct grid mapping (may be inaccurate for large parallax)." << std::endl;
+                }
 
                 // Build faces and index LUT from reference ROI (use frame 0 from cam1)
                 std::vector<int> faces; std::vector<int> indexLUT; int W=0,H=0;
@@ -1065,12 +1087,82 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     }
                 }
 
+                // Lambda to extract cam2 points mapped through matching displacement
+                // MATLAB step2_dic_finish equivalent: bilinear interpolation of cam2 displacements
+                // at positions offset by matching displacement, then add matching displacement
+                auto extract_points2D_cam2_mapped = [](const ncorr::Disp2D& disp_cam2,
+                                                       const ncorr::Disp2D& disp_matching,
+                                                       std::vector<double>& pts_xy,
+                                                       std::vector<int>& indexLUT, int W, int H) {
+                    const auto& Au2 = disp_cam2.get_u().get_array();
+                    const auto& Av2 = disp_cam2.get_v().get_array();
+                    const auto& Au12 = disp_matching.get_u().get_array();
+                    const auto& Av12 = disp_matching.get_v().get_array();
+                    int sf = disp_cam2.get_scalefactor();
+                    int H2 = Au2.height(), W2 = Au2.width();
+                    
+                    pts_xy.clear();
+                    pts_xy.reserve(std::count_if(indexLUT.begin(), indexLUT.end(), [](int v){return v>=0;}) * 2);
+                    
+                    for (int y = 0; y < H; ++y) {
+                        for (int x = 0; x < W; ++x) {
+                            int idx = indexLUT[y * W + x];
+                            if (idx < 0) continue;
+                            
+                            // Matching displacement at cam1 grid position (y,x)
+                            double u12 = Au12(y, x);  // x-displacement cam1→cam2 (full-res pixels)
+                            double v12 = Av12(y, x);  // y-displacement cam1→cam2 (full-res pixels)
+                            
+                            // Mapped position in cam2's reduced grid
+                            double cam2_rx = static_cast<double>(x) + u12 / sf;
+                            double cam2_ry = static_cast<double>(y) + v12 / sf;
+                            
+                            // Bilinear interpolation of cam2 displacement at mapped position
+                            int x0 = static_cast<int>(std::floor(cam2_rx));
+                            int y0 = static_cast<int>(std::floor(cam2_ry));
+                            int x1 = x0 + 1;
+                            int y1 = y0 + 1;
+                            double fx = cam2_rx - x0;
+                            double fy = cam2_ry - y0;
+                            
+                            double u2_mapped = 0.0, v2_mapped = 0.0;
+                            if (x0 >= 0 && y0 >= 0 && x1 < W2 && y1 < H2) {
+                                // Standard bilinear interpolation
+                                u2_mapped = (1-fx)*(1-fy)*Au2(y0,x0) + fx*(1-fy)*Au2(y0,x1)
+                                          + (1-fx)*fy*Au2(y1,x0) + fx*fy*Au2(y1,x1);
+                                v2_mapped = (1-fx)*(1-fy)*Av2(y0,x0) + fx*(1-fy)*Av2(y0,x1)
+                                          + (1-fx)*fy*Av2(y1,x0) + fx*fy*Av2(y1,x1);
+                            } else if (x0 >= 0 && y0 >= 0 && x0 < W2 && y0 < H2) {
+                                // Edge case: nearest neighbor
+                                int cx = std::min(std::max(static_cast<int>(std::round(cam2_rx)), 0), W2-1);
+                                int cy = std::min(std::max(static_cast<int>(std::round(cam2_ry)), 0), H2-1);
+                                u2_mapped = Au2(cy, cx);
+                                v2_mapped = Av2(cy, cx);
+                            }
+                            // else: out of bounds, u2/v2 remain 0
+                            
+                            // Final cam2 pixel position = cam2_ref_pixel + cam2_displacement
+                            // cam2_ref_pixel = cam1_pixel + matching_displacement
+                            double px = static_cast<double>(x) * sf + u12 + u2_mapped;
+                            double py = static_cast<double>(y) * sf + v12 + v2_mapped;
+                            
+                            pts_xy.resize(std::max((size_t)((idx+1)*2), pts_xy.size()));
+                            pts_xy[idx*2+0] = px;
+                            pts_xy[idx*2+1] = py;
+                        }
+                    }
+                };
+                
                 for (size_t fi=0; fi<dic1.disps.size(); ++fi) {
                     const auto& d1 = dic1.disps[fi];
                     const auto& d2 = dic2.disps[fi];
                     std::vector<double> pts1, pts2;
                     extract_points2D(d1, pts1, indexLUT, W, H);
-                    extract_points2D(d2, pts2, indexLUT, W, H);
+                    if (has_matching) {
+                        extract_points2D_cam2_mapped(d2, dic12.disps[0], pts2, indexLUT, W, H);
+                    } else {
+                        extract_points2D(d2, pts2, indexLUT, W, H);
+                    }
                     
                     // Apply distortion removal if enabled (matching MATLAB STEP3 lines 128-161)
                     if (use_distortion_removal) {
@@ -1342,7 +1434,7 @@ bool DicAnalysis::setupNcorrAnalysis(const std::vector<std::string>& images,
 
 bool DicAnalysis::run() {
     // Search for trial targets (equivalent to search_trial2target)
-    std::vector<int> trial_target = {7, 12, 25};//#searchTrialTarget();
+    std::vector<int> trial_target = {7};//{7, 12, 25};//#searchTrialTarget();
     
     std::cout << "Trial target set: [";
     for (size_t i = 0; i < trial_target.size(); ++i) {
@@ -1351,19 +1443,23 @@ bool DicAnalysis::run() {
     }
     std::cout << "]" << std::endl;
     
-    // Helper lambda: Check if 2D DIC outputs exist for all trials/pairs
+    // Helper lambda: Check if 2D DIC outputs exist for all trials/pairs (myDIC2DpairResults_C_x_C_y.mat)
     auto check_2d_outputs_exist = [&]() -> bool {
         for (int trial : trial_target) {
             for (int pair = 1; pair <= config_.num_pair; ++pair) {
-                for (int cam = 1; cam <= 2; ++cam) {
-                    std::ostringstream cam_bin_path;
-                    cam_bin_path << config_.dic_path << "/" << config_.subject_id << "/" << config_.material 
-                                 << "/cam_" << cam << "_trial_" << std::setfill('0') << std::setw(3) << trial 
-                                 << "_pair" << pair << ".bin";
-                    if (!std::filesystem::exists(cam_bin_path.str())) {
-                        return false;
-                    }
+                int cam1, cam2;
+                Utils::getCamerasForPair(pair, cam1, cam2);
+
+                std::ostringstream cam_bin_path;
+                cam_bin_path << config_.dic_path << "/" << config_.subject_id << "/" 
+                                << config_.material << "/"
+                                << std::setfill('0') << std::setw(3) << trial << "/"
+                                << config_.phase_id << "/"
+                                << "myDIC2DpairResults_C_" << cam1 << "_C_" << cam2 << ".mat";
+                if (!std::filesystem::exists(cam_bin_path.str())) {
+                    return false;
                 }
+            
             }
         }
         return true;
@@ -1373,9 +1469,11 @@ bool DicAnalysis::run() {
     auto check_3d_outputs_exist = [&]() -> bool {
         for (int trial : trial_target) {
             std::ostringstream dic3d_path;
-            dic3d_path << config_.dic_path << "/" << config_.subject_id << "/" << config_.material 
-                      << "/DIC3Dcombined_" << config_.num_pair << "Pairs_trial_" 
-                      << std::setfill('0') << std::setw(3) << trial << ".bin";
+            dic3d_path << config_.dic_path << "/" << config_.subject_id << "/" 
+                                << config_.material << "/"
+                                << std::setfill('0') << std::setw(3) << trial << "/"
+                                << config_.phase_id << "/"
+                                << "DIC3Dcombined_" << config_.num_pair <<"Pairs_stitched.mat";
             if (!std::filesystem::exists(dic3d_path.str())) {
                 return false;
             }
@@ -1385,10 +1483,18 @@ bool DicAnalysis::run() {
     
     // Helper lambda: Check if deformation analysis outputs exist
     auto check_deformation_outputs_exist = [&]() -> bool {
-        std::ostringstream ppresults_path;
-        ppresults_path << config_.dic_path << "/" << config_.subject_id << "/" << config_.material 
-                      << "/DIC3DPPresults_" << config_.num_pair << "Pairs_cum_v1.mat";
-        return std::filesystem::exists(ppresults_path.str());
+        for (int trial : trial_target) {
+            std::ostringstream ppresults_path;
+            ppresults_path << config_.dic_path << "/" << config_.subject_id << "/" 
+                                    << config_.material << "/"
+                                    << std::setfill('0') << std::setw(3) << trial << "/"
+                                    << config_.phase_id << "/"
+                                    << "DIC3DPPresults_" << config_.num_pair << "Pairs_cum_v1.mat";
+            if (!std::filesystem::exists(ppresults_path.str())) {
+                return false;
+            }
+        }
+        return true;
     };
     
     // STEP D: 2D-DIC

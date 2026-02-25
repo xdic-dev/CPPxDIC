@@ -146,7 +146,7 @@ DIC2DOutputs DIC2DWorkflow::execute(const DIC2DInputs& inputs) {
         DICConstants::LIMIT_GRAYSCALE_DEFAULT : DICConstants::LIMIT_GRAYSCALE_S8_PLUS;
     
     // Set camera numbers
-    getCameraNumbers(inputs.stereopair, base_params_.cam_1, base_params_.cam_2);
+    Utils::getCamerasForPair(inputs.stereopair, base_params_.cam_1, base_params_.cam_2);
     
     // Set output path
     base_params_.outputPath = base_params_.baseResultPath + "/" + 
@@ -157,20 +157,13 @@ DIC2DOutputs DIC2DWorkflow::execute(const DIC2DInputs& inputs) {
     std::filesystem::create_directories(base_params_.outputPath);
     
     // Set file paths
-    base_params_.roifile = base_params_.baseResultPath + "/" + base_params_.subject + "/" +
-        base_params_.material + "/REF_MASK_" + inputs.reference_trial + "_" + base_params_.phase +
-        "_pair" + std::to_string(inputs.stereopair) + ".mat";
-    
-    base_params_.matchingfile = base_params_.outputPath + "/MATCHING2" + 
-        inputs.reference_trial + "_pair" + std::to_string(inputs.stereopair) + ".mat";
-    
-    base_params_.seedfile = base_params_.baseResultPath + "/" + base_params_.subject + "/" +
-        base_params_.material + "/REF_SEED_" + inputs.reference_trial + "_" + base_params_.phase +
-        "_pair" + std::to_string(inputs.stereopair) + ".mat";
+    base_params_.roifile = Utils::buildRoiFilePath(base_params_, inputs.reference_trial, inputs.stereopair);
+    base_params_.matchingfile = Utils::buildMatchingFilePath(base_params_, inputs.reference_trial, inputs.stereopair);
+    base_params_.seedfile = Utils::buildSeedFilePath(base_params_, inputs.reference_trial, inputs.stereopair);
     
     // Step 1: Import video frames
     std::vector<cv::Mat> cam1_raw, cam2_raw;
-    std::cout << "Reading video data..." << std::endl;
+    std::cout << "Reading video data... ";
     if (!importVideoFrames(inputs.trial, inputs.stereopair, cam1_raw, cam2_raw)) {
         std::cerr << "Failed to import video frames" << std::endl;
         return outputs;
@@ -542,7 +535,7 @@ bool DIC2DWorkflow::formatOutput(const std::string& trial, int stereopair) {
     }
     
     int cam_1, cam_2;
-    getCameraNumbers(stereopair, cam_1, cam_2);
+    Utils::getCamerasForPair(stereopair, cam_1, cam_2);
     
     std::filesystem::path cache_dir = std::filesystem::path(base_params_.outputPath) / ".cache";
     std::string ncorr1_bin = (cache_dir / ("ncorr" + std::to_string(cam_1) + ".mat.bin")).string();
@@ -599,11 +592,6 @@ bool DIC2DWorkflow::hasMatchingCheckpoint(const std::string& matching_path) {
 // ============================================================================
 // Utility Functions
 // ============================================================================
-
-void DIC2DWorkflow::getCameraNumbers(int stereopair, int& cam1, int& cam2) {
-    cam1 = (stereopair - 1) * 2 + 1;
-    cam2 = (stereopair - 1) * 2 + 2;
-}
 
 DIC2DInputs DIC2DWorkflow::buildInputs(const std::string& trial, int stereopair,
                                        const std::string& reference_trial) {

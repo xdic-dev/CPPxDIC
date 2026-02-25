@@ -68,7 +68,7 @@ public:
      * @param subset_spacing Subset spacing parameter
      * @return Subset world coordinates [x, y]
      */
-    static std::vector<double> mapPixel2Subset(const std::vector<double>& pixel_coords,
+    static std::vector<int> mapPixel2Subset(const std::vector<int>& pixel_coords,
                                                int subset_spacing);
     
     /**
@@ -79,7 +79,7 @@ public:
      * @param subset_spacing Subset spacing parameter
      * @return Pixel world coordinates [x, y]
      */
-    static std::vector<double> mapSubset2Pixel(const std::vector<double>& subset_coords,
+    static std::vector<int> mapSubset2Pixel(const std::vector<int>& subset_coords,
                                                int subset_spacing);
     
     /**
@@ -91,7 +91,7 @@ public:
      * @param V_mapped V displacement field (normalized by subset_spacing+1)
      * @return Mapped point in subset world coordinates
      */
-    static std::vector<double> mapPointCoordinate(const std::vector<double>& point_sw,
+    static std::vector<int> mapPointCoordinate(const std::vector<int>& point_sw,
                                                   const cv::Mat& U_mapped,
                                                   const cv::Mat& V_mapped);
     
@@ -127,7 +127,7 @@ public:
      * @param roi_mask ROI mask
      * @return Center coordinates [x, y]
      */
-    static std::vector<double> findROICenter(const cv::Mat& roi_mask);
+    static std::vector<int> findROICenter(const cv::Mat& roi_mask);
     
     /**
      * Convert ncorr ROI2D to OpenCV Mat

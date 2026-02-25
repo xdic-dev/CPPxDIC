@@ -102,18 +102,18 @@ SeedPoint ROIManager::loadSeedFromMat(const std::string& seed_file) {
             // Try different data types
             if (seed_var->data_type == MAT_T_UINT16 || seed_var->data_type == MAT_T_INT16) {
                 const uint16_t* data = static_cast<const uint16_t*>(seed_var->data);
-                seed.pw = {static_cast<double>(data[0]), static_cast<double>(data[1])};
+                seed.pw = {static_cast<int>(data[0]), static_cast<int>(data[1])};
             } else if (seed_var->data_type == MAT_T_DOUBLE) {
                 const double* data = static_cast<const double*>(seed_var->data);
-                seed.pw = {data[0], data[1]};
+                seed.pw = {static_cast<int>(data[0]), static_cast<int>(data[1])};
             } else if (seed_var->data_type == MAT_T_SINGLE) {
                 const float* data = static_cast<const float*>(seed_var->data);
-                seed.pw = {static_cast<double>(data[0]), static_cast<double>(data[1])};
+                seed.pw = {static_cast<int>(data[0]), static_cast<int>(data[1])};
             } else {
                 std::cerr << "Warning: Unexpected seed_point data type: " << seed_var->data_type << std::endl;
                 // Try to read as uint16 anyway
                 const uint16_t* data = static_cast<const uint16_t*>(seed_var->data);
-                seed.pw = {static_cast<double>(data[0]), static_cast<double>(data[1])};
+                seed.pw = {static_cast<int>(data[0]), static_cast<int>(data[1])};
             }
             std::cout << "  Loaded seed point: (" << seed.pw[0] << ", " << seed.pw[1] << ")" << std::endl;
         }
@@ -138,26 +138,41 @@ SeedPoint ROIManager::loadOrCreateSeed(const BaseParameters& params,
     }
 }
 
-std::vector<double> ROIManager::mapPixel2Subset(const std::vector<double>& pixel_coords,
-                                               int subset_spacing) {
-    // Formula from map_pixel2subset.m: subset_coord = pixel_coord / (subset_spacing + 1)
-    double divisor = static_cast<double>(subset_spacing + 1);
-    return {pixel_coords[0] / divisor, pixel_coords[1] / divisor};
+int compute_and_round(int pos, int subset_spacing, double offset, bool divide = false) {
+    double value = static_cast<double>(subset_spacing + 1);
+    if (divide && value != 0.0) {
+        return static_cast<int>(std::round((pos + offset) / value));
+    } else {
+        return static_cast<int>(std::round((pos + offset) * value));
+    }
 }
 
-std::vector<double> ROIManager::mapSubset2Pixel(const std::vector<double>& subset_coords,
-                                               int subset_spacing) {
-    // Formula from map_subset2pixel.m: pixel_coord = subset_coord * (subset_spacing + 1)
-    double multiplier = static_cast<double>(subset_spacing + 1);
-    return {subset_coords[0] * multiplier, subset_coords[1] * multiplier};
+std::vector<int> divide_and_round(const std::vector<int>& pixel_coords, int subset_spacing, double offset = -1.0) {
+    return {compute_and_round(pixel_coords[0], subset_spacing, offset, true), compute_and_round(pixel_coords[1], subset_spacing, offset, true)};
 }
 
-std::vector<double> ROIManager::mapPointCoordinate(const std::vector<double>& point_sw,
+std::vector<int> multiply_and_round(const std::vector<int>& pixel_coords, int subset_spacing, double offset = -1.0) {
+    return {compute_and_round(pixel_coords[0], subset_spacing, offset, false), compute_and_round(pixel_coords[1], subset_spacing, offset, false)};
+}
+
+std::vector<int> ROIManager::mapPixel2Subset(const std::vector<int>& pixel_coords,
+                                               int subset_spacing) {
+    return divide_and_round(pixel_coords, subset_spacing);
+}
+
+std::vector<int> ROIManager::mapSubset2Pixel(const std::vector<int>& subset_coords,
+                                               int subset_spacing) {
+    return multiply_and_round(subset_coords, subset_spacing);
+}
+
+std::vector<int> ROIManager::mapPointCoordinate(const std::vector<int>& point_sw,
                                                    const cv::Mat& U_mapped,
                                                    const cv::Mat& V_mapped) {
     // Convert subset coords to pixel indices (round to nearest)
     int x = static_cast<int>(std::round(point_sw[0]));
     int y = static_cast<int>(std::round(point_sw[1]));
+
+    std::cout << "DEBUG - x: " << x << ", y: " << y << std::endl;
     
     // Bounds checking
     if (x < 0 || x >= U_mapped.cols || y < 0 || y >= U_mapped.rows) {
@@ -169,8 +184,10 @@ std::vector<double> ROIManager::mapPointCoordinate(const std::vector<double>& po
     double u = U_mapped.at<double>(y, x);
     double v = V_mapped.at<double>(y, x);
     
+    std::cout << "DEBUG - u: " << u << ", v: " << v << std::endl;
+
     // Add displacement to original point (in subset world coordinates)
-    return {point_sw[0] + u, point_sw[1] + v};
+    return {compute_and_round(point_sw[0], 0, u), compute_and_round(point_sw[1], 0, v)};
 }
 
 bool ROIManager::loadMatchingResults(const std::string& matching_file,
@@ -250,9 +267,9 @@ cv::Mat ROIManager::createFullROI(const cv::Size& image_size) {
     return cv::Mat::ones(image_size, CV_8UC1) * 255;
 }
 
-std::vector<double> ROIManager::findROICenter(const cv::Mat& roi_mask) {
+std::vector<int> ROIManager::findROICenter(const cv::Mat& roi_mask) {
     cv::Point2f center = computeROICenterOfMass(roi_mask);
-    return {static_cast<double>(center.x), static_cast<double>(center.y)};
+    return {static_cast<int>(center.x), static_cast<int>(center.y)};
 }
 
 cv::Mat ROIManager::ncorrROIToMat(const ncorr::ROI2D& roi) {

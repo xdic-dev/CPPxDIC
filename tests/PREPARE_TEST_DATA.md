@@ -77,16 +77,82 @@ save('test_data/temporal_reference.mat', 'disp_x', 'disp_y', 'disp_z', ...
      'filt_x', 'filt_y', 'filt_z', 'freq_filt', 'freq_acq', '-v7.3');
 ```
 
-### 4. Pipeline Integration Test Files
+### 4. Surface Stitching Unit Tests (No Data Required)
 
-For complete pipeline validation, you need both MATLAB and C++ outputs from the same dataset:
+`test_unit_stitching` uses synthetic meshes — no MATLAB reference data needed. It validates:
+- `computeMeshBoundary` — boundary edge detection
+- `computeEdgeLengths` — edge length calculation
+- `groupBoundaryEdges` — connected component grouping
+- `edgeListToCurve` — ordered boundary curve construction
+- `findAllBoundaryFaces` — all-boundary-edge face detection
+- `zipBoundaryCurves` — greedy boundary zipping
+- `removeOverlapSurfaces` — centroid-based overlap removal
+- `stitchPairsSimple` — append-based multi-pair stitching
+- `stitchPairsGeometric` — geometric stitching with overlap removal
+
+Just build and run:
+```bash
+./bin/test_unit_stitching
+```
+
+### 5. 3D Reconstruction Integration Test
+
+Compares C++ 3D reconstruction output against MATLAB reference.
+
+Required files in `test_data/`:
+- `DIC3Dcombined_cpp.mat` — C++ Step E output
+- `DIC3Dcombined_matlab.mat` — MATLAB Step 3 output
+
+```matlab
+% After running MATLAB pipeline Step 3 (step3_dic_rewrited)
+matlab_3d = load('DIC3Dcombined_1Pairs_stitched.mat');
+save('test_data/DIC3Dcombined_matlab.mat', '-struct', matlab_3d, '-v7.3');
+```
+
+Then run C++ pipeline on same dataset:
+```bash
+cp /path/to/cpp/DIC3Dcombined_1Pairs_stitched.mat test_data/DIC3Dcombined_cpp.mat
+```
+
+Run the test:
+```bash
+./bin/test_reconstruction_integration test_data/ 1e-4
+```
+
+Fields compared: `Points3D` (x/y/z per frame), `Faces`, `FaceColors`, `corrComb`, `FaceCorrComb`, `DispMgn`, `FacePairInds`.
+
+### 6. Deformation Integration Test
+
+Loads mesh from `DIC3Dcombined_matlab.mat`, runs C++ TCPE deformation, and compares against MATLAB `DIC3DPPresults_matlab.mat`.
+
+Required files in `test_data/`:
+- `DIC3Dcombined_matlab.mat` — Input mesh (same data for both C++ and MATLAB)
+- `DIC3DPPresults_matlab.mat` — MATLAB Step 4 deformation reference
+
+```matlab
+% After running MATLAB pipeline Step 4 (step4_dic_rewrited)
+matlab_deform = load('DIC3DPPresults_1Pairs_cum_v1.mat');
+save('test_data/DIC3DPPresults_matlab.mat', '-struct', matlab_deform, '-v7.3');
+```
+
+Run the test:
+```bash
+./bin/test_deformation_integration test_data/ 1e-6
+```
+
+Fields compared: `Epc1`, `Epc2`, `epc1`, `epc2`, `EShearMax`, `eShearMax`, `Eeq`, `eeq`, `Emgn`, `emgn`, `J`, `Lamda1`, `Lamda2` (first and last frame).
+
+**Note:** This test runs the actual C++ `computeTriSurfaceDeformation` on the MATLAB mesh data, so it validates the TCPE algorithm directly rather than just comparing pre-generated files.
+
+### 7. Generic Pipeline MAT Comparison
+
+For generic structure-level comparison between any two MAT files:
 
 ```matlab
 % After running complete MATLAB pipeline
 matlab_3d = load('DIC3Dcombined_1Pairs_stitched.mat');
 matlab_deform = load('DIC3DPPresults_1Pairs_cum_v1.mat');
 
-% Save with standard names
 save('test_data/DIC3Dcombined_matlab.mat', '-struct', matlab_3d, '-v7.3');
 save('test_data/DIC3DPPresults_matlab.mat', '-struct', matlab_deform, '-v7.3');
 ```
