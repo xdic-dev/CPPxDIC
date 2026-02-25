@@ -7,6 +7,7 @@
 #include "image_processor.h"
 #include "roi_manager.h"
 #include "mat_writer.h"
+#include "mat_reader.h"
 #include "delaunay_triangulation.h"
 #include "utils.h"
 #include "Array2D.h"
@@ -65,20 +66,57 @@ DIC2DOutputs DIC2DWorkflow::execute(const std::string& trial, int stereopair) {
     std::cout << "DIC 2D Analysis - Trial " << trial << ", Pair " << stereopair << std::endl;
     std::cout << "-------------------------------------------" << std::endl;
     
-    // Determine reference trial
+    // Determine reference trial from config
     std::string reftrial;
-    if (config_.ref_trial_id > 0) {
-        std::ostringstream oss;
-        oss << std::setw(3) << std::setfill('0') << config_.ref_trial_id;
-        reftrial = oss.str();
-    } else {
-        reftrial = trial;
-    }
+    std::ostringstream oss;
+    oss << std::setw(3) << std::setfill('0') << config_.ref_trial_id;
+    reftrial = oss.str();
     
     // Build inputs
     DIC2DInputs inputs = buildInputs(trial, stereopair, reftrial);
     
-    return execute(inputs);
+    // Execute and get outputs
+    DIC2DOutputs outputs = execute(inputs);
+    
+    // Load protocol to determine pair ordering (stored in outputs)
+    std::string protocol_path = config_.data_path + "/rawdata/" + config_.subject_id + "/speckles/" +
+                                config_.material + "/protocol/";
+    std::vector<std::string> protocol_files;
+    if (std::filesystem::exists(protocol_path)) {
+        for (const auto& entry : std::filesystem::directory_iterator(protocol_path)) {
+            if (entry.path().extension() == ".mat") {
+                protocol_files.push_back(entry.path().string());
+            }
+        }
+    }
+    
+    if (!protocol_files.empty()) {
+        ProtocolFileData protocol;
+        if (MatReader::loadProtocol(protocol_files[0], protocol)) {
+            int trial_num = std::stoi(trial);
+            if (trial_num > 0 && trial_num <= static_cast<int>(protocol.trials.size())) {
+                const auto& trial_info = protocol.trials[trial_num - 1];
+                
+                // Determine pair order based on direction
+                if (trial_info.direction == "Ubnf") {
+                    outputs.pair_order = {2, 1};
+                    outputs.pair_forced = true;
+                } else if (trial_info.direction == "Rbnf") {
+                    outputs.pair_order = {1, 2};
+                    outputs.pair_forced = true;
+                } else {
+                    outputs.pair_order = {1, 2};
+                    outputs.pair_forced = false;
+                }
+                
+                std::cout << "Trial " << trial << " direction: " << trial_info.direction 
+                          << ", pair order: [" << outputs.pair_order[0] << ", " 
+                          << outputs.pair_order[1] << "]" << std::endl;
+            }
+        }
+    }
+    
+    return outputs;
 }
 
 DIC2DOutputs DIC2DWorkflow::execute(const DIC2DInputs& inputs) {
@@ -108,7 +146,7 @@ DIC2DOutputs DIC2DWorkflow::execute(const DIC2DInputs& inputs) {
         DICConstants::LIMIT_GRAYSCALE_DEFAULT : DICConstants::LIMIT_GRAYSCALE_S8_PLUS;
     
     // Set camera numbers
-    getCameraNumbers(inputs.stereopair, base_params_.cam_1, base_params_.cam_2);
+    Utils::getCamerasForPair(inputs.stereopair, base_params_.cam_1, base_params_.cam_2);
     
     // Set output path
     base_params_.outputPath = base_params_.baseResultPath + "/" + 
@@ -119,20 +157,13 @@ DIC2DOutputs DIC2DWorkflow::execute(const DIC2DInputs& inputs) {
     std::filesystem::create_directories(base_params_.outputPath);
     
     // Set file paths
-    base_params_.roifile = base_params_.baseResultPath + "/" + base_params_.subject + "/" +
-        base_params_.material + "/REF_MASK_" + inputs.reference_trial + "_" + base_params_.phase +
-        "_pair" + std::to_string(inputs.stereopair) + ".mat";
-    
-    base_params_.matchingfile = base_params_.outputPath + "/MATCHING2" + 
-        inputs.reference_trial + "_pair" + std::to_string(inputs.stereopair) + ".mat";
-    
-    base_params_.seedfile = base_params_.baseResultPath + "/" + base_params_.subject + "/" +
-        base_params_.material + "/REF_SEED_" + inputs.reference_trial + "_" + base_params_.phase +
-        "_pair" + std::to_string(inputs.stereopair) + ".mat";
+    base_params_.roifile = Utils::buildRoiFilePath(base_params_, inputs.reference_trial, inputs.stereopair);
+    base_params_.matchingfile = Utils::buildMatchingFilePath(base_params_, inputs.reference_trial, inputs.stereopair);
+    base_params_.seedfile = Utils::buildSeedFilePath(base_params_, inputs.reference_trial, inputs.stereopair);
     
     // Step 1: Import video frames
     std::vector<cv::Mat> cam1_raw, cam2_raw;
-    std::cout << "Reading video data..." << std::endl;
+    std::cout << "Reading video data... ";
     if (!importVideoFrames(inputs.trial, inputs.stereopair, cam1_raw, cam2_raw)) {
         std::cerr << "Failed to import video frames" << std::endl;
         return outputs;
@@ -504,7 +535,7 @@ bool DIC2DWorkflow::formatOutput(const std::string& trial, int stereopair) {
     }
     
     int cam_1, cam_2;
-    getCameraNumbers(stereopair, cam_1, cam_2);
+    Utils::getCamerasForPair(stereopair, cam_1, cam_2);
     
     std::filesystem::path cache_dir = std::filesystem::path(base_params_.outputPath) / ".cache";
     std::string ncorr1_bin = (cache_dir / ("ncorr" + std::to_string(cam_1) + ".mat.bin")).string();
@@ -561,11 +592,6 @@ bool DIC2DWorkflow::hasMatchingCheckpoint(const std::string& matching_path) {
 // ============================================================================
 // Utility Functions
 // ============================================================================
-
-void DIC2DWorkflow::getCameraNumbers(int stereopair, int& cam1, int& cam2) {
-    cam1 = (stereopair - 1) * 2 + 1;
-    cam2 = (stereopair - 1) * 2 + 2;
-}
 
 DIC2DInputs DIC2DWorkflow::buildInputs(const std::string& trial, int stereopair,
                                        const std::string& reference_trial) {

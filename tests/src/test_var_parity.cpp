@@ -348,21 +348,13 @@ int main(int argc, char** argv) {
     base_params.cam_2 = cam_2;
     
     // Output path
-    base_params.outputPath = base_params.baseResultPath + "/" + 
-        base_params.subject + "/" + base_params.material + "/" +
-        base_params.trial + "/" + base_params.phase;
+    base_params.outputPath = Utils::buildOutputPath(base_params);
+    
     
     // File paths
-    base_params.roifile = base_params.baseResultPath + "/" + base_params.subject + "/" +
-        base_params.material + "/REF_MASK_" + base_params.reftrial + "_" + base_params.phase +
-        "_pair" + std::to_string(stereopair) + ".mat";
-    
-    base_params.seedfile = base_params.baseResultPath + "/" + base_params.subject + "/" +
-        base_params.material + "/REF_SEED_" + base_params.reftrial + "_" + base_params.phase +
-        "_pair" + std::to_string(stereopair) + ".mat";
-    
-    base_params.matchingfile = base_params.outputPath + "/MATCHING2" + 
-        base_params.reftrial + "_pair" + std::to_string(stereopair) + ".mat";
+    base_params.roifile = Utils::buildRoiFilePath(base_params, base_params.reftrial, stereopair);
+    base_params.seedfile = Utils::buildSeedFilePath(base_params, base_params.reftrial, stereopair);
+    base_params.matchingfile = Utils::buildMatchingFilePath(base_params, base_params.reftrial, stereopair);
     
     std::cout << "Config:\n";
     std::cout << "  Trial: " << trial << "\n";

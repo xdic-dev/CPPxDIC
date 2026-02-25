@@ -7,6 +7,7 @@
 #define UTILS_H
 
 #include "config.h"
+#include "parameters.h"
 #include <string>
 #include <vector>
 #include <opencv2/opencv.hpp>
@@ -120,14 +121,78 @@ public:
     static std::vector<Eigen::Vector3d> applyRigidTransform(const std::vector<Eigen::Vector3d>& points_in,
                                                              const RigidTransform& transform);
     
+     /**
+     * Get camera numbers for a given stereopair
+     * @param stereopair The stereopair number (1 or 2)
+     * @param cam_first Output: first camera number
+     * @param cam_second Output: second camera number
+     */
+    static void getCamerasForPair(int stereopair, int& cam_first, int& cam_second);
+
+    /**
+     * Build the path based on activated parameters and return the proper string
+     * @param parameters The base parameters structure (required)
+     * @param with_material Whether to include material in the path (default as false)
+     * @param with_trial Whether to include trial in the path (default as false)
+     * @param with_phase Whether to include phase in the path (default as false)
+     * @param with_cache Whether to include cache in the path (default as false)
+     * @return The constructed path string
+     */
+    static std::string buildPath(const cppxdic::BaseParameters& parameters, bool with_material = false, bool with_trial = false, bool with_phase = false, bool with_cache = false);
+
+    /**
+     * Build the output path
+     * @param parameters The base parameters structure (required)
+     * @return The constructed path string
+     */
+    static std::string buildOutputPath(const cppxdic::BaseParameters& parameters);
+    
+    /**
+     * Build the output cache path
+     * @param parameters The base parameters structure (required)
+     * @return The constructed path string
+     */
+    static std::string buildOutputCachePath(const cppxdic::BaseParameters& parameters);
+
+    /**
+     * Build the roi file path
+     * @param parameters The base parameters structure (required)
+     * @param reftrial The reference trial number (required)
+     * @param stereopair The stereopair number (required)
+     * @param extension The file extension (default as ".mat")
+     * @return The constructed path string
+     */
+    static std::string buildRoiFilePath(const cppxdic::BaseParameters& parameters, std::string reftrial, int stereopair, const std::string& extension = ".mat");
+
+    /**
+     * Build the seed file path
+     * @param parameters The base parameters structure (required)
+     * @param reftrial The reference trial number (required)
+     * @param stereopair The stereopair number (required)
+     * @param extension The file extension (default as ".mat")
+     * @return The constructed path string
+     */
+    static std::string buildSeedFilePath(const cppxdic::BaseParameters& parameters, std::string reftrial, int stereopair, const std::string& extension = ".mat");
+
+
+    /**
+     * Build the matching file path
+     * @param parameters The base parameters structure (required)
+     * @param reftrial The reference trial number (required)
+     * @param stereopair The stereopair number (required)
+     * @param extension The file extension (default as ".mat")
+     * @return The constructed path string
+     */
+    static std::string buildMatchingFilePath(const cppxdic::BaseParameters& parameters, std::string reftrial, int stereopair, const std::string& extension = ".mat");
+
 private:
     static bool checkROIReferences(const Config& config);
     static bool checkSeedReferences(const Config& config);
     static bool checkProtocolFiles(const Config& config);
     static bool checkCalibrationFiles(const Config& config);
 
-    // Helpers for video
-    static void getCamerasForPair(int stereopair, int& cam_first, int& cam_second);
+    static std::string buildRoiOrSeedLikeFilePath(const cppxdic::BaseParameters& parameters, std::string reftrial, int stereopair, std::string_view prefix, const std::string& extension = ".mat");
+
 };
 
 #endif // UTILS_H

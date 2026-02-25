@@ -251,15 +251,6 @@ public:
     // =========================================================================
     
     /**
-     * Get camera numbers for a stereo pair
-     * 
-     * @param stereopair Stereo pair number (1 or 2)
-     * @param cam1 Output: first camera number
-     * @param cam2 Output: second camera number
-     */
-    static void getCameraNumbers(int stereopair, int& cam1, int& cam2);
-    
-    /**
      * Build input structure from config and trial info
      * 
      * @param trial Trial ID

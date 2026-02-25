@@ -7,8 +7,134 @@
 #include <iostream>
 #include <sstream>
 #include <cstring>
+#include <algorithm>
 
 namespace cppxdic {
+
+// ============================================================================
+// Protocol Loading
+// ============================================================================
+
+bool MatReader::loadProtocol(const std::string& protocol_path, ProtocolFileData& protocol) {
+    mat_t* matfp = Mat_Open(protocol_path.c_str(), MAT_ACC_RDONLY);
+    if (!matfp) {
+        std::cerr << "Failed to open protocol file: " << protocol_path << std::endl;
+        return false;
+    }
+    
+    bool success = false;
+    
+    // Read 'cond' structure
+    matvar_t* cond_var = Mat_VarRead(matfp, "cond");
+    if (!cond_var) {
+        // Try alternative name 'protocol'
+        cond_var = Mat_VarRead(matfp, "protocol");
+    }
+    
+    if (cond_var && cond_var->class_type == MAT_C_STRUCT) {
+        // Read titles field (cell array of strings)
+        matvar_t* titles_var = Mat_VarGetStructFieldByName(cond_var, "titles", 0);
+        if (titles_var && titles_var->class_type == MAT_C_CELL) {
+            protocol.titles = readCellStrings(titles_var);
+        }
+        
+        // Read table field
+        matvar_t* table_var = Mat_VarGetStructFieldByName(cond_var, "table", 0);
+        if (table_var && table_var->class_type == MAT_C_CELL) {
+            size_t n_trials = table_var->dims[0];
+            size_t n_fields = table_var->dims[1];
+            
+            protocol.n_trials = n_trials;
+            protocol.n_fields = n_fields;
+            
+            // Find column indices for important fields
+            int dir_idx = -1, nf_idx = -1, spd_idx = -1, rep_idx = -1;
+            for (size_t i = 0; i < protocol.titles.size(); ++i) {
+                if (protocol.titles[i] == "dir") dir_idx = i;
+                else if (protocol.titles[i] == "nf") nf_idx = i;
+                else if (protocol.titles[i] == "spd") spd_idx = i;
+                else if (protocol.titles[i] == "rep") rep_idx = i;
+            }
+            
+            // Read trial data
+            for (size_t trial = 0; trial < n_trials; ++trial) {
+                ProtocolFileData::TrialEntry info;
+                info.trial_number = trial + 1;  // 1-based indexing
+                
+                // Read direction
+                if (dir_idx >= 0) {
+                    matvar_t* cell = Mat_VarGetCell(table_var, trial * n_fields + dir_idx);
+                    if (cell) {
+                        if (cell->class_type == MAT_C_CHAR) {
+                            info.direction = std::string(static_cast<char*>(cell->data), cell->nbytes);
+                            // Remove trailing spaces
+                            info.direction.erase(info.direction.find_last_not_of(" \t\n\r") + 1);
+                        }
+                    }
+                }
+                
+                // Read force
+                if (nf_idx >= 0) {
+                    matvar_t* cell = Mat_VarGetCell(table_var, trial * n_fields + nf_idx);
+                    if (cell && cell->class_type == MAT_C_DOUBLE) {
+                        info.force = *static_cast<double*>(cell->data);
+                    }
+                }
+                
+                // Read speed
+                if (spd_idx >= 0) {
+                    matvar_t* cell = Mat_VarGetCell(table_var, trial * n_fields + spd_idx);
+                    if (cell && cell->class_type == MAT_C_DOUBLE) {
+                        info.speed = *static_cast<double*>(cell->data);
+                    }
+                }
+                
+                // Read repetition
+                if (rep_idx >= 0) {
+                    matvar_t* cell = Mat_VarGetCell(table_var, trial * n_fields + rep_idx);
+                    if (cell && cell->class_type == MAT_C_DOUBLE) {
+                        info.repetition = static_cast<int>(*static_cast<double*>(cell->data));
+                    }
+                }
+                
+                protocol.trials.push_back(info);
+            }
+        }
+        
+        Mat_VarFree(cond_var);
+        success = true;
+    }
+    
+    Mat_Close(matfp);
+    return success;
+}
+
+std::vector<std::string> MatReader::readCellStrings(matvar_t* cell_var) {
+    std::vector<std::string> strings;
+    
+    if (!cell_var || cell_var->class_type != MAT_C_CELL) {
+        return strings;
+    }
+    
+    size_t n_cells = 1;
+    for (int i = 0; i < cell_var->rank; ++i) {
+        n_cells *= cell_var->dims[i];
+    }
+    
+    for (size_t i = 0; i < n_cells; ++i) {
+        matvar_t* cell = Mat_VarGetCell(cell_var, i);
+        if (cell && cell->class_type == MAT_C_CHAR) {
+            std::string str(static_cast<char*>(cell->data), cell->nbytes);
+            // Remove trailing spaces
+            str.erase(str.find_last_not_of(" \t\n\r") + 1);
+            strings.push_back(str);
+        } else {
+            strings.push_back("");  // Empty string for non-string cells
+        }
+    }
+    
+    return strings;
+}
 
 matvar_t* MatReader::readStructField(mat_t* matfp, 
                                      const std::string& struct_name,

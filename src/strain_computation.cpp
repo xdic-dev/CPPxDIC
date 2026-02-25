@@ -115,8 +115,9 @@ DeformationResult computeSingleFrameDeformation(
         result.Drec1[itri] = result.D2[itri].cross(result.D3[itri]) / result.Dnorm[itri];
         result.Drec2[itri] = result.D3[itri].cross(result.D1[itri]) / result.Dnorm[itri];
         
-        // Area (MATLAB line 172)
-        result.Area[itri] = 0.5 * result.Dnorm[itri];
+        // Area uses current (deformed) configuration (MATLAB lines 161-162: dnorm = cross(d1,d2)*d3')
+        double dnorm_val = cross_d.dot(result.d3[itri]);
+        result.Area[itri] = 0.5 * dnorm_val;
         
         // Deformation gradient tensor F (MATLAB lines 174-179)
         result.Fmat[itri] = Eigen::Matrix3d::Zero();

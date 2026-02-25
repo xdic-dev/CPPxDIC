@@ -77,8 +77,9 @@ DeformationOutputs DeformationWorkflow::execute(const DeformationInputs& inputs)
     
     // Check for existing checkpoint
     std::ostringstream binout;
+    std::string deform_mode = inputs.cumulative_deformation ? "cum" : "rate";
     binout << inputs.output_dir << "/DIC3DPPresults_" << config_.num_pair 
-           << "Pairs_cum_" << config_.fileversion << ".bin";
+           << "Pairs_" << deform_mode << "_" << config_.fileversion << ".bin";
     
     if (hasDeformationCheckpoint(inputs.output_dir, config_.num_pair)) {
         std::cout << "Checkpoint found: " << binout.str() << std::endl;
@@ -157,6 +158,7 @@ DeformationOutputs DeformationWorkflow::execute(const DeformationInputs& inputs)
     // Compute deformation (with RBM)
     std::cout << "\nComputing 3D surface deformation (with RBM)..." << std::endl;
     std::cout << "  Method: Triangular Cosserat Point Elements (TCPE)" << std::endl;
+    std::cout << "  Mode: " << (inputs.cumulative_deformation ? "Cumulative" : "Rate/Incremental") << std::endl;
     FrameDeformationResult deform_result = computeSurfaceDeformation(
         dic3d.Faces, vertices_ref, vertices_all_frames, inputs.cumulative_deformation);
     std::cout << "  ✓ Deformation computation complete (with RBM)" << std::endl;
@@ -194,7 +196,9 @@ DeformationOutputs DeformationWorkflow::execute(const DeformationInputs& inputs)
     // Optionally generate MAT file
     if (config_.generate_mat_files) {
         std::ostringstream matout;
-        matout << inputs.output_dir << "/DIC3DPPresults_" << config_.num_pair << "Pairs_cum_v1.mat";
+        std::string deform_mode = inputs.cumulative_deformation ? "cum" : "rate";
+        matout << inputs.output_dir << "/DIC3DPPresults_" << config_.num_pair 
+               << "Pairs_" << deform_mode << "_v1.mat";
         
         if (!std::filesystem::exists(matout.str())) {
             if (saveMAT(ppresults, matout.str())) {
@@ -648,17 +652,23 @@ DeformationInputs DeformationWorkflow::buildInputs(int trial_id) {
     DeformationInputs inputs;
     inputs.trial_id = trial_id;
     
+    std::ostringstream trial_str;
+    trial_str << std::setw(3) << std::setfill('0') << trial_id;
+    
+    inputs.dic3d_combined_path = config_.dic_path + "/" + config_.subject_id + "/" +
+        config_.material + "/DIC3Dcombined_" + std::to_string(config_.num_pair) + 
+        "Pairs_stitched.bin";
+    
     inputs.output_dir = config_.dic_path + "/" + config_.subject_id + "/" + config_.material;
     
-    std::ostringstream dic3d_path;
-    dic3d_path << inputs.output_dir << "/DIC3Dcombined_" << config_.num_pair << "Pairs_stitched.bin";
-    inputs.dic3d_combined_path = dic3d_path.str();
-    
-    // Processing options from config
+    // Processing options
     inputs.apply_temporal_filtering = true;
-    inputs.filter_freq = config_.filterFreq;
-    inputs.acquisition_freq = config_.vid_sample_freq;
-    inputs.cumulative_deformation = (config_.deftype == "cum" || config_.deftype == "both");
+    inputs.filter_freq = 10.0;  // Hz
+    inputs.acquisition_freq = 50.0;  // Hz  
+    
+    // Deformation mode from config (can be overridden)
+    // Check config for deformation type: "cum", "rate", or "both"
+    inputs.cumulative_deformation = (config_.deftype != "rate");
     
     return inputs;
 }

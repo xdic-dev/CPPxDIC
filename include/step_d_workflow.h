@@ -161,8 +161,8 @@ private:
      */
     bool performMatching(const std::vector<cv::Mat>& cam_first_satur,
                         const std::vector<cv::Mat>& cam_second_satur,
-                        const cv::Mat& refmask_trial,
-                        const SeedPoint& initial_seed_point_set1,
+                        cv::Mat& refmask_trial,
+                        SeedPoint& initial_seed_point_set1,
                         cv::Mat& refmask_trial_matched,
                         SeedPoint& initial_seed_point_set2);
     
@@ -254,16 +254,9 @@ private:
                                                 const SeedPoint& seed_point,
                                                 const StepParameters& step_params,
                                                 const std::string& output_path,
-                                                const bool go_parallel);
+                                                const bool go_parallel,
+                                                const bool use_no_update = false);
     
-    /**
-     * Get camera numbers for stereo pair
-     * 
-     * @param stereopair Stereo pair number
-     * @param cam_first Output: first camera number
-     * @param cam_second Output: second camera number
-     */
-    static void getCameraNumbers(int stereopair, int& cam_first, int& cam_second);
 };
 
 } // namespace cppxdic
