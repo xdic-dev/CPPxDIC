@@ -223,7 +223,11 @@ limit_grayscale = 70
 # File version identifier
 fileversion = v2
 
-# Generate MATLAB .mat files
+# Data format for pipeline I/O: mat, bin, or json
+# Controls the format used for saving/loading DIC2D, DIC3Dcombined, DIC3DPPresults
+data_format = mat
+
+# Generate MATLAB .mat files (legacy flag, overridden by data_format)
 generate_mat_files = true
 
 # Delete cached .bin files after use

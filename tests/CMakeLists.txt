@@ -518,10 +518,7 @@ set(PROJECT_SOURCES
     ${CMAKE_SOURCE_DIR}/../src/temporal_filter.cpp
     ${CMAKE_SOURCE_DIR}/../src/face_isotropy.cpp
     ${CMAKE_SOURCE_DIR}/../src/visualization.cpp
-    ${CMAKE_SOURCE_DIR}/../src/preprocessing_workflow.cpp
-    ${CMAKE_SOURCE_DIR}/../src/dic2d_workflow.cpp
-    ${CMAKE_SOURCE_DIR}/../src/reconstruction3d_workflow.cpp
-    ${CMAKE_SOURCE_DIR}/../src/deformation_workflow.cpp
+    ${CMAKE_SOURCE_DIR}/../src/data_serializer.cpp
 )
 
 # Helper macro: link all project dependencies to a target

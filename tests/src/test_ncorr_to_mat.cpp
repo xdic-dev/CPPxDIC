@@ -142,9 +142,9 @@ int main(int argc, char** argv) {
         std::cerr << "Usage: " << argv[0] << " <path_to_bin_file> [output_mat_file]" << std::endl;
         std::cerr << "If output_mat_file is not specified, it will use the same name and location as the input." << std::endl;
         std::cerr << "\nSupported formats:" << std::endl;
-        std::cerr << "  - ncorr*.mat.bin (ncorr::DIC_analysis_output)" << std::endl;
+        std::cerr << "  - ncorr*.bin (ncorr::DIC_analysis_output)" << std::endl;
         std::cerr << "  - DIC3Dcombined*.bin (DIC3Dcombined results)" << std::endl;
-        std::cerr << "\nExample 1: " << argv[0] << " ncorr1.mat.bin" << std::endl;
+        std::cerr << "\nExample 1: " << argv[0] << " ncorr1.bin" << std::endl;
         std::cerr << "           (creates ncorr1.mat)" << std::endl;
         std::cerr << "\nExample 2: " << argv[0] << " DIC3Dcombined.bin output.mat" << std::endl;
         return 1;

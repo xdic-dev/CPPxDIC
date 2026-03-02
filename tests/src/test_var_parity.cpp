@@ -505,14 +505,11 @@ int main(int argc, char** argv) {
     int spacing = DICConstants::SUBSET_SPACING;
     bool matching_loaded = false;
     
-    // Check if matching cache bin exists
-    std::filesystem::path cache_bin = std::filesystem::path(base_params.matchingfile).parent_path() / 
-        ".cache" / (std::filesystem::path(base_params.matchingfile).filename().string() + ".bin");
-    
-    if (std::filesystem::exists(cache_bin)) {
-        std::cout << "Loading matching from cache: " << cache_bin.string() << "\n";
+    // Load matching from ncorr binary file
+    if (std::filesystem::exists(base_params.matchingfile)) {
+        std::cout << "Loading matching from: " << base_params.matchingfile << "\n";
         
-        auto dic_output = ncorr::DIC_analysis_output::load(cache_bin.string());
+        auto dic_output = ncorr::DIC_analysis_output::load(base_params.matchingfile);
         
         if (!dic_output.disps.empty()) {
             refmask_trial = refmask_REF.clone();
@@ -535,20 +532,7 @@ int main(int argc, char** argv) {
             initial_seed_point_set1.sw = ROIManager::mapPointCoordinate(ref_seed_point.sw, U_mapped, V_mapped);
             initial_seed_point_set1.pw = ROIManager::mapSubset2Pixel(initial_seed_point_set1.sw, spacing);
             matching_loaded = true;
-            std::cout << "Matching loaded from cache\n";
-        }
-    }
-    
-    if (!matching_loaded && std::filesystem::exists(base_params.matchingfile)) {
-        cv::Mat U_mapped, V_mapped;
-        if (ROIManager::loadMatchingResults(base_params.matchingfile,
-                                           refmask_REF, refmask_trial,
-                                           U_mapped, V_mapped, spacing)) {
-            ref_seed_point.sw = ROIManager::mapPixel2Subset(ref_seed_point.pw, spacing);
-            initial_seed_point_set1.sw = ROIManager::mapPointCoordinate(ref_seed_point.sw, U_mapped, V_mapped);
-            initial_seed_point_set1.pw = ROIManager::mapSubset2Pixel(initial_seed_point_set1.sw, spacing);
-            matching_loaded = true;
-            std::cout << "Matching loaded from .mat file\n";
+            std::cout << "Matching loaded\n";
         }
     }
     
@@ -592,19 +576,15 @@ int main(int argc, char** argv) {
     std::cout << "\n--- Step 6: Inter-camera Matching ---\n";
     
     std::string ncorr_matching_path = base_params.outputPath + "/ncorr" + 
-        std::to_string(cam_1) + std::to_string(cam_2) + ".mat";
+        std::to_string(cam_1) + std::to_string(cam_2) + ".bin";
     
     cv::Mat refmask_trial_matched;
     SeedPoint initial_seed_point_set2;
     
-    std::filesystem::path matching_cache_bin = std::filesystem::path(ncorr_matching_path).parent_path() / 
-        ".cache" / ("ncorr" + std::to_string(cam_1) + std::to_string(cam_2) + ".mat.bin");
-    
-    if (std::filesystem::exists(matching_cache_bin)) {
-        std::cout << "Loading matching from cache: " << matching_cache_bin.string() << "\n";
+    if (std::filesystem::exists(ncorr_matching_path)) {
+        std::cout << "Loading matching from: " << ncorr_matching_path << "\n";
         
-        // Load from cache and extract displacement
-        auto dic_output = ncorr::DIC_analysis_output::load(matching_cache_bin.string());
+        auto dic_output = ncorr::DIC_analysis_output::load(ncorr_matching_path);
         
         if (!dic_output.disps.empty()) {
             refmask_trial_matched = refmask_trial.clone();
@@ -629,10 +609,10 @@ int main(int argc, char** argv) {
                 initial_seed_point_set2.sw, spacing);
         }
     } else {
-        // No matching cache - use seed as-is
+        // No matching file - use seed as-is
         refmask_trial_matched = refmask_trial.clone();
         initial_seed_point_set2 = initial_seed_point_set1;
-        std::cout << "No matching cache, using seed as-is\n";
+        std::cout << "No matching file, using seed as-is\n";
     }
     
     std::cout << "initial_seed_point_set2: pw=[" << initial_seed_point_set2.pw[0] << "," 

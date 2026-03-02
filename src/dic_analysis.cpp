@@ -5,8 +5,7 @@
 #include "dic_analysis.h"
 #include "utils.h"
 #include "step_d_workflow.h"
-#include "mat_writer.h"
-#include "mat_reader.h"
+#include "data_serializer.h"
 #include "strain_computation.h"
 #include "surface_stitching.h"
 #include "temporal_filter.h"
@@ -25,7 +24,6 @@
 #include <fstream>
 // JSON
 #include <nlohmann/json.hpp>
-#include <unordered_map>
 #include <algorithm>
 #include <array>
 
@@ -34,164 +32,6 @@ using namespace cppxdic;
 
 DicAnalysis::DicAnalysis(const Config& config) : config_(config) {
 }
-
-// ============================================================================
-// Workflow Accessors (lazy initialization)
-// ============================================================================
-
-PreprocessingWorkflow& DicAnalysis::getPreprocessingWorkflow() {
-    if (!preprocessing_) {
-        preprocessing_ = std::make_unique<PreprocessingWorkflow>(config_);
-    }
-    return *preprocessing_;
-}
-
-DIC2DWorkflow& DicAnalysis::getDIC2DWorkflow() {
-    if (!dic2d_) {
-        dic2d_ = std::make_unique<DIC2DWorkflow>(config_);
-    }
-    return *dic2d_;
-}
-
-Reconstruction3DWorkflow& DicAnalysis::getReconstruction3DWorkflow() {
-    if (!reconstruction3d_) {
-        reconstruction3d_ = std::make_unique<Reconstruction3DWorkflow>(config_);
-    }
-    return *reconstruction3d_;
-}
-
-DeformationWorkflow& DicAnalysis::getDeformationWorkflow() {
-    if (!deformation_) {
-        deformation_ = std::make_unique<DeformationWorkflow>(config_);
-    }
-    return *deformation_;
-}
-
-// ============================================================================
-// Refactored Run Method (using new workflow classes)
-// ============================================================================
-
-bool DicAnalysis::runRefactored() {
-    std::cout << "========================================" << std::endl;
-    std::cout << "DIC Analysis Pipeline (Refactored)" << std::endl;
-    std::cout << "========================================" << std::endl;
-    
-    // Step 0: Preprocessing
-    std::cout << "\n=== PREPROCESSING ===" << std::endl;
-    auto& preprocessing = getPreprocessingWorkflow();
-    if (!preprocessing.execute()) {
-        std::cerr << "Preprocessing failed!" << std::endl;
-        return false;
-    }
-    
-    const auto& trial_target = preprocessing.getTargetTrials();
-    std::cout << "Target trials: [";
-    for (size_t i = 0; i < trial_target.size(); ++i) {
-        std::cout << trial_target[i];
-        if (i < trial_target.size() - 1) std::cout << ", ";
-    }
-    std::cout << "]" << std::endl;
-    
-    // Step D: 2D DIC Analysis
-    std::cout << "\n=== STEP D: 2D DIC Analysis ===" << std::endl;
-    if (!check2DOutputsExist(trial_target)) {
-        auto& dic2d = getDIC2DWorkflow();
-        
-        for (int trial : trial_target) {
-            for (int pair = 1; pair <= config_.num_pair; ++pair) {
-                std::ostringstream trial_str;
-                trial_str << std::setw(3) << std::setfill('0') << trial;
-                
-                std::cout << "\nProcessing Trial " << trial << ", Pair " << pair << std::endl;
-                
-                auto outputs = dic2d.execute(trial_str.str(), pair);
-                if (!outputs.isValid()) {
-                    std::cerr << "DIC 2D failed for trial " << trial << ", pair " << pair << std::endl;
-                    return false;
-                }
-                
-                std::cout << "✓ Trial " << trial << ", pair " << pair << " complete" << std::endl;
-            }
-        }
-    } else {
-        std::cout << "✓ Checkpoint detected: All 2D DIC outputs exist" << std::endl;
-    }
-    
-    // Step E: 3D Reconstruction
-    std::cout << "\n=== STEP E: 3D Reconstruction ===" << std::endl;
-    if (!check3DOutputsExist(trial_target)) {
-        auto& reconstruction = getReconstruction3DWorkflow();
-        if (!reconstruction.execute(trial_target)) {
-            std::cerr << "3D Reconstruction failed!" << std::endl;
-            return false;
-        }
-    } else {
-        std::cout << "✓ Checkpoint detected: All 3D reconstruction outputs exist" << std::endl;
-    }
-    
-    // Step F: Deformation Analysis
-    std::cout << "\n=== STEP F: Deformation Analysis ===" << std::endl;
-    if (!checkDeformationOutputsExist()) {
-        auto& deformation = getDeformationWorkflow();
-        if (!deformation.execute(trial_target)) {
-            std::cerr << "Deformation Analysis failed!" << std::endl;
-            return false;
-        }
-    } else {
-        std::cout << "✓ Checkpoint detected: Deformation analysis outputs exist" << std::endl;
-    }
-    
-    std::cout << "\n========================================" << std::endl;
-    std::cout << "✓ All DIC analysis steps complete!" << std::endl;
-    std::cout << "========================================" << std::endl;
-    
-    return true;
-}
-
-// ============================================================================
-// Checkpoint Helpers
-// ============================================================================
-
-bool DicAnalysis::check2DOutputsExist(const std::vector<int>& trial_target) {
-    for (int trial : trial_target) {
-        for (int pair = 1; pair <= config_.num_pair; ++pair) {
-            int cam1 = (pair - 1) * 2 + 1;
-            int cam2 = (pair - 1) * 2 + 2;
-            
-            std::ostringstream trial_str;
-            trial_str << std::setw(3) << std::setfill('0') << trial;
-            
-            std::string output_path = config_.dic_path + "/" + config_.subject_id + "/" + 
-                config_.material + "/" + trial_str.str() + "/" + config_.phase_id;
-            
-            std::string cam1_bin = output_path + "/.cache/ncorr" + std::to_string(cam1) + ".mat.bin";
-            std::string cam2_bin = output_path + "/.cache/ncorr" + std::to_string(cam2) + ".mat.bin";
-            
-            if (!std::filesystem::exists(cam1_bin) || !std::filesystem::exists(cam2_bin)) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
-bool DicAnalysis::check3DOutputsExist(const std::vector<int>& /*trial_target*/) {
-    std::ostringstream dic3d_path;
-    dic3d_path << config_.dic_path << "/" << config_.subject_id << "/" << config_.material 
-               << "/DIC3Dcombined_" << config_.num_pair << "Pairs_stitched.bin";
-    return std::filesystem::exists(dic3d_path.str());
-}
-
-bool DicAnalysis::checkDeformationOutputsExist() {
-    std::ostringstream ppresults_path;
-    ppresults_path << config_.dic_path << "/" << config_.subject_id << "/" << config_.material 
-                   << "/DIC3DPPresults_" << config_.num_pair << "Pairs_cum_v1.mat";
-    return std::filesystem::exists(ppresults_path.str());
-}
-
-// ============================================================================
-// Legacy Methods (kept for backward compatibility)
-// ============================================================================
 
 bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
     std::cout << "Starting Deformation/Strain Analysis (Step F)..." << std::endl;
@@ -202,28 +42,22 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
             // Step F works on combined 3D reconstruction, not per-pair
             std::string output_dir = config_.dic_path + "/" + config_.subject_id + "/" + config_.material;
             
-            // Load DIC3Dcombined from Step E output (binary format)
-            std::ostringstream dic3d_path;
-            dic3d_path << output_dir << "/DIC3Dcombined_" << config_.num_pair << "Pairs_stitched.bin";
+            // Load DIC3Dcombined from Step E output using configured format
+            auto serializer = cppxdic::DataSerializer::create(config_.data_format);
+            std::string dic3d_file = output_dir + "/DIC3Dcombined_" + std::to_string(config_.num_pair) 
+                                   + "Pairs_stitched" + serializer->extension();
             
-            if (!std::filesystem::exists(dic3d_path.str())) {
-                std::cerr << "ERROR: DIC3Dcombined file not found: " << dic3d_path.str() << std::endl;
+            if (!std::filesystem::exists(dic3d_file)) {
+                std::cerr << "ERROR: DIC3Dcombined file not found: " << dic3d_file << std::endl;
                 std::cerr << "You must run Step E (dic3DReconstruction) first!" << std::endl;
                 return false;
             }
             
-            if (config_.debug_mode) {
-                std::cout << "[DEBUG] Loading DIC3Dcombined from: " << dic3d_path.str() << std::endl;
-            } else {
-                std::cout << "Loading DIC3Dcombined from: " << dic3d_path.str() << std::endl;
-            }
+            std::cout << "Loading DIC3Dcombined from: " << dic3d_file << std::endl;
             
-            // Load DIC3Dcombined structure from binary file
             DIC3Dcombined dic3d;
-            try {
-                dic3d = DIC3Dcombined::loadBinary(dic3d_path.str());
-            } catch (const std::exception& e) {
-                std::cerr << "Failed to load DIC3Dcombined structure: " << e.what() << std::endl;
+            if (!serializer->loadDIC3Dcombined(dic3d_file, dic3d)) {
+                std::cerr << "Failed to load DIC3Dcombined structure" << std::endl;
                 return false;
             }
             
@@ -687,45 +521,22 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
             
             std::cout << "  ✓ Populated all deformation data (with RBM and ARBM) for " << ppresults.n_frames << " frames" << std::endl;
             
-            // Write DIC3DPPresults to .mat file
-            if (config_.generate_mat_files) {
-                std::ostringstream matout;
-                matout << output_dir << "/DIC3DPPresults_" << config_.num_pair << "Pairs_cum_v1.mat";
+            // Save DIC3DPPresults using configured format
+            {
+                auto pp_serializer = cppxdic::DataSerializer::create(config_.data_format);
+                std::string ppout = output_dir + "/DIC3DPPresults_" + std::to_string(config_.num_pair) 
+                                  + "Pairs_cum_" + config_.fileversion + pp_serializer->extension();
                 
-                // Check if already exists (checkpoint)
-                if (std::filesystem::exists(matout.str())) {
-                    std::cout << "\nCheckpoint found: " << matout.str() << " (skipping)" << std::endl;
-                    if (config_.debug_mode) {
-                        std::cout << "[DEBUG] DIC3DPPresults .mat file: " << matout.str() << std::endl;
-                    }
+                if (std::filesystem::exists(ppout)) {
+                    std::cout << "\nCheckpoint found: " << ppout << " (skipping)" << std::endl;
                 } else {
-                    if (config_.debug_mode) {
-                        std::cout << "\n[DEBUG] Writing DIC3DPPresults to: " << matout.str() << std::endl;
-                    } else {
-                        std::cout << "\nWriting results to: " << matout.str() << std::endl;
-                    }
-                    bool success = MatWriter::write3DPPresults(matout.str(), ppresults);
-                    if (success) {
-                        std::cout << "✓ Generated MATLAB .mat file successfully" << std::endl;
-                    } else {
-                        std::cerr << "ERROR: Failed to write DIC3DPPresults .mat" << std::endl;
+                    std::cout << "\nWriting DIC3DPPresults to: " << ppout << std::endl;
+                    if (!pp_serializer->saveDIC3DPPresults(ppout, ppresults)) {
+                        std::cerr << "ERROR: Failed to write DIC3DPPresults" << std::endl;
                         return false;
                     }
+                    std::cout << "✓ Saved DIC3DPPresults: " << ppout << std::endl;
                 }
-            } else {
-                std::cout << "\nDeformation analysis complete (generate_mat_files=false, no .mat output)" << std::endl;
-            }
-            
-            // Save binary cache file
-            std::ostringstream binout;
-            binout << output_dir << "/DIC3DPPresults_" << config_.num_pair 
-                   << "Pairs_cum_" << config_.fileversion << ".bin";
-            
-            try {
-                ppresults.saveBinary(binout.str());
-                std::cout << "✓ Saved DIC3DPPresults binary cache: " << binout.str() << std::endl;
-            } catch (const std::exception& e) {
-                std::cerr << "Warning: Failed to write DIC3DPPresults binary: " << e.what() << std::endl;
             }
             
             // Generate visualization exports if enabled
@@ -889,12 +700,11 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 int cam_1 = (pair - 1) * 2 + 1;
                 int cam_2 = (pair - 1) * 2 + 2;
                 
-                // Load DIC 2D outputs from .cache directory (internal .bin format)
-                // Path must match where Step D saves files: subject/material/trial/phase/.cache/
+                // Load ncorr DIC outputs from output directory (ncorr native .bin format)
                 std::string output_dir = config_.dic_path + "/" + config_.subject_id + "/" + config_.material + "/" + trial_str.str() + "/" + config_.phase_id;
-                std::string cam1_bin = output_dir + "/.cache/ncorr" + std::to_string(cam_1) + ".mat.bin";
-                std::string cam2_bin = output_dir + "/.cache/ncorr" + std::to_string(cam_2) + ".mat.bin";
-                std::string matching_bin = output_dir + "/.cache/ncorr" + std::to_string(cam_1) + std::to_string(cam_2) + ".mat.bin";
+                std::string cam1_bin = output_dir + "/ncorr" + std::to_string(cam_1) + ".bin";
+                std::string cam2_bin = output_dir + "/ncorr" + std::to_string(cam_2) + ".bin";
+                std::string matching_bin = output_dir + "/ncorr" + std::to_string(cam_1) + std::to_string(cam_2) + ".bin";
                 
                 if (!std::filesystem::exists(cam1_bin) || !std::filesystem::exists(cam2_bin)) {
                     std::cerr << "Missing cached 2D outputs for trial " << trial << ", pair " << pair << ". Skipping." << std::endl;
@@ -1305,24 +1115,23 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 // Store individual pair results in stitched structure
                 stitched.AllPairsResults = all_pairs;
                 
-                // Load DIC2D pair results from Step 2 output files
+                // Load DIC2D pair results from Step D output files
                 std::cout << "\n=== Loading DIC2D pair results ===" << std::endl;
+                auto d_serializer = cppxdic::DataSerializer::create(config_.data_format);
                 std::string output_dir = config_.dic_path + "/" + config_.subject_id + "/" + config_.material;
                 for (int pair = 1; pair <= config_.num_pair; ++pair) {
                     int cam_1 = (pair - 1) * 2 + 1;
                     int cam_2 = (pair - 1) * 2 + 2;
                     
                     std::string dic2d_file = output_dir + "/myDIC2DpairResults_C_" + 
-                        std::to_string(cam_1) + "_C_" + std::to_string(cam_2) + ".mat";
+                        std::to_string(cam_1) + "_C_" + std::to_string(cam_2) + d_serializer->extension();
                     
                     if (std::filesystem::exists(dic2d_file)) {
-                        // Load full DIC2D data from MAT file
                         DIC2DPairResults dic2d_result;
-                        if (MatReader::readDIC2DPairResults(dic2d_file, dic2d_result)) {
+                        if (d_serializer->loadDIC2DPairResults(dic2d_file, dic2d_result)) {
                             dic2d_info.push_back(dic2d_result);
-                            std::cout << "  ✓ Loaded full DIC2D data for pair " << pair << std::endl;
+                            std::cout << "  ✓ Loaded DIC2D data for pair " << pair << std::endl;
                         } else {
-                            // Fallback to placeholder if loading fails
                             std::cerr << "  ! Failed to load DIC2D file, using placeholder: " << dic2d_file << std::endl;
                             dic2d_result.nCamRef = cam_1;
                             dic2d_result.nCamDef = cam_2;
@@ -1331,7 +1140,6 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                         }
                     } else {
                         std::cout << "  ! DIC2D file not found (creating placeholder): " << dic2d_file << std::endl;
-                        // Create placeholder when file doesn't exist
                         DIC2DPairResults dic2d_result;
                         dic2d_result.nCamRef = cam_1;
                         dic2d_result.nCamDef = cam_2;
@@ -1345,44 +1153,21 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 std::cout << "  Stored " << stitched.DIC2Dinfo.size() << " DIC2D pair results" << std::endl;
             }
             
-            // Write stitched result to binary file (always saved for Step F)
-            std::ostringstream binout;
-            binout << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
-                   << "/DIC3Dcombined_" << config_.num_pair << "Pairs_stitched.bin";
-            
-            // Check if already exists (checkpoint)
-            if (std::filesystem::exists(binout.str())) {
-                std::cout << "Checkpoint found: " << binout.str() << " (skipping)" << std::endl;
-                if (config_.debug_mode) {
-                    std::cout << "[DEBUG] DIC3Dcombined binary file: " << binout.str() << std::endl;
-                }
-            } else {
-                try {
-                    stitched.saveBinary(binout.str());
-                    std::cout << "✓ Saved DIC3Dcombined binary file: " << binout.str() << std::endl;
-                } catch (const std::exception& e) {
-                    std::cerr << "Failed to write DIC3Dcombined binary: " << e.what() << std::endl;
-                }
-            }
-            
-            // Optionally generate MATLAB .mat file
-            if (config_.generate_mat_files) {
-                std::ostringstream matout;
-                matout << config_.dic_path << "/" << config_.subject_id << "/" << config_.material
-                       << "/DIC3Dcombined_" << config_.num_pair << "Pairs_stitched.mat";
+            // Save DIC3Dcombined using configured format
+            {
+                auto e_serializer = cppxdic::DataSerializer::create(config_.data_format);
+                std::string e_out = config_.dic_path + "/" + config_.subject_id + "/" + config_.material
+                                  + "/DIC3Dcombined_" + std::to_string(config_.num_pair) 
+                                  + "Pairs_stitched" + e_serializer->extension();
                 
-                // Check if already exists (checkpoint)
-                if (std::filesystem::exists(matout.str())) {
-                    std::cout << "Checkpoint found: " << matout.str() << " (skipping)" << std::endl;
-                    if (config_.debug_mode) {
-                        std::cout << "[DEBUG] DIC3Dcombined .mat file: " << matout.str() << std::endl;
-                    }
+                if (std::filesystem::exists(e_out)) {
+                    std::cout << "Checkpoint found: " << e_out << " (skipping)" << std::endl;
                 } else {
-                    bool success = MatWriter::write3DCombinedResults(matout.str(), stitched);
-                    if (success) {
-                        std::cout << "✓ Generated MATLAB .mat file: " << matout.str() << std::endl;
+                    std::cout << "Writing DIC3Dcombined to: " << e_out << std::endl;
+                    if (!e_serializer->saveDIC3Dcombined(e_out, stitched)) {
+                        std::cerr << "Failed to write DIC3Dcombined" << std::endl;
                     } else {
-                        std::cerr << "Failed to write DIC3Dcombined .mat" << std::endl;
+                        std::cout << "✓ Saved DIC3Dcombined: " << e_out << std::endl;
                     }
                 }
             }
@@ -1443,58 +1228,46 @@ bool DicAnalysis::run() {
     }
     std::cout << "]" << std::endl;
     
-    // Helper lambda: Check if 2D DIC outputs exist for all trials/pairs (myDIC2DpairResults_C_x_C_y.mat)
+    // Create serializer for format-aware checkpoint checks
+    auto serializer = cppxdic::DataSerializer::create(config_.data_format);
+    std::string ext = serializer->extension();
+    
+    // Helper lambda: Check if 2D DIC outputs exist for all trials/pairs
     auto check_2d_outputs_exist = [&]() -> bool {
         for (int trial : trial_target) {
             for (int pair = 1; pair <= config_.num_pair; ++pair) {
                 int cam1, cam2;
                 Utils::getCamerasForPair(pair, cam1, cam2);
 
-                std::ostringstream cam_bin_path;
-                cam_bin_path << config_.dic_path << "/" << config_.subject_id << "/" 
-                                << config_.material << "/"
-                                << std::setfill('0') << std::setw(3) << trial << "/"
-                                << config_.phase_id << "/"
-                                << "myDIC2DpairResults_C_" << cam1 << "_C_" << cam2 << ".mat";
-                if (!std::filesystem::exists(cam_bin_path.str())) {
+                std::ostringstream path;
+                path << config_.dic_path << "/" << config_.subject_id << "/" 
+                     << config_.material << "/"
+                     << std::setfill('0') << std::setw(3) << trial << "/"
+                     << config_.phase_id << "/"
+                     << "myDIC2DpairResults_C_" << cam1 << "_C_" << cam2 << ext;
+                if (!std::filesystem::exists(path.str())) {
                     return false;
                 }
-            
             }
         }
         return true;
     };
     
-    // Helper lambda: Check if 3D reconstruction outputs exist for all trials
+    // Helper lambda: Check if 3D reconstruction outputs exist
     auto check_3d_outputs_exist = [&]() -> bool {
-        for (int trial : trial_target) {
-            std::ostringstream dic3d_path;
-            dic3d_path << config_.dic_path << "/" << config_.subject_id << "/" 
-                                << config_.material << "/"
-                                << std::setfill('0') << std::setw(3) << trial << "/"
-                                << config_.phase_id << "/"
-                                << "DIC3Dcombined_" << config_.num_pair <<"Pairs_stitched.mat";
-            if (!std::filesystem::exists(dic3d_path.str())) {
-                return false;
-            }
-        }
-        return true;
+        std::string dic3d_file = config_.dic_path + "/" + config_.subject_id + "/" 
+                               + config_.material + "/DIC3Dcombined_" 
+                               + std::to_string(config_.num_pair) + "Pairs_stitched" + ext;
+        return std::filesystem::exists(dic3d_file);
     };
     
     // Helper lambda: Check if deformation analysis outputs exist
     auto check_deformation_outputs_exist = [&]() -> bool {
-        for (int trial : trial_target) {
-            std::ostringstream ppresults_path;
-            ppresults_path << config_.dic_path << "/" << config_.subject_id << "/" 
-                                    << config_.material << "/"
-                                    << std::setfill('0') << std::setw(3) << trial << "/"
-                                    << config_.phase_id << "/"
-                                    << "DIC3DPPresults_" << config_.num_pair << "Pairs_cum_v1.mat";
-            if (!std::filesystem::exists(ppresults_path.str())) {
-                return false;
-            }
-        }
-        return true;
+        std::string pp_file = config_.dic_path + "/" + config_.subject_id + "/" 
+                            + config_.material + "/DIC3DPPresults_" 
+                            + std::to_string(config_.num_pair) + "Pairs_cum_" 
+                            + config_.fileversion + ext;
+        return std::filesystem::exists(pp_file);
     };
     
     // STEP D: 2D-DIC

@@ -10,31 +10,20 @@
 #include <algorithm>
 
 Config::Config() {
-    // Set generate_mat_files based on debug_mode
-    if (debug_mode) {
-        generate_mat_files = true;
-    }
-}
-
-void Config::loadGlobalParams() {
-    // Set default paths based on current working directory
-    setDefaultPaths();
-    
-    // Initialize derived paths
-    data_path = base_path + "/example_data";
-    dic_path = base_path + "/analysis";
-    
-    std::cout << "Global parameters loaded." << std::endl;
-}
-
-void Config::loadDicParams() {
-    // All parameters are already initialized with default values
-    // In a real implementation, these could be loaded from a config file
-    
-    std::cout << "DIC parameters loaded." << std::endl;
+    // Set step_e defaults (matching uses larger radius)
+    step_e.radius = 60;
 }
 
 void Config::updateVariables() {
+    // Set default paths if not explicitly set from config file
+    setDefaultPaths();
+    if (data_path.empty()) {
+        data_path = base_path + "/example_data";
+    }
+    if (dic_path.empty()) {
+        dic_path = base_path + "/analysis";
+    }
+    
     // Update material name from material_id
     if (material_id >= 1 && material_id <= static_cast<int>(frictional_conditions.size())) {
         material = frictional_conditions[material_id - 1];  // Convert to 0-based index
@@ -215,13 +204,87 @@ bool Config::loadFromDicParamsFile(const std::string& filepath) {
         } else if (!(value = parseConfigValue(line, "subregion_radius")).empty()) {
             subregion_radius = std::stoi(value);
         }
+        // Units and calibration
+        else if (!(value = parseConfigValue(line, "limit_grayscale")).empty()) {
+            limit_grayscale = std::stoi(value);
+        }
         // Output control
         else if (!(value = parseConfigValue(line, "fileversion")).empty()) {
             fileversion = value;
-        } else if (!(value = parseConfigValue(line, "generate_mat_files")).empty()) {
-            generate_mat_files = parseBool(value);
-        } else if (!(value = parseConfigValue(line, "cleanup_cache_bins")).empty()) {
-            cleanup_cache_bins = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "data_format")).empty()) {
+            data_format = value;
+        }
+        // Step D parameters
+        else if (!(value = parseConfigValue(line, "step_d_analysis_type")).empty()) {
+            step_d.analysis_type = value;
+        } else if (!(value = parseConfigValue(line, "step_d_radius")).empty()) {
+            step_d.radius = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "step_d_spacing")).empty()) {
+            step_d.spacing = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "step_d_cutoff_diffnorm")).empty()) {
+            step_d.cutoff_diffnorm = std::stod(value);
+        } else if (!(value = parseConfigValue(line, "step_d_cutoff_iteration")).empty()) {
+            step_d.cutoff_iteration = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "step_d_total_threads")).empty()) {
+            step_d.total_threads = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "step_d_high_strain_enabled")).empty()) {
+            step_d.high_strain_enabled = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "step_d_seed_type")).empty()) {
+            step_d.seed_type = value;
+        } else if (!(value = parseConfigValue(line, "step_d_auto_update")).empty()) {
+            step_d.auto_update = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "step_d_step_ref_change")).empty()) {
+            step_d.step_ref_change = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "step_d_initial_seed")).empty()) {
+            step_d.initial_seed = parseIntList(value);
+        }
+        // Step E parameters
+        else if (!(value = parseConfigValue(line, "step_e_analysis_type")).empty()) {
+            step_e.analysis_type = value;
+        } else if (!(value = parseConfigValue(line, "step_e_radius")).empty()) {
+            step_e.radius = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "step_e_spacing")).empty()) {
+            step_e.spacing = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "step_e_cutoff_diffnorm")).empty()) {
+            step_e.cutoff_diffnorm = std::stod(value);
+        } else if (!(value = parseConfigValue(line, "step_e_cutoff_iteration")).empty()) {
+            step_e.cutoff_iteration = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "step_e_total_threads")).empty()) {
+            step_e.total_threads = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "step_e_high_strain_enabled")).empty()) {
+            step_e.high_strain_enabled = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "step_e_seed_type")).empty()) {
+            step_e.seed_type = value;
+        } else if (!(value = parseConfigValue(line, "step_e_auto_update")).empty()) {
+            step_e.auto_update = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "step_e_step_ref_change")).empty()) {
+            step_e.step_ref_change = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "step_e_initial_seed")).empty()) {
+            step_e.initial_seed = parseIntList(value);
+        }
+        // Step F parameters
+        else if (!(value = parseConfigValue(line, "step_f_analysis_type")).empty()) {
+            step_f.analysis_type = value;
+        } else if (!(value = parseConfigValue(line, "step_f_radius")).empty()) {
+            step_f.radius = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "step_f_spacing")).empty()) {
+            step_f.spacing = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "step_f_cutoff_diffnorm")).empty()) {
+            step_f.cutoff_diffnorm = std::stod(value);
+        } else if (!(value = parseConfigValue(line, "step_f_cutoff_iteration")).empty()) {
+            step_f.cutoff_iteration = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "step_f_total_threads")).empty()) {
+            step_f.total_threads = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "step_f_high_strain_enabled")).empty()) {
+            step_f.high_strain_enabled = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "step_f_seed_type")).empty()) {
+            step_f.seed_type = value;
+        } else if (!(value = parseConfigValue(line, "step_f_auto_update")).empty()) {
+            step_f.auto_update = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "step_f_step_ref_change")).empty()) {
+            step_f.step_ref_change = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "step_f_initial_seed")).empty()) {
+            step_f.initial_seed = parseIntList(value);
         }
     }
     
@@ -255,7 +318,6 @@ bool Config::loadFromNcorrParamsFile(const std::string& filepath) {
         
         std::string value;
         
-        // Override units_per_pixel if present
         if (!(value = parseConfigValue(line, "units_per_pixel")).empty()) {
             units_per_pixel = std::stod(value);
         } else if (!(value = parseConfigValue(line, "radius")).empty()) {
@@ -263,9 +325,35 @@ bool Config::loadFromNcorrParamsFile(const std::string& filepath) {
         } else if (!(value = parseConfigValue(line, "debug")).empty()) {
             debug_mode = parseBool(value);
         } else if (!(value = parseConfigValue(line, "threads")).empty()) {
-            // Could store this for later use in step parameters
+            ncorr_threads = std::stoi(value);
         } else if (!(value = parseConfigValue(line, "maxCorrCoeff")).empty()) {
             maxCorrCoeff = std::stod(value);
+        } else if (!(value = parseConfigValue(line, "scalefactor")).empty()) {
+            ncorr_scalefactor = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "interp")).empty()) {
+            ncorr_interp = value;
+        } else if (!(value = parseConfigValue(line, "subregion")).empty()) {
+            ncorr_subregion = value;
+        } else if (!(value = parseConfigValue(line, "dic_config")).empty()) {
+            ncorr_dic_config = value;
+        } else if (!(value = parseConfigValue(line, "cutoff_corrcoef")).empty()) {
+            ncorr_cutoff_corrcoef = std::stod(value);
+        } else if (!(value = parseConfigValue(line, "roi_update_mode")).empty()) {
+            ncorr_roi_update_mode = value;
+        } else if (!(value = parseConfigValue(line, "accumulation_mode")).empty()) {
+            ncorr_accumulation_mode = value;
+        } else if (!(value = parseConfigValue(line, "save_disps_steps")).empty()) {
+            ncorr_save_disps_steps = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "perspective_interp")).empty()) {
+            ncorr_perspective_interp = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "units")).empty()) {
+            ncorr_units = value;
+        } else if (!(value = parseConfigValue(line, "seeds_are_optimized")).empty()) {
+            ncorr_seeds_are_optimized = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "cutoff_max_diffnorm")).empty()) {
+            ncorr_cutoff_max_diffnorm = std::stod(value);
+        } else if (!(value = parseConfigValue(line, "cutoff_max_corrcoef")).empty()) {
+            ncorr_cutoff_max_corrcoef = std::stod(value);
         }
     }
     
@@ -356,6 +444,78 @@ bool Config::loadFromVisualizationParamsFile(const std::string& filepath) {
             export_each_frame = parseBool(value);
         } else if (!(value = parseConfigValue(line, "export_frame_list")).empty()) {
             export_frame_list = parseIntList(value);
+        }
+        // VTK export options
+        else if (!(value = parseConfigValue(line, "vtk_format")).empty()) {
+            vtk_format = value;
+        } else if (!(value = parseConfigValue(line, "vtk_include_scalars")).empty()) {
+            vtk_include_scalars = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "vtk_include_vectors")).empty()) {
+            vtk_include_vectors = parseBool(value);
+        }
+        // PLY export options
+        else if (!(value = parseConfigValue(line, "ply_format")).empty()) {
+            ply_format = value;
+        } else if (!(value = parseConfigValue(line, "ply_include_colors")).empty()) {
+            ply_include_colors = parseBool(value);
+        }
+        // CSV export options
+        else if (!(value = parseConfigValue(line, "csv_delimiter")).empty()) {
+            csv_delimiter = value;
+        } else if (!(value = parseConfigValue(line, "csv_include_header")).empty()) {
+            csv_include_header = parseBool(value);
+        }
+        // Video options
+        else if (!(value = parseConfigValue(line, "generate_videos")).empty()) {
+            generate_videos = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "video_fps")).empty()) {
+            video_fps = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "video_codec")).empty()) {
+            video_codec = value;
+        } else if (!(value = parseConfigValue(line, "video_quality")).empty()) {
+            video_quality = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "video_alpha")).empty()) {
+            video_alpha = std::stod(value);
+        }
+        // Colormap options
+        else if (!(value = parseConfigValue(line, "colormap")).empty()) {
+            colormap = value;
+        } else if (!(value = parseConfigValue(line, "colormap_range_mode")).empty()) {
+            colormap_range_mode = value;
+        } else if (!(value = parseConfigValue(line, "colormap_min")).empty()) {
+            colormap_min = std::stod(value);
+        } else if (!(value = parseConfigValue(line, "colormap_max")).empty()) {
+            colormap_max = std::stod(value);
+        } else if (!(value = parseConfigValue(line, "colormap_levels")).empty()) {
+            colormap_levels = std::stoi(value);
+        }
+        // Statistics options
+        else if (!(value = parseConfigValue(line, "generate_summary_stats")).empty()) {
+            generate_summary_stats = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "stats_format")).empty()) {
+            stats_format = value;
+        } else if (!(value = parseConfigValue(line, "stats_per_frame")).empty()) {
+            stats_per_frame = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "stats_spatial")).empty()) {
+            stats_spatial = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "stats_temporal")).empty()) {
+            stats_temporal = parseBool(value);
+        }
+        // Advanced visualization options
+        else if (!(value = parseConfigValue(line, "mesh_decimation")).empty()) {
+            mesh_decimation = std::stod(value);
+        } else if (!(value = parseConfigValue(line, "mesh_smoothing")).empty()) {
+            mesh_smoothing = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "mesh_smoothing_iterations")).empty()) {
+            mesh_smoothing_iterations = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "show_axes")).empty()) {
+            show_axes = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "show_colorbar")).empty()) {
+            show_colorbar = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "show_grid")).empty()) {
+            show_grid = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "background_color")).empty()) {
+            background_color = value;
         }
     }
     

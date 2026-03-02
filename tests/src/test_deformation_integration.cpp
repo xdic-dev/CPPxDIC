@@ -287,7 +287,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     
-    config.generate_mat_files = true;
+    config.data_format = "mat";
     config.mapLogic = false;
     config.debug_mode = true;
     // Disable temporal filtering for clean comparison against MATLAB TCPE output

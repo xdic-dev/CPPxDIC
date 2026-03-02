@@ -98,11 +98,7 @@ int main(int argc, char* argv[]) {
         // 4. Load visualization params if it exists
         config.loadFromVisualizationParamsFile(viz_params_file);
         
-        // 5. Apply legacy loading methods for backward compatibility
-        config.loadGlobalParams();
-        config.loadDicParams();
-        
-        // 6. Apply command-line overrides (highest priority)
+        // 5. Apply command-line overrides (highest priority)
         if (!subject_override.empty()) {
             config.overrideSubject(subject_override);
         }

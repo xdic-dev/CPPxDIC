@@ -9,6 +9,24 @@
 #include <string>
 #include <vector>
 
+/**
+ * Step-level DIC parameters (tracking/matching/combined)
+ * Loaded from dic_params.txt step_d_*, step_e_*, step_f_* keys
+ */
+struct StepConfig {
+    std::string analysis_type = "regular";
+    int radius = 40;
+    int spacing = 10;
+    double cutoff_diffnorm = 1e-5;
+    int cutoff_iteration = 100;
+    int total_threads = 1;
+    bool high_strain_enabled = true;
+    std::string seed_type = "seed";
+    bool auto_update = true;
+    int step_ref_change = 10;
+    std::vector<int> initial_seed;  // empty = auto
+};
+
 class Config {
 public:
     // Global parameters (from global_param.m)
@@ -85,24 +103,88 @@ public:
     // File version and naming
     std::string fileversion = "v2";      // Deformation file version
     
-    // Output format control
-    bool generate_mat_files = true;     // Generate MATLAB .mat files (default: false, true if debug_mode)
-    bool cleanup_cache_bins = false;     // Delete cached .bin files after use (default: false)
+    // Output format control (legacy flags removed — use data_format instead)
     
-    // Units and subregion (from dic_param.m or config)
+    // Units and subregion
     double units_per_pixel = 0.2;        // e.g., mm per pixel
     int subregion_radius = 20;           // default subset radius (pixels)
+    int limit_grayscale = 70;            // Grayscale limit threshold
+    
+    // Step-level DIC parameters (loaded from dic_params.txt)
+    StepConfig step_d;                   // Step D: initial tracking
+    StepConfig step_e;                   // Step E: matching
+    StepConfig step_f;                   // Step F: combined/final
+    
+    // Data format for pipeline I/O: "mat", "bin", or "json"
+    std::string data_format = "mat";
+    
+    // NCorr-specific parameters (loaded from ncorr_params.txt)
+    int ncorr_scalefactor = 3;           // Scale factor
+    std::string ncorr_interp = "quintic_bspline_precompute";  // Interpolation method
+    std::string ncorr_subregion = "circle";                    // Subregion shape
+    std::string ncorr_dic_config = "no_update";                // DIC config mode
+    double ncorr_cutoff_corrcoef = 10.0;                       // Correlation cutoff
+    std::string ncorr_roi_update_mode = "none";                // ROI update mode
+    std::string ncorr_accumulation_mode = "none";              // Accumulation mode
+    bool ncorr_save_disps_steps = false;                        // Save intermediate disps
+    bool ncorr_perspective_interp = false;                      // Perspective interpolation
+    std::string ncorr_units = "mm";                             // Units string
+    bool ncorr_seeds_are_optimized = true;                      // Optimized seeds
+    double ncorr_cutoff_max_diffnorm = 1e-5;                   // Max diff norm cutoff
+    double ncorr_cutoff_max_corrcoef = 10.0;                   // Max corr coef cutoff
+    int ncorr_threads = 4;                                      // Number of threads
+    
+    // Visualization: VTK export options
+    std::string vtk_format = "ascii";    // VTK format: ascii|binary
+    bool vtk_include_scalars = true;     // Include scalar data in VTK
+    bool vtk_include_vectors = true;     // Include vector data in VTK
+    
+    // Visualization: PLY export options
+    std::string ply_format = "ascii";    // PLY format: ascii|binary
+    bool ply_include_colors = true;      // Include colors in PLY
+    
+    // Visualization: CSV export options
+    std::string csv_delimiter = ",";     // CSV delimiter
+    bool csv_include_header = true;      // Include header in CSV
+    
+    // Visualization: Video options
+    bool generate_videos = false;        // Generate videos
+    int video_fps = 10;                  // Video FPS
+    std::string video_codec = "MJPG";    // Video codec
+    int video_quality = 90;              // Video quality (0-100)
+    double video_alpha = 1.0;            // Video transparency
+    
+    // Visualization: Colormap options
+    std::string colormap = "jet";        // Colormap name
+    std::string colormap_range_mode = "auto"; // Range mode: auto|manual
+    double colormap_min = 0.0;           // Manual colormap min
+    double colormap_max = 1.0;           // Manual colormap max
+    int colormap_levels = 256;           // Number of color levels
+    
+    // Visualization: Statistics options
+    bool generate_summary_stats = true;  // Generate summary statistics
+    std::string stats_format = "txt";    // Stats format: txt|csv|json
+    bool stats_per_frame = true;         // Per-frame statistics
+    bool stats_spatial = true;           // Spatial statistics
+    bool stats_temporal = true;          // Temporal statistics
+    
+    // Visualization: Advanced options
+    double mesh_decimation = 1.0;        // Mesh decimation factor (1.0 = no decimation)
+    bool mesh_smoothing = false;         // Enable mesh smoothing
+    int mesh_smoothing_iterations = 10;  // Smoothing iterations
+    bool show_axes = true;               // Show axes in visualization
+    bool show_colorbar = true;           // Show colorbar
+    bool show_grid = false;              // Show grid
+    std::string background_color = "white"; // Background color
     
     // Derived parameters
     std::string material;                // Material name from frictional_conditions
     
     // Methods
     Config();                            // Constructor to set defaults
-    void loadGlobalParams();
-    void loadDicParams();
-    void updateVariables();
+    void updateVariables();              // Derive material name etc.
     
-    // New parameter file loading methods
+    // Parameter file loading methods
     bool loadFromDicParamsFile(const std::string& filepath = "dic_params.txt");
     bool loadFromNcorrParamsFile(const std::string& filepath = "ncorr_params.txt");
     bool loadFromVisualizationParamsFile(const std::string& filepath = "visualization_params.txt");

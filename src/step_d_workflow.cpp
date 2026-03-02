@@ -7,6 +7,7 @@
 #include "step_d_workflow.h"
 #include "Array2D.h"
 #include "mat_writer.h"
+#include "data_serializer.h"
 #include "delaunay_triangulation.h"
 #include "ncorr.h"
 #include "utils.h"
@@ -386,16 +387,9 @@ bool StepDWorkflow::initializeROIAndSeed(const std::vector<cv::Mat>& cam_first_s
     ref_seed_point.sw = ROIManager::mapPixel2Subset(ref_seed_point.pw,
                                                            step1_params_.spacing);
     
-    // Check cache for MATCHING file to avoid redundant computation
-    //TODO: completely remove the use of the cache for ncorr parts
-    std::filesystem::path cache_bin = std::filesystem::path(base_params_.matchingfile).parent_path() / 
-        ".cache" / (std::filesystem::path(base_params_.matchingfile).filename().string() + ".bin");
-    
-    bool dic_computation_status = false;
-
-    // Check the matching file inexistance first
-    if (!std::filesystem::exists(cache_bin)) {
-        // No matching file - use seed as-is
+    // Check for MATCHING file (ncorr binary, saved directly in output dir)
+    if (!std::filesystem::exists(base_params_.matchingfile)) {
+        // No matching file - compute it
         std::cout << "\n--> STEP: MATCHING file computation)" << std::endl;
         std::vector<cv::Mat> reftrial_cam_first_raw, reftrial_cam_second_raw;
         std::cout << "Reading REF Trial video data..." << std::endl;
@@ -410,79 +404,54 @@ bool StepDWorkflow::initializeROIAndSeed(const std::vector<cv::Mat>& cam_first_s
         
         std::ostringstream message_oss;
         message_oss << "Matching Pair " << base_params_.stereopair << ": trial " << base_params_.reftrial << "'s frame 1 TO trial " << base_params_.trial << "'s frame 1";
-        dic_computation_status =  matchingInitialFrame(reftrial_cam_first_raw, 
-                                    cam_first_satur, 
-                                    refmask_REF,
-                                    base_params_.matchingfile,
-                                    message_oss.str(), 
-                                    ref_seed_point, 
-                                    refmask_trial, 
-                                    after_disp_seed_point);
-    }
-
-    // Loading from cache first (.bin)
-    if(!dic_computation_status) {
-        std::cout << "Checkpoint found: \"" << cache_bin.string() << "\"" << std::endl;
+        matchingInitialFrame(reftrial_cam_first_raw, 
+                            cam_first_satur, 
+                            refmask_REF,
+                            base_params_.matchingfile,
+                            message_oss.str(), 
+                            ref_seed_point, 
+                            refmask_trial, 
+                            after_disp_seed_point);
+    } else {
+        std::cout << "Checkpoint found: " << base_params_.matchingfile << std::endl;
         std::cout << "--> STEP: MATCHING file loaded from checkpoint (skipped computation)" << std::endl;
     }
 
-    // Try loading from .mat file (for backward compatibility or MATLAB-generated files)
+    // Load matching displacement fields from ncorr binary to map seed point
     if (std::filesystem::exists(base_params_.matchingfile)) {
-        cv::Mat U_mapped, V_mapped;
-        if (ROIManager::loadMatchingResults(base_params_.matchingfile,
-                                           refmask_REF, refmask_trial,
-                                           U_mapped, V_mapped,
-                                           step1_params_.spacing)) {
-            // Map seed point using displacement fields
+        auto dic_output = ncorr::DIC_analysis_output::load(base_params_.matchingfile);
+        
+        if (!dic_output.disps.empty()) {
+            const auto& disp = dic_output.disps[0];
+            const auto& u_array = disp.get_u().get_array();
+            const auto& v_array = disp.get_v().get_array();
+            
+            cv::Mat U_mapped(disp.get_u().data_height(), disp.get_u().data_width(), CV_64F);
+            cv::Mat V_mapped(disp.get_v().data_height(), disp.get_v().data_width(), CV_64F);
+            
+            for (size_t y = 0; y < static_cast<size_t>(disp.get_u().data_height()); ++y) {
+                for (size_t x = 0; x < static_cast<size_t>(disp.get_u().data_width()); ++x) {
+                    U_mapped.at<double>(y, x) = u_array(y, x);
+                    V_mapped.at<double>(y, x) = v_array(y, x);
+                }
+            }
+            
+            refmask_trial = refmask_REF.clone();
+            
             after_disp_seed_point.sw = ROIManager::mapPointCoordinate(ref_seed_point.sw,
                                                                         U_mapped, V_mapped);
             after_disp_seed_point.pw = ROIManager::mapSubset2Pixel(after_disp_seed_point.sw,
                                                                      step1_params_.spacing);
             
-            std::cout << "--> STEP: MATCHING transformation applied from .mat file" << std::endl;
+            std::cout << "--> STEP: MATCHING transformation applied" << std::endl;
             return true;
+        } else {
+            std::cerr << "Warning: MATCHING file has no displacements" << std::endl;
         }
     }
     
-    /*
-    // Load displacement fields from cache to map seed point
-    //TODO: Hopefully the code will never reach this point for now. The bin version should be properly loaded as the matlab version updating all the variables including the refmask trial which is just the ref clone for now at this step.
-    auto dic_output = ncorr::DIC_analysis_output::load(cache_bin.string());
-    
-    if (!dic_output.disps.empty()) {
-        const auto& disp = dic_output.disps[0];
-        const auto& u_array = disp.get_u().get_array();
-        const auto& v_array = disp.get_v().get_array();
-        
-        cv::Mat U_mapped(disp.get_u().data_height(), disp.get_u().data_width(), CV_64F);
-        cv::Mat V_mapped(disp.get_v().data_height(), disp.get_v().data_width(), CV_64F);
-        
-        for (size_t y = 0; y < static_cast<size_t>(disp.get_u().data_height()); ++y) {
-            for (size_t x = 0; x < static_cast<size_t>(disp.get_u().data_width()); ++x) {
-                U_mapped.at<double>(y, x) = u_array(y, x);
-                V_mapped.at<double>(y, x) = v_array(y, x);
-            }
-        }
-        
-        // TODO: the ref trial must be updated from U and V mapped
-        refmask_trial = refmask_REF.clone();
-        
-        // Map seed point using displacement fields
-        after_disp_seed_point.sw = ROIManager::mapPointCoordinate(ref_seed_point.sw,
-                                                                    U_mapped, V_mapped);
-        after_disp_seed_point.pw = ROIManager::mapSubset2Pixel(after_disp_seed_point.sw,
-                                                                    step1_params_.spacing);
-        
-        std::cout << "--> STEP: MATCHING transformation applied" << std::endl;
-        return true;
-    } else {
-        std::cerr << "Warning: Cached MATCHING file has no displacements, re-running..." << std::endl;
-    }
-*/
-    std::cerr << "Warning: Something went wrong for the MATCHING, re-running...?" << std::endl;
-    // something probably went wrong
+    std::cerr << "Warning: Something went wrong for the MATCHING" << std::endl;
     return false;
-
 }
 
 bool StepDWorkflow::matchingInitialFrame(const std::vector<cv::Mat>& cam_ref,
@@ -565,67 +534,36 @@ bool StepDWorkflow::performMatching(const std::vector<cv::Mat>& cam_first_satur,
     int cam_1, cam_2;
     Utils::getCamerasForPair(base_params_.stereopair, cam_1, cam_2);
     
-    // Build cache-compatible filename (e.g., ncorr12.mat for cameras 1,2)
+    // ncorr matching output path (always .bin — ncorr native format)
     std::string ncorr_matching_path = base_params_.outputPath + "/ncorr" + 
-        std::to_string(cam_1) + std::to_string(cam_2) + ".mat";
+        std::to_string(cam_1) + std::to_string(cam_2) + ".bin";
     
-    // Check cache to avoid redundant computation
-    std::filesystem::path cache_bin = std::filesystem::path(ncorr_matching_path).parent_path() / 
-        ".cache" / ("ncorr" + std::to_string(cam_1) + std::to_string(cam_2) + ".mat.bin");
-    
-    bool dic_computation_status = false;
-
-    // Check the matching file inexistance first
-    if (!std::filesystem::exists(cache_bin)) {
-        // No matching file - use seed as-is
+    // Compute matching if output doesn't exist
+    if (!std::filesystem::exists(ncorr_matching_path)) {
         std::cout << "\n--> STEP: MATCHING file computation)" << std::endl;
 
         std::ostringstream message_oss;
         message_oss << "Matching Inside Camera Pair (1-2) : Cam1's frame 1 VS cam2's frame 1";
 
-        dic_computation_status = matchingInitialFrame(cam_first_satur, 
-                                cam_second_satur, 
-                                refmask, 
-                                ncorr_matching_path, 
-                                message_oss.str(), 
-                                ref_seed_point, 
-                                after_disp_mask, 
-                                after_disp_seed_point);
-
+        matchingInitialFrame(cam_first_satur, 
+                            cam_second_satur, 
+                            refmask, 
+                            ncorr_matching_path, 
+                            message_oss.str(), 
+                            ref_seed_point, 
+                            after_disp_mask, 
+                            after_disp_seed_point);
+    } else {
+        std::cout << "Checkpoint found: " << ncorr_matching_path << std::endl;
+        std::cout << "--> STEP: MATCHING loaded from checkpoint (skipped computation)" << std::endl;
     }
 
-    if(!dic_computation_status) {
-        std::cout << "Checkpoint found: \"" << cache_bin.string() << "\"" << std::endl;
-        std::cout << "--> STEP: MATCHING file loaded from checkpoint (skipped computation)" << std::endl;
-    }
-
-    // Try loading from .mat file (for backward compatibility or MATLAB-generated files)
-    if (std::filesystem::exists(base_params_.matchingfile)) {
-        cv::Mat U_mapped, V_mapped;
-        if (ROIManager::loadMatchingResults(base_params_.matchingfile,
-                                           refmask, after_disp_mask,
-                                           U_mapped, V_mapped,
-                                           step1_params_.spacing)) {
-            // Map seed point using displacement fields
-            after_disp_seed_point.sw = ROIManager::mapPointCoordinate(ref_seed_point.sw,
-                                                                        U_mapped, V_mapped);
-            after_disp_seed_point.pw = ROIManager::mapSubset2Pixel(after_disp_seed_point.sw,
-                                                                     step1_params_.spacing);
-            
-            std::cout << "--> STEP: MATCHING transformation applied from .mat file" << std::endl;
-            return true;
-        }
-    }
-
-    /*if (std::filesystem::exists(cache_bin)) {
-        std::cout << "Checkpoint found: \"" << cache_bin.string() << "\"" << std::endl;
-        std::cout << "--> STEP: Ncorr matching 1-2 loaded from checkpoint (skipped computation)" << std::endl;
-        
-        // Still need to load the displacement fields to compute seed mapping
-        auto dic_output = ncorr::DIC_analysis_output::load(cache_bin.string());
+    // Load matching displacement fields from ncorr binary to map seed point
+    if (std::filesystem::exists(ncorr_matching_path)) {
+        auto dic_output = ncorr::DIC_analysis_output::load(ncorr_matching_path);
         
         if (!dic_output.disps.empty()) {
-            refmask_trial_matched = refmask_trial.clone();
+            after_disp_mask = refmask.clone();
             
             const auto& disp = dic_output.disps[0];
             const auto& u_array = disp.get_u().get_array();
@@ -641,17 +579,17 @@ bool StepDWorkflow::performMatching(const std::vector<cv::Mat>& cam_first_satur,
                 }
             }
             
-            initial_seed_point_set2.sw = ROIManager::mapPointCoordinate(
-                initial_seed_point_set1.sw, U_mapped, V_mapped);
-            initial_seed_point_set2.pw = ROIManager::mapSubset2Pixel(
-                initial_seed_point_set2.sw, step1_2_params_.spacing);
+            after_disp_seed_point.sw = ROIManager::mapPointCoordinate(
+                ref_seed_point.sw, U_mapped, V_mapped);
+            after_disp_seed_point.pw = ROIManager::mapSubset2Pixel(
+                after_disp_seed_point.sw, step1_params_.spacing);
             
-            std::cout << "--> STEP: Ncorr matching 1-2 done" << std::endl;
+            std::cout << "--> STEP: MATCHING transformation applied" << std::endl;
             return true;
         } else {
-            std::cerr << "Warning: Cached matching file has no displacements, re-running..." << std::endl;
+            std::cerr << "Warning: Matching file has no displacements" << std::endl;
         }
-    }*/
+    }
     
     std::cerr << "Warning: Something went wrong with the matching" << std::endl;
     return false;
@@ -669,12 +607,11 @@ bool StepDWorkflow::performTracking(const int tracking_number,
 
     std::cout << "TRACKING STEP " << tracking_number << std::endl;
     
-    std::string output_path = base_params_.outputPath + "/ncorr" + std::to_string(cam_number) + ".mat";
+    std::string output_path = base_params_.outputPath + "/ncorr" + std::to_string(cam_number) + ".bin";
     
-    // Checkpoint: Check if cached .bin file already exists
-    std::filesystem::path cache_bin = std::filesystem::path(output_path).parent_path() / ".cache" / ("ncorr" + std::to_string(cam_number) + ".mat.bin");
-    if (std::filesystem::exists(cache_bin)) {
-        std::cout << "Checkpoint found: " << cache_bin << std::endl;
+    // Checkpoint: Check if ncorr binary already exists
+    if (std::filesystem::exists(output_path)) {
+        std::cout << "Checkpoint found: " << output_path << std::endl;
         std::cout << "--> STEP: Ncorr " << cam_number << " loaded from checkpoint (skipped computation)" << std::endl;
         return true;
     }
@@ -751,21 +688,13 @@ void StepDWorkflow::saveTrialInfo(const std::string& trial, int stereopair, int 
 void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
     std::cout << "Formatting output files (step2_dic_finish equivalent)..." << std::endl;
     
-    if (!config_.generate_mat_files) {
-        std::cout << "Skipping formatOutput (generate_mat_files=false)" << std::endl;
-        return;
-    }
-    
     int cam_1, cam_2;
     Utils::getCamerasForPair(stereopair, cam_1, cam_2);
     
-    std::filesystem::path cache_dir = std::filesystem::path(base_params_.outputPath) / ".cache";
-    // Use actual camera numbers (e.g., ncorr1.mat.bin, ncorr2.mat.bin for pair 1; ncorr3.mat.bin, ncorr4.mat.bin for pair 2)
-    std::string ncorr1_bin = (cache_dir / ("ncorr" + std::to_string(cam_1) + ".mat.bin")).string();
-    std::string ncorr2_bin = (cache_dir / ("ncorr" + std::to_string(cam_2) + ".mat.bin")).string();
-    // For stereo pair 1: cameras 1,2 -> ncorr12.mat.bin (no underscore to match save format)
-    // For stereo pair 2: cameras 3,4 -> ncorr34.mat.bin
-    std::string ncorr12_bin = (cache_dir / ("ncorr" + std::to_string(cam_1) + std::to_string(cam_2) + ".mat.bin")).string();
+    // ncorr outputs live directly in the output directory as .bin (ncorr native format)
+    std::string ncorr1_bin = base_params_.outputPath + "/ncorr" + std::to_string(cam_1) + ".bin";
+    std::string ncorr2_bin = base_params_.outputPath + "/ncorr" + std::to_string(cam_2) + ".bin";
+    std::string ncorr12_bin = base_params_.outputPath + "/ncorr" + std::to_string(cam_1) + std::to_string(cam_2) + ".bin";
     
     if (!std::filesystem::exists(ncorr1_bin) || !std::filesystem::exists(ncorr2_bin) || !std::filesystem::exists(ncorr12_bin)) {
         std::cerr << "Warning: cached ncorr result files not found" << std::endl;
@@ -775,8 +704,9 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
         return;
     }
     
+    auto d_serializer = cppxdic::DataSerializer::create(config_.data_format);
     std::string output_file = base_params_.outputPath + "/myDIC2DpairResults_C_" + 
-        std::to_string(cam_1) + "_C_" + std::to_string(cam_2) + ".mat";
+        std::to_string(cam_1) + "_C_" + std::to_string(cam_2) + d_serializer->extension();
     
     if (std::filesystem::exists(output_file)) {
         std::cout << "Checkpoint found: " << output_file << std::endl;
@@ -1001,8 +931,7 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
     results.FaceColors.resize(results.Faces.size() / 3, 128.0);
     
     std::cout << "  Writing results..." << std::endl;
-    bool success = MatWriter::writeDIC2DPairResults(output_file, results);
-    if (success) {
+    if (d_serializer->saveDIC2DPairResults(output_file, results)) {
         std::cout << "Output formatting complete: " << output_file << std::endl;
     } else {
         std::cerr << "Failed to write DIC2DPairResults" << std::endl;
@@ -1095,11 +1024,7 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     // Post-process with both perspectives
     std::cout << "Post-processing displacements..." << std::endl;
     
-    // Step 1: Apply correlation filtering (optional, controlled by config)
-    double correlation_cutoff = 0.3;  // TODO: make this configurable
-    //ncorr::DIC_analysis_output dic_filtered = ncorr::filter_by_correlation(dic_output_raw, correlation_cutoff);
-    
-    // Step 2: Convert to Eulerian perspective with sign inversion (still in pixels)
+    // Step 1: Convert to Eulerian perspective with sign inversion (still in pixels)
     ncorr::DIC_analysis_output dic_eulerian_pixels = ncorr::change_perspective_with_inversion(
         dic_output_raw, 
         ncorr::INTERP::CUBIC_KEYS  // Use cubic interpolation for perspective change
@@ -1111,82 +1036,12 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     
     std::cout << "  Created both Lagrangian and Eulerian perspectives" << std::endl;
     
-    // Strategy: Always save .bin to .cache/ subdirectory (for C++ internal use)
-    //           Optionally generate .mat files (for MATLAB compatibility)
+    // Save ncorr output directly as binary (ncorr's native format)
+    // output_path already has .bin extension
+    save(dic_lagrangian, output_path);
+    std::cout << "DIC analysis saved: " << output_path << std::endl;
     
-    // Create .cache directory if it doesn't exist
-    std::filesystem::path output_dir = std::filesystem::path(output_path).parent_path();
-    std::filesystem::path cache_dir = output_dir / ".cache";
-    std::filesystem::create_directories(cache_dir);
-    
-    // Save Lagrangian .bin to cache directory (internal format for C++)
-    std::string cache_bin = (cache_dir / std::filesystem::path(output_path).filename()).string() + ".bin";
-    save(dic_lagrangian, cache_bin);
-    std::cout << "DIC analysis saved to cache: " << cache_bin << std::endl;
-    
-    // Generate .mat file for MATLAB compatibility
-    // MATCHING files (MATCHING2xxx and ncorrXY) are ALWAYS generated (needed for seed transformation and external tools)
-    // Other files are only generated if config_.generate_mat_files is enabled
-    bool is_matching_file = (output_path.find("MATCHING") != std::string::npos) || 
-                           (output_path.find("ncorr") != std::string::npos && 
-                            std::filesystem::path(output_path).filename().string().find("ncorr") == 0 &&
-                            std::filesystem::path(output_path).stem().string().length() == 7); // ncorrXY format
-    bool should_generate_mat = is_matching_file || config_.generate_mat_files;
-    
-    std::cout << "DEBUG:: is_matching_file = " <<  is_matching_file << " should_generate_mat = " << should_generate_mat << std::endl;
-    
-    if (should_generate_mat) {
-        // For MATCHING files, write with both perspectives
-        if (is_matching_file) {
-            // Extract necessary data for writeMatchingFile
-            cv::Mat ref_img_out = ref_img.clone();
-            cv::Mat cur_img_out = cur_imgs[0].clone();  // First current image
-            cv::Mat ref_roi_out = roi_mask.clone();
-            cv::Mat cur_roi_out = roi_mask.clone();  // Will be updated inside writeMatchingFile
-            
-            // Prepare dispinfo
-            std::map<std::string, double> dispinfo;
-            dispinfo["radius"] = step_params.radius;
-            dispinfo["spacing"] = step_params.spacing;
-            dispinfo["cutoff_corrcoef"] = correlation_cutoff;
-            dispinfo["units_per_pixel"] = config_.units_per_pixel;
-            
-            // Write with both perspectives
-            bool success = MatWriter::writeMatchingFile(
-                output_path,
-                ref_img_out, cur_img_out,
-                ref_roi_out, cur_roi_out,
-                dic_lagrangian,   // _ref_formatted
-                dic_eulerian,     // _cur_formatted
-                dispinfo
-            );
-            
-            if (success) {
-                std::cout << "MATLAB .mat file with both perspectives generated: " << output_path << std::endl;
-            } else {
-                std::cerr << "Warning: Failed to generate .mat file" << std::endl;
-            }
-        } else {
-            // For tracking files (ncorr1.mat, ncorr2.mat), use legacy method
-            bool success = MatWriter::convertBinToMat(cache_bin, output_path, dic_input);
-            if (success) {
-                std::cout << "MATLAB .mat file generated: " << output_path << std::endl;
-            } else {
-                std::cerr << "Warning: Failed to generate .mat file" << std::endl;
-            }
-        }
-        
-        // Optionally cleanup cache .bin after .mat generation
-        if (config_.cleanup_cache_bins) {
-            std::filesystem::remove(cache_bin);
-            std::cout << "Cache .bin cleaned up: " << cache_bin << std::endl;
-        }
-    }
-    
-    // Return Lagrangian output for further processing
-    ncorr::DIC_analysis_output dic_output = dic_lagrangian;
-    
-    return dic_output;
+    return dic_lagrangian;
 }
 
 } // namespace cppxdic

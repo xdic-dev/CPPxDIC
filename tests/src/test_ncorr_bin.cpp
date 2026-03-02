@@ -293,9 +293,9 @@ int main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " <path_to_bin_file>" << std::endl;
         std::cerr << "\nSupported formats:" << std::endl;
-        std::cerr << "  - ncorr*.mat.bin (ncorr::DIC_analysis_output)" << std::endl;
+        std::cerr << "  - ncorr*.bin (ncorr::DIC_analysis_output)" << std::endl;
         std::cerr << "  - DIC3Dcombined*.bin (DIC3Dcombined results)" << std::endl;
-        std::cerr << "\nExample: " << argv[0] << " ncorr1.mat.bin" << std::endl;
+        std::cerr << "\nExample: " << argv[0] << " ncorr1.bin" << std::endl;
         return 1;
     }
     

@@ -183,7 +183,7 @@ public:
      * @param extension The file extension (default as ".mat")
      * @return The constructed path string
      */
-    static std::string buildMatchingFilePath(const cppxdic::BaseParameters& parameters, std::string reftrial, int stereopair, const std::string& extension = ".mat");
+    static std::string buildMatchingFilePath(const cppxdic::BaseParameters& parameters, std::string reftrial, int stereopair, const std::string& extension = ".bin");
 
 private:
     static bool checkROIReferences(const Config& config);

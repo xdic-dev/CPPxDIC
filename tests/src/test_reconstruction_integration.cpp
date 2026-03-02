@@ -12,10 +12,10 @@
  *
  *   <test_root_dir>/
  *     dic_output/<subject>/<material>/
- *       <trial>/<phase>/.cache/          <- Step D binary outputs
- *         ncorr1.mat.bin                  (cam1 DIC output)
- *         ncorr2.mat.bin                  (cam2 DIC output)
- *         ncorr12.mat.bin                 (matching displacement)
+ *       <trial>/<phase>/                  <- Step D binary outputs
+ *         ncorr1.bin                      (cam1 DIC output)
+ *         ncorr2.bin                      (cam2 DIC output)
+ *         ncorr12.bin                     (matching displacement)
  *       myDIC2DpairResults_C_1_C_2.mat    (optional, from formatOutput)
  *     rawdata/<subject>/speckles/<material>/calibration/
  *       DLTstruct_cam1.mat                (DLT calibration cam1)
@@ -346,7 +346,7 @@ int main(int argc, char** argv) {
     }
     
     // Force .mat output and disable visualization
-    config.generate_mat_files = true;
+    config.data_format = "mat";
     config.mapLogic = false;
     config.debug_mode = true;
     
@@ -397,7 +397,7 @@ int main(int argc, char** argv) {
     
     if (!step_e_ok) {
         std::cerr << "\nStep E FAILED (" << elapsed << " s)" << std::endl;
-        std::cerr << "Check that .cache/*.bin and calibration files exist in test directory." << std::endl;
+        std::cerr << "Check that ncorr*.bin and calibration files exist in test directory." << std::endl;
         return 1;
     }
     std::cout << "\nStep E completed in " << std::fixed << std::setprecision(2) << elapsed << " s" << std::endl;
