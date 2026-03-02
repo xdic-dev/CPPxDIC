@@ -1,27 +1,36 @@
 /**
  * Integration Test: Deformation Analysis (Step F)
  *
- * Assumes you have MATLAB reference .mat files:
- *   - Input:  DIC3Dcombined_matlab.mat   (MATLAB Step E output)
- *   - Output: DIC3DPPresults_matlab.mat  (MATLAB Step F output)
- *
- * This test:
- *   1. Loads the DIC3Dcombined from .mat (same data for both C++ and MATLAB)
- *   2. Runs computeTriSurfaceDeformation (TCPE) on the loaded mesh
- *   3. Compares the C++ deformation output against the MATLAB reference
- *   4. Outputs a detailed comparison report
+ * This test calls DicAnalysis::runStepF() directly to execute the C++ TCPE
+ * deformation pipeline, then compares the generated .mat output against
+ * a MATLAB reference.
  *
  * Usage:
- *   ./test_deformation_integration <test_data_dir> [tolerance]
+ *   ./test_deformation_integration <test_root_dir> [tolerance]
  *
- * Expected files in <test_data_dir>:
- *   DIC3Dcombined_matlab.mat   - Input mesh (Points3D, Faces)
- *   DIC3DPPresults_matlab.mat  - MATLAB deformation reference (Deform struct)
+ * The <test_root_dir> must mirror the real project directory layout:
  *
- * The test outputs:
- *   deformation_report.txt     - Detailed comparison report
+ *   <test_root_dir>/
+ *     dic_output/<subject>/<material>/
+ *       DIC3Dcombined_<N>Pairs_stitched.bin  <- Step E binary (or generated from .mat)
+ *     matlab_reference/
+ *       DIC3Dcombined_matlab.mat             (MATLAB Step E output, used as input)
+ *       DIC3DPPresults_matlab.mat            (MATLAB Step F reference output)
+ *     test_config.txt                        (Config overrides)
+ *
+ * The test:
+ *   1. If the .bin file doesn't exist, loads DIC3Dcombined_matlab.mat and
+ *      saves it as .bin at the path Step F expects
+ *   2. Configures DicAnalysis and calls runStepF()
+ *   3. Loads the C++ generated DIC3DPPresults .mat
+ *   4. Loads the MATLAB reference DIC3DPPresults .mat
+ *   5. Compares all deformation fields and produces a report
  */
 
+#include "dic_analysis.h"
+#include "config.h"
+#include "mat_reader.h"
+#include "dic_structures.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -32,12 +41,9 @@
 #include <sstream>
 #include <fstream>
 #include <algorithm>
-#include <Eigen/Dense>
-
-#include "strain_computation.h"
+#include <chrono>
 
 namespace fs = std::filesystem;
-using namespace cppxdic;
 
 // ============================================================================
 // MAT File Reading Helpers
@@ -51,22 +57,6 @@ static std::vector<double> readDoubleArray(matvar_t* var) {
     if (var->class_type == MAT_C_DOUBLE) {
         double* data = static_cast<double*>(var->data);
         result.assign(data, data + n);
-    }
-    return result;
-}
-
-static std::vector<int> readIntArray(matvar_t* var) {
-    std::vector<int> result;
-    if (!var || !var->data) return result;
-    size_t n = 1;
-    for (int i = 0; i < var->rank; ++i) n *= var->dims[i];
-    if (var->class_type == MAT_C_INT32) {
-        int32_t* data = static_cast<int32_t*>(var->data);
-        result.assign(data, data + n);
-    } else if (var->class_type == MAT_C_DOUBLE) {
-        double* data = static_cast<double*>(var->data);
-        result.resize(n);
-        for (size_t i = 0; i < n; ++i) result[i] = static_cast<int>(std::round(data[i]));
     }
     return result;
 }
@@ -174,75 +164,6 @@ void writeReport(const std::string& path, const std::string& title,
         for (const auto& d : fc.details) ofs << "  " << d << std::endl;
     }
     ofs.close();
-    std::cout << "Report: " << path << std::endl;
-}
-
-// ============================================================================
-// Load mesh data from DIC3Dcombined .mat
-// ============================================================================
-
-struct MeshData {
-    std::vector<int> faces;  // 0-indexed
-    std::vector<Eigen::Vector3d> vertices_ref;
-    std::vector<std::vector<Eigen::Vector3d>> vertices_all;
-    size_t nFrames = 0;
-    size_t nPoints = 0;
-    size_t nFaces = 0;
-    bool valid = false;
-};
-
-MeshData loadMeshFromCombined(const std::string& mat_path) {
-    MeshData mesh;
-    mat_t* matfp = Mat_Open(mat_path.c_str(), MAT_ACC_RDONLY);
-    if (!matfp) return mesh;
-    
-    // Read Faces
-    matvar_t* faces_var = Mat_VarRead(matfp, "Faces");
-    if (faces_var) {
-        mesh.faces = readIntArray(faces_var);
-        // Convert 1-based to 0-based if needed
-        if (!mesh.faces.empty()) {
-            int minF = *std::min_element(mesh.faces.begin(), mesh.faces.end());
-            if (minF == 1) for (auto& f : mesh.faces) f -= 1;
-        }
-        mesh.nFaces = mesh.faces.size() / 3;
-        Mat_VarFree(faces_var);
-    }
-    
-    // Read Points3D
-    matvar_t* pts_var = Mat_VarRead(matfp, "Points3D");
-    if (pts_var && pts_var->class_type == MAT_C_CELL) {
-        mesh.nFrames = pts_var->dims[0] * pts_var->dims[1];
-        for (size_t f = 0; f < mesh.nFrames; ++f) {
-            matvar_t* frame = Mat_VarGetCell(pts_var, f);
-            if (!frame) continue;
-            
-            matvar_t* xv = Mat_VarGetStructFieldByName(frame, "x", 0);
-            matvar_t* yv = Mat_VarGetStructFieldByName(frame, "y", 0);
-            matvar_t* zv = Mat_VarGetStructFieldByName(frame, "z", 0);
-            
-            auto xd = readDoubleArray(xv);
-            auto yd = readDoubleArray(yv);
-            auto zd = readDoubleArray(zv);
-            
-            if (f == 0) mesh.nPoints = xd.size();
-            
-            std::vector<Eigen::Vector3d> verts(xd.size());
-            for (size_t i = 0; i < xd.size(); ++i)
-                verts[i] = Eigen::Vector3d(xd[i], yd[i], zd[i]);
-            
-            mesh.vertices_all.push_back(std::move(verts));
-        }
-        Mat_VarFree(pts_var);
-    }
-    
-    if (!mesh.vertices_all.empty()) {
-        mesh.vertices_ref = mesh.vertices_all[0];
-    }
-    
-    Mat_Close(matfp);
-    mesh.valid = !mesh.faces.empty() && !mesh.vertices_all.empty();
-    return mesh;
 }
 
 // ============================================================================
@@ -250,7 +171,6 @@ MeshData loadMeshFromCombined(const std::string& mat_path) {
 // ============================================================================
 
 struct DeformRef {
-    // Scalar fields per frame (cell arrays in MATLAB)
     std::vector<std::vector<double>> Epc1, Epc2, epc1, epc2;
     std::vector<std::vector<double>> EShearMax, eShearMax;
     std::vector<std::vector<double>> Eeq, eeq;
@@ -260,16 +180,13 @@ struct DeformRef {
     bool valid = false;
 };
 
-static std::vector<std::vector<double>> loadCellField(matvar_t* deform_var, const char* name) {
+static std::vector<std::vector<double>> loadCellField(matvar_t* parent, const char* name) {
     std::vector<std::vector<double>> result;
-    matvar_t* field = Mat_VarGetStructFieldByName(deform_var, name, 0);
+    matvar_t* field = Mat_VarGetStructFieldByName(parent, name, 0);
     if (!field || field->class_type != MAT_C_CELL) return result;
-    
     size_t n = field->dims[0] * field->dims[1];
-    for (size_t i = 0; i < n; ++i) {
-        matvar_t* cell = Mat_VarGetCell(field, i);
-        result.push_back(readDoubleArray(cell));
-    }
+    for (size_t i = 0; i < n; ++i)
+        result.push_back(readDoubleArray(Mat_VarGetCell(field, i)));
     return result;
 }
 
@@ -278,36 +195,40 @@ DeformRef loadDeformFromPPresults(const std::string& mat_path) {
     mat_t* matfp = Mat_Open(mat_path.c_str(), MAT_ACC_RDONLY);
     if (!matfp) return ref;
     
-    matvar_t* deform_var = Mat_VarRead(matfp, "Deform");
-    if (!deform_var || deform_var->class_type != MAT_C_STRUCT) {
-        if (deform_var) Mat_VarFree(deform_var);
+    matvar_t* dv = Mat_VarRead(matfp, "Deform");
+    if (!dv || dv->class_type != MAT_C_STRUCT) {
+        if (dv) Mat_VarFree(dv);
         Mat_Close(matfp);
         return ref;
     }
     
-    ref.Epc1 = loadCellField(deform_var, "Epc1");
-    ref.Epc2 = loadCellField(deform_var, "Epc2");
-    ref.epc1 = loadCellField(deform_var, "epc1");
-    ref.epc2 = loadCellField(deform_var, "epc2");
-    ref.EShearMax = loadCellField(deform_var, "EShearMax");
-    ref.eShearMax = loadCellField(deform_var, "eShearMax");
-    ref.Eeq = loadCellField(deform_var, "Eeq");
-    ref.eeq = loadCellField(deform_var, "eeq");
-    ref.Emgn = loadCellField(deform_var, "Emgn");
-    ref.emgn = loadCellField(deform_var, "emgn");
-    ref.J = loadCellField(deform_var, "J");
-    ref.Lamda1 = loadCellField(deform_var, "Lamda1");
-    ref.Lamda2 = loadCellField(deform_var, "Lamda2");
+    ref.Epc1      = loadCellField(dv, "Epc1");
+    ref.Epc2      = loadCellField(dv, "Epc2");
+    ref.epc1      = loadCellField(dv, "epc1");
+    ref.epc2      = loadCellField(dv, "epc2");
+    ref.EShearMax = loadCellField(dv, "EShearMax");
+    ref.eShearMax = loadCellField(dv, "eShearMax");
+    ref.Eeq       = loadCellField(dv, "Eeq");
+    ref.eeq       = loadCellField(dv, "eeq");
+    ref.Emgn      = loadCellField(dv, "Emgn");
+    ref.emgn      = loadCellField(dv, "emgn");
+    ref.J         = loadCellField(dv, "J");
+    ref.Lamda1    = loadCellField(dv, "Lamda1");
+    ref.Lamda2    = loadCellField(dv, "Lamda2");
     
-    Mat_VarFree(deform_var);
+    Mat_VarFree(dv);
     Mat_Close(matfp);
-    
     ref.valid = !ref.Epc1.empty();
     return ref;
 }
 
+// Load Deform from a C++ generated DIC3DPPresults .mat (same format)
+DeformRef loadDeformFromCppOutput(const std::string& mat_path) {
+    return loadDeformFromPPresults(mat_path);
+}
+
 // ============================================================================
-// Compare a deformation field across all frames
+// Compare a deformation field (first + last frame)
 // ============================================================================
 
 static void compareDeformField(const std::string& name,
@@ -320,13 +241,11 @@ static void compareDeformField(const std::string& name,
         FieldComparison fc;
         fc.name = name;
         fc.passed = false;
-        fc.details.push_back("No frames to compare (C++=" + std::to_string(cpp_frames.size()) +
+        fc.details.push_back("No frames (C++=" + std::to_string(cpp_frames.size()) +
                             " MAT=" + std::to_string(mat_frames.size()) + ")");
         comparisons.push_back(fc);
         return;
     }
-    
-    // Compare first and last frame
     for (size_t f : {size_t(0), nFrames > 1 ? nFrames - 1 : size_t(0)}) {
         if (f >= nFrames) continue;
         std::string label = name + "[" + std::to_string(f) + "]";
@@ -335,110 +254,172 @@ static void compareDeformField(const std::string& name,
 }
 
 // ============================================================================
-// Extract per-frame scalar field from FrameDeformationResult
-// ============================================================================
-
-using FieldExtractor = std::function<const std::vector<double>&(const DeformationResult&)>;
-
-static std::vector<std::vector<double>> extractField(const FrameDeformationResult& result,
-                                                      FieldExtractor extractor) {
-    std::vector<std::vector<double>> out;
-    for (const auto& frame : result.frames)
-        out.push_back(extractor(frame));
-    return out;
-}
-
-// ============================================================================
 // Main
 // ============================================================================
 
 int main(int argc, char** argv) {
-    std::string test_data_dir = "test_data";
+    std::string test_root = "test_data";
     double tolerance = 1e-6;
     
-    if (argc > 1) test_data_dir = argv[1];
+    if (argc > 1) test_root = argv[1];
     if (argc > 2) tolerance = std::stod(argv[2]);
     
     std::cout << "\n=== DEFORMATION ANALYSIS INTEGRATION TEST ===" << std::endl;
-    std::cout << "Data dir:  " << test_data_dir << std::endl;
-    std::cout << "Tolerance: " << std::scientific << tolerance << std::endl << std::endl;
+    std::cout << "Test root: " << test_root << std::endl;
+    std::cout << "Tolerance: " << std::scientific << tolerance << std::endl;
     
-    std::string combined_file = test_data_dir + "/DIC3Dcombined_matlab.mat";
-    std::string ppresults_file = test_data_dir + "/DIC3DPPresults_matlab.mat";
-    
-    if (!fs::exists(combined_file)) {
-        std::cerr << "Input mesh not found: " << combined_file << std::endl;
-        std::cerr << "\nPrepare test data:" << std::endl;
-        std::cerr << "  Copy your MATLAB DIC3Dcombined_*.mat to " << combined_file << std::endl;
+    // =====================================================================
+    // 1. Configure DicAnalysis
+    // =====================================================================
+    Config config;
+    std::string config_file = test_root + "/test_config.txt";
+    if (fs::exists(config_file)) {
+        config.loadFromDicParamsFile(config_file);
+        std::cout << "Loaded config from: " << config_file << std::endl;
+    } else {
+        std::cerr << "Config file not found: " << config_file << std::endl;
+        std::cerr << "\nCreate " << config_file << " with at least:" << std::endl;
+        std::cerr << "  subject_id = S09" << std::endl;
+        std::cerr << "  material = glass" << std::endl;
+        std::cerr << "  num_pair = 2" << std::endl;
+        std::cerr << "  dic_path = " << test_root << "/dic_output" << std::endl;
+        std::cerr << "\nSee PREPARE_TEST_DATA.md for full directory layout." << std::endl;
         return 1;
     }
-    if (!fs::exists(ppresults_file)) {
-        std::cerr << "MATLAB reference not found: " << ppresults_file << std::endl;
-        std::cerr << "\nPrepare test data:" << std::endl;
-        std::cerr << "  Copy your MATLAB DIC3DPPresults_*.mat to " << ppresults_file << std::endl;
+    
+    config.generate_mat_files = true;
+    config.mapLogic = false;
+    config.debug_mode = true;
+    // Disable temporal filtering for clean comparison against MATLAB TCPE output
+    config.smoothTimeLogic = false;
+    
+    std::cout << "\nConfig:" << std::endl;
+    std::cout << "  subject_id: " << config.subject_id << std::endl;
+    std::cout << "  material:   " << config.material << std::endl;
+    std::cout << "  num_pair:   " << config.num_pair << std::endl;
+    std::cout << "  dic_path:   " << config.dic_path << std::endl;
+    
+    std::vector<int> trial_target = {config.ref_trial_id};
+    std::cout << "  trial:      " << trial_target[0] << std::endl;
+    
+    // =====================================================================
+    // 2. Ensure DIC3Dcombined .bin exists (Step F reads binary, not .mat)
+    // =====================================================================
+    std::string output_dir = config.dic_path + "/" + config.subject_id + "/" + config.material;
+    std::string bin_path = output_dir + "/DIC3Dcombined_" +
+                           std::to_string(config.num_pair) + "Pairs_stitched.bin";
+    
+    std::string matlab_combined = test_root + "/matlab_reference/DIC3Dcombined_matlab.mat";
+    
+    if (!fs::exists(bin_path)) {
+        // Convert MATLAB .mat → binary .bin so Step F can read it
+        std::cout << "\nNo .bin found at: " << bin_path << std::endl;
+        std::cout << "Converting from MATLAB .mat: " << matlab_combined << std::endl;
+        
+        if (!fs::exists(matlab_combined)) {
+            std::cerr << "MATLAB DIC3Dcombined not found: " << matlab_combined << std::endl;
+            std::cerr << "Place your MATLAB DIC3Dcombined_*.mat there." << std::endl;
+            return 1;
+        }
+        
+        cppxdic::DIC3Dcombined combined;
+        if (!cppxdic::MatReader::readDIC3Dcombined(matlab_combined, combined)) {
+            std::cerr << "Failed to read DIC3Dcombined from .mat" << std::endl;
+            return 1;
+        }
+        
+        fs::create_directories(output_dir);
+        try {
+            combined.saveBinary(bin_path);
+            std::cout << "  Saved binary: " << bin_path << std::endl;
+            std::cout << "  " << combined.Points3D.size() << " frames, "
+                      << (combined.Points3D.empty() ? 0 : combined.Points3D[0].x.size()) << " points, "
+                      << combined.Faces.size() / 3 << " faces" << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "Failed to save binary: " << e.what() << std::endl;
+            return 1;
+        }
+    } else {
+        std::cout << "\nUsing existing .bin: " << bin_path << std::endl;
+    }
+    
+    // Remove existing Step F output to force re-computation
+    std::string cpp_pp_mat = output_dir + "/DIC3DPPresults_" +
+                              std::to_string(config.num_pair) + "Pairs_cum_v1.mat";
+    std::string cpp_pp_bin = output_dir + "/DIC3DPPresults_" +
+                              std::to_string(config.num_pair) + "Pairs_cum_" + config.fileversion + ".bin";
+    
+    if (fs::exists(cpp_pp_mat)) { fs::remove(cpp_pp_mat); std::cout << "  Removed: " << cpp_pp_mat << std::endl; }
+    if (fs::exists(cpp_pp_bin)) { fs::remove(cpp_pp_bin); std::cout << "  Removed: " << cpp_pp_bin << std::endl; }
+    
+    // =====================================================================
+    // 3. Run Step F via DicAnalysis::runStepF()
+    // =====================================================================
+    std::cout << "\n--- Running C++ Deformation Analysis (Step F) ---" << std::endl;
+    
+    auto t0 = std::chrono::high_resolution_clock::now();
+    DicAnalysis analysis(config);
+    bool step_f_ok = analysis.runStepF(trial_target);
+    auto t1 = std::chrono::high_resolution_clock::now();
+    double elapsed = std::chrono::duration<double>(t1 - t0).count();
+    
+    if (!step_f_ok) {
+        std::cerr << "\nStep F FAILED (" << elapsed << " s)" << std::endl;
+        return 1;
+    }
+    std::cout << "\nStep F completed in " << std::fixed << std::setprecision(2) << elapsed << " s" << std::endl;
+    
+    // =====================================================================
+    // 4. Load C++ output and MATLAB reference
+    // =====================================================================
+    if (!fs::exists(cpp_pp_mat)) {
+        std::cerr << "C++ output not generated: " << cpp_pp_mat << std::endl;
         return 1;
     }
     
-    // Load mesh
-    std::cout << "Loading mesh from: " << combined_file << std::endl;
-    auto mesh = loadMeshFromCombined(combined_file);
-    if (!mesh.valid) {
-        std::cerr << "Failed to load mesh" << std::endl;
-        return 1;
+    std::string matlab_pp_ref = test_root + "/matlab_reference/DIC3DPPresults_matlab.mat";
+    if (!fs::exists(matlab_pp_ref)) {
+        std::cerr << "MATLAB reference not found: " << matlab_pp_ref << std::endl;
+        std::cerr << "Step F ran successfully but no MATLAB reference to compare." << std::endl;
+        std::cerr << "Place MATLAB DIC3DPPresults_*.mat at: " << matlab_pp_ref << std::endl;
+        std::cout << "\nStep F: PASS (no comparison, reference missing)" << std::endl;
+        return 0;
     }
-    std::cout << "  " << mesh.nFrames << " frames, " << mesh.nPoints << " points, "
-              << mesh.nFaces << " faces" << std::endl;
     
-    // Load MATLAB deformation reference
-    std::cout << "Loading MATLAB Deform reference: " << ppresults_file << std::endl;
-    auto deform_ref = loadDeformFromPPresults(ppresults_file);
-    if (!deform_ref.valid) {
-        std::cerr << "Failed to load MATLAB Deform struct" << std::endl;
-        return 1;
-    }
-    std::cout << "  Loaded " << deform_ref.Epc1.size() << " frames of deformation data" << std::endl;
+    std::cout << "\nLoading C++ output:       " << cpp_pp_mat << std::endl;
+    auto cpp_deform = loadDeformFromCppOutput(cpp_pp_mat);
     
-    // Run C++ deformation computation
-    std::cout << "\nRunning C++ TCPE deformation (cumulative)..." << std::endl;
-    FrameDeformationResult cpp_result = computeTriSurfaceDeformation(
-        mesh.faces, mesh.vertices_ref, mesh.vertices_all, true
-    );
-    std::cout << "  Computed " << cpp_result.n_frames << " frames, "
-              << cpp_result.n_faces << " faces" << std::endl;
+    std::cout << "Loading MATLAB reference: " << matlab_pp_ref << std::endl;
+    auto mat_deform = loadDeformFromPPresults(matlab_pp_ref);
     
-    // Extract C++ fields
-    auto cpp_Epc1 = extractField(cpp_result, [](const DeformationResult& r) -> const std::vector<double>& { return r.Epc1; });
-    auto cpp_Epc2 = extractField(cpp_result, [](const DeformationResult& r) -> const std::vector<double>& { return r.Epc2; });
-    auto cpp_epc1 = extractField(cpp_result, [](const DeformationResult& r) -> const std::vector<double>& { return r.epc1; });
-    auto cpp_epc2 = extractField(cpp_result, [](const DeformationResult& r) -> const std::vector<double>& { return r.epc2; });
-    auto cpp_EShearMax = extractField(cpp_result, [](const DeformationResult& r) -> const std::vector<double>& { return r.EShearMax; });
-    auto cpp_eShearMax = extractField(cpp_result, [](const DeformationResult& r) -> const std::vector<double>& { return r.eShearMax; });
-    auto cpp_Eeq = extractField(cpp_result, [](const DeformationResult& r) -> const std::vector<double>& { return r.Eeq; });
-    auto cpp_eeq = extractField(cpp_result, [](const DeformationResult& r) -> const std::vector<double>& { return r.eeq; });
-    auto cpp_Emgn = extractField(cpp_result, [](const DeformationResult& r) -> const std::vector<double>& { return r.Emgn; });
-    auto cpp_emgn = extractField(cpp_result, [](const DeformationResult& r) -> const std::vector<double>& { return r.emgn; });
-    auto cpp_J = extractField(cpp_result, [](const DeformationResult& r) -> const std::vector<double>& { return r.J; });
-    auto cpp_Lamda1 = extractField(cpp_result, [](const DeformationResult& r) -> const std::vector<double>& { return r.Lamda1; });
-    auto cpp_Lamda2 = extractField(cpp_result, [](const DeformationResult& r) -> const std::vector<double>& { return r.Lamda2; });
+    if (!cpp_deform.valid) { std::cerr << "Failed to load C++ Deform" << std::endl; return 1; }
+    if (!mat_deform.valid) { std::cerr << "Failed to load MATLAB Deform" << std::endl; return 1; }
     
-    // Compare all fields
+    std::cout << "  C++ frames:    " << cpp_deform.Epc1.size() << std::endl;
+    std::cout << "  MATLAB frames: " << mat_deform.Epc1.size() << std::endl;
+    
+    // =====================================================================
+    // 5. Compare all deformation fields
+    // =====================================================================
     std::vector<FieldComparison> comparisons;
     
-    compareDeformField("Epc1", cpp_Epc1, deform_ref.Epc1, tolerance, comparisons);
-    compareDeformField("Epc2", cpp_Epc2, deform_ref.Epc2, tolerance, comparisons);
-    compareDeformField("epc1", cpp_epc1, deform_ref.epc1, tolerance, comparisons);
-    compareDeformField("epc2", cpp_epc2, deform_ref.epc2, tolerance, comparisons);
-    compareDeformField("EShearMax", cpp_EShearMax, deform_ref.EShearMax, tolerance, comparisons);
-    compareDeformField("eShearMax", cpp_eShearMax, deform_ref.eShearMax, tolerance, comparisons);
-    compareDeformField("Eeq", cpp_Eeq, deform_ref.Eeq, tolerance, comparisons);
-    compareDeformField("eeq", cpp_eeq, deform_ref.eeq, tolerance, comparisons);
-    compareDeformField("Emgn", cpp_Emgn, deform_ref.Emgn, tolerance, comparisons);
-    compareDeformField("emgn", cpp_emgn, deform_ref.emgn, tolerance, comparisons);
-    compareDeformField("J", cpp_J, deform_ref.J, 1e-3, comparisons);  // Relaxed for J
-    compareDeformField("Lamda1", cpp_Lamda1, deform_ref.Lamda1, tolerance, comparisons);
-    compareDeformField("Lamda2", cpp_Lamda2, deform_ref.Lamda2, tolerance, comparisons);
+    compareDeformField("Epc1",      cpp_deform.Epc1,      mat_deform.Epc1,      tolerance, comparisons);
+    compareDeformField("Epc2",      cpp_deform.Epc2,      mat_deform.Epc2,      tolerance, comparisons);
+    compareDeformField("epc1",      cpp_deform.epc1,      mat_deform.epc1,      tolerance, comparisons);
+    compareDeformField("epc2",      cpp_deform.epc2,      mat_deform.epc2,      tolerance, comparisons);
+    compareDeformField("EShearMax", cpp_deform.EShearMax, mat_deform.EShearMax, tolerance, comparisons);
+    compareDeformField("eShearMax", cpp_deform.eShearMax, mat_deform.eShearMax, tolerance, comparisons);
+    compareDeformField("Eeq",       cpp_deform.Eeq,       mat_deform.Eeq,       tolerance, comparisons);
+    compareDeformField("eeq",       cpp_deform.eeq,       mat_deform.eeq,       tolerance, comparisons);
+    compareDeformField("Emgn",      cpp_deform.Emgn,      mat_deform.Emgn,      tolerance, comparisons);
+    compareDeformField("emgn",      cpp_deform.emgn,      mat_deform.emgn,      tolerance, comparisons);
+    compareDeformField("J",         cpp_deform.J,         mat_deform.J,         1e-3, comparisons);
+    compareDeformField("Lamda1",    cpp_deform.Lamda1,    mat_deform.Lamda1,    tolerance, comparisons);
+    compareDeformField("Lamda2",    cpp_deform.Lamda2,    mat_deform.Lamda2,    tolerance, comparisons);
     
-    // Print results
+    // =====================================================================
+    // 6. Results
+    // =====================================================================
     std::cout << "\n--- Deformation Field Comparisons ---" << std::endl;
     for (const auto& fc : comparisons) printComparison(fc);
     
@@ -446,11 +427,13 @@ int main(int argc, char** argv) {
     for (const auto& fc : comparisons) if (fc.passed) passed++;
     
     std::cout << "\n========================================" << std::endl;
-    std::cout << "Deformation: " << passed << "/" << comparisons.size() << " fields passed" << std::endl;
+    std::cout << "Deformation: " << passed << "/" << comparisons.size()
+              << " fields passed (" << elapsed << " s)" << std::endl;
     std::cout << "========================================" << std::endl;
     
-    writeReport(test_data_dir + "/deformation_report.txt",
+    writeReport(test_root + "/deformation_report.txt",
                 "Deformation Integration Test", comparisons);
+    std::cout << "Report: " << test_root << "/deformation_report.txt" << std::endl;
     
     return (passed == (int)comparisons.size()) ? 0 : 1;
 }

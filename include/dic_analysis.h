@@ -60,6 +60,18 @@ public:
     /** Get Deformation workflow (Step F) */
     cppxdic::DeformationWorkflow& getDeformationWorkflow();
     
+    /**
+     * Run 3D Reconstruction (Step E) only — for integration testing
+     * Requires Step D outputs (.cache/*.bin) and calibration files to exist
+     */
+    bool runStepE(const std::vector<int>& trial_target) { return dic3DReconstruction(trial_target); }
+    
+    /**
+     * Run Deformation Analysis (Step F) only — for integration testing
+     * Requires DIC3Dcombined_*.bin from Step E to exist
+     */
+    bool runStepF(const std::vector<int>& trial_target) { return dicDeformationAnalysis(trial_target); }
+    
 private:
     const Config& config_;
     

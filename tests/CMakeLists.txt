@@ -54,6 +54,12 @@ if(Eigen3_FOUND)
     endif()
 endif()
 
+# Find CGAL (required by delaunay_triangulation.cpp)
+find_package(CGAL REQUIRED)
+if(CGAL_FOUND)
+    message(STATUS "Found CGAL: ${CGAL_VERSION}")
+endif()
+
 # Test 1: test_ncorr_bin - Analyze .bin files (now supports both ncorr and DIC3Dcombined formats)
 add_executable(test_ncorr_bin
     src/test_ncorr_bin.cpp
@@ -494,64 +500,76 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(test_unit_stitching OpenMP::OpenMP_CXX)
 endif()
 
-# Test 11: test_reconstruction_integration - Integration test for 3D reconstruction
+# Common project sources (all sources except main.cpp) for integration tests
+# that need the full DicAnalysis pipeline
+set(PROJECT_SOURCES
+    ${CMAKE_SOURCE_DIR}/../src/config.cpp
+    ${CMAKE_SOURCE_DIR}/../src/dic_analysis.cpp
+    ${CMAKE_SOURCE_DIR}/../src/dic_structures.cpp
+    ${CMAKE_SOURCE_DIR}/../src/utils.cpp
+    ${CMAKE_SOURCE_DIR}/../src/image_processor.cpp
+    ${CMAKE_SOURCE_DIR}/../src/roi_manager.cpp
+    ${CMAKE_SOURCE_DIR}/../src/mat_writer.cpp
+    ${CMAKE_SOURCE_DIR}/../src/mat_reader.cpp
+    ${CMAKE_SOURCE_DIR}/../src/step_d_workflow.cpp
+    ${CMAKE_SOURCE_DIR}/../src/strain_computation.cpp
+    ${CMAKE_SOURCE_DIR}/../src/delaunay_triangulation.cpp
+    ${CMAKE_SOURCE_DIR}/../src/surface_stitching.cpp
+    ${CMAKE_SOURCE_DIR}/../src/temporal_filter.cpp
+    ${CMAKE_SOURCE_DIR}/../src/face_isotropy.cpp
+    ${CMAKE_SOURCE_DIR}/../src/visualization.cpp
+    ${CMAKE_SOURCE_DIR}/../src/preprocessing_workflow.cpp
+    ${CMAKE_SOURCE_DIR}/../src/dic2d_workflow.cpp
+    ${CMAKE_SOURCE_DIR}/../src/reconstruction3d_workflow.cpp
+    ${CMAKE_SOURCE_DIR}/../src/deformation_workflow.cpp
+)
+
+# Helper macro: link all project dependencies to a target
+macro(link_all_project_deps TARGET_NAME)
+    target_link_libraries(${TARGET_NAME} ${MATIO_LIBRARY})
+    target_link_libraries(${TARGET_NAME} ${OpenCV_LIBS})
+    if(TARGET Eigen3::Eigen)
+        target_link_libraries(${TARGET_NAME} Eigen3::Eigen)
+    endif()
+    if(NCORR_LIBRARY)
+        target_link_libraries(${TARGET_NAME} ${NCORR_LIBRARY})
+    endif()
+    if(FFTW_LIBRARY)
+        target_link_libraries(${TARGET_NAME} ${FFTW_LIBRARY})
+    endif()
+    if(HDF5_FOUND)
+        target_include_directories(${TARGET_NAME} PRIVATE ${HDF5_INCLUDE_DIRS})
+        target_link_libraries(${TARGET_NAME} ${HDF5_C_LIBRARIES})
+    endif()
+    target_link_libraries(${TARGET_NAME} ${SUITESPARSE_LIBRARY1})
+    target_link_libraries(${TARGET_NAME} ${SUITESPARSE_LIBRARY2})
+    target_link_libraries(${TARGET_NAME} ${SUITESPARSE_LIBRARY3})
+    target_link_libraries(${TARGET_NAME} ${SUITESPARSE_LIBRARY4})
+    target_link_libraries(${TARGET_NAME} ${SUITESPARSE_LIBRARY5})
+    target_link_libraries(${TARGET_NAME} ${LAPACK_LIBRARY})
+    target_link_libraries(${TARGET_NAME} ${BLAS_LIBRARY})
+    target_link_libraries(${TARGET_NAME} ${CMAKE_THREAD_LIBS_INIT})
+    if(CGAL_FOUND)
+        target_link_libraries(${TARGET_NAME} CGAL::CGAL)
+    endif()
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(${TARGET_NAME} OpenMP::OpenMP_CXX)
+    endif()
+endmacro()
+
+# Test 11: test_reconstruction_integration - calls DicAnalysis::runStepE() directly
 add_executable(test_reconstruction_integration
     src/test_reconstruction_integration.cpp
+    ${PROJECT_SOURCES}
 )
+link_all_project_deps(test_reconstruction_integration)
 
-# Link matio library
-target_link_libraries(test_reconstruction_integration ${MATIO_LIBRARY})
-
-# Link HDF5 library
-if(HDF5_FOUND)
-    target_include_directories(test_reconstruction_integration PRIVATE ${HDF5_INCLUDE_DIRS})
-    target_link_libraries(test_reconstruction_integration ${HDF5_C_LIBRARIES})
-endif()
-
-# Test 12: test_deformation_integration - Integration test for deformation analysis
+# Test 12: test_deformation_integration - calls DicAnalysis::runStepF() directly
 add_executable(test_deformation_integration
     src/test_deformation_integration.cpp
-    ${CMAKE_SOURCE_DIR}/../src/strain_computation.cpp
-    ${CMAKE_SOURCE_DIR}/../src/dic_structures.cpp
+    ${PROJECT_SOURCES}
 )
-
-# Link matio library
-target_link_libraries(test_deformation_integration ${MATIO_LIBRARY})
-
-# Link HDF5 library
-if(HDF5_FOUND)
-    target_include_directories(test_deformation_integration PRIVATE ${HDF5_INCLUDE_DIRS})
-    target_link_libraries(test_deformation_integration ${HDF5_C_LIBRARIES})
-endif()
-
-# Link Eigen3
-if(TARGET Eigen3::Eigen)
-    target_link_libraries(test_deformation_integration Eigen3::Eigen)
-endif()
-
-# Link ncorr library
-if(NCORR_LIBRARY)
-    target_link_libraries(test_deformation_integration ${NCORR_LIBRARY})
-endif()
-
-# Link OpenCV
-target_link_libraries(test_deformation_integration ${OpenCV_LIBS})
-
-# Link other dependencies
-if(FFTW_LIBRARY)
-    target_link_libraries(test_deformation_integration ${FFTW_LIBRARY})
-endif()
-target_link_libraries(test_deformation_integration ${SUITESPARSE_LIBRARY1})
-target_link_libraries(test_deformation_integration ${SUITESPARSE_LIBRARY2})
-target_link_libraries(test_deformation_integration ${SUITESPARSE_LIBRARY3})
-target_link_libraries(test_deformation_integration ${SUITESPARSE_LIBRARY4})
-target_link_libraries(test_deformation_integration ${SUITESPARSE_LIBRARY5})
-target_link_libraries(test_deformation_integration ${LAPACK_LIBRARY})
-target_link_libraries(test_deformation_integration ${BLAS_LIBRARY})
-target_link_libraries(test_deformation_integration ${CMAKE_THREAD_LIBS_INIT})
-if(OpenMP_CXX_FOUND)
-    target_link_libraries(test_deformation_integration OpenMP::OpenMP_CXX)
-endif()
+link_all_project_deps(test_deformation_integration)
 
 # Compiler flags
 target_compile_options(test_ncorr_bin PRIVATE -Wall -Wextra -O2)
