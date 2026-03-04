@@ -1351,8 +1351,7 @@ std::vector<int> DicAnalysis::searchTrialTarget() {
     std::vector<int> trials;
 
     // Build protocol directory path
-    std::string protocol_dir = config_.data_path + "/rawdata/" + config_.subject_id +
-                               "/speckles/" + config_.material + "/protocol/";
+    std::string protocol_dir = Utils::buildProtocolDir(config_, true, true, true, true);
 
     // Find protocol .mat file
     auto protos = Utils::findFiles(protocol_dir, "*.mat");

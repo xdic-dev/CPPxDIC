@@ -7,6 +7,7 @@
 #include "step_d_workflow.h"
 #include "Array2D.h"
 #include "mat_writer.h"
+#include "mat_reader.h"
 #include "data_serializer.h"
 #include "delaunay_triangulation.h"
 #include "ncorr.h"
@@ -16,7 +17,6 @@
 #include <sstream>
 #include <iomanip>
 #include <filesystem>
-#include <matio.h>
 #include <cmath>
 
 namespace cppxdic {
@@ -36,10 +36,10 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     // The following checkpoint files are checked/created to avoid redundant computation:
     // 1. REF_MASK_{reftrial}_{phase}_pair{stereopair}.mat - ROI mask (loaded from base path)
     // 2. REF_SEED_{reftrial}_{phase}_pair{stereopair}.mat - Seed point (loaded from base path)
-    // 3. MATCHING2{reftrial}_pair{stereopair}.mat - Camera matching results (in output path)
-    // 4. ncorr{cam1}_{cam2}.mat - Camera 1 and Camera 2 first frame matching results (in output path)
-    // 5. ncorr{cam1}.mat - Camera 1 tracking results (in output path)
-    // 6. ncorr{cam2}.mat - Camera 2 tracking results (in output path)
+    // 3. MATCHING2{reftrial}_pair{stereopair}.bin - REF-to-trial matching (in output path)
+    // 4. ncorr{cam1}{cam2}.bin - Inter-camera matching (in output path)
+    // 5. ncorr{cam1}.bin - Camera 1 tracking results (in output path)
+    // 6. ncorr{cam2}.bin - Camera 2 tracking results (in output path)
     // 7. dic_info_data_target_pair{stereopair}.mat - Trial metadata (in output path)
     
     // I. Preps analysis
@@ -235,72 +235,112 @@ void StepDWorkflow::setupStepParameters() {
 
 bool StepDWorkflow::loadProtocol() {
     // Load protocol MAT file
-    std::string protocol_path = config_.data_path + "/rawdata/" +
-        config_.subject_id + "/speckles/" + config_.material + "/protocol/";
-    std::cout << "protocol_path: " << protocol_path << std::endl;
+    std::string protocol_dir = Utils::buildProtocolDir(config_, true, true, true, true);
+    std::cout << "protocol_path: " << protocol_dir << std::endl;
     
     // Find MAT file in protocol directory
-    std::vector<std::string> mat_files;
-    if (std::filesystem::exists(protocol_path)) {
-        for (const auto& entry : std::filesystem::directory_iterator(protocol_path)) {
-            if (entry.path().extension() == ".mat") {
-                mat_files.push_back(entry.path().string());
-            }
-        }
-    }
+    auto mat_files = Utils::findFiles(protocol_dir, "*.mat");
     
     if (mat_files.empty()) {
-        std::cerr << "No protocol file found in: " << protocol_path << std::endl;
+        std::cerr << "No protocol file found in: " << protocol_dir << std::endl;
         return false;
     }
     
-    // Load first MAT file found
+    // Load first MAT file found using MatReader
     std::string protocol_file = mat_files[0];
     std::cout << "Loading protocol: " << protocol_file << std::endl;
     
-    mat_t* matfp = Mat_Open(protocol_file.c_str(), MAT_ACC_RDONLY);
-    if (!matfp) {
-        std::cerr << "Failed to open protocol file" << std::endl;
+    cppxdic::ProtocolFileData protocol_data;
+    if (!MatReader::loadProtocol(protocol_file, protocol_data)) {
+        std::cerr << "Failed to parse protocol file: " << protocol_file << std::endl;
         return false;
     }
     
-    // Read 'cond' struct
-    matvar_t* cond = Mat_VarRead(matfp, "cond");
-    if (!cond || cond->class_type != MAT_C_STRUCT) {
-        if (cond) Mat_VarFree(cond);
-        Mat_Close(matfp);
-        std::cerr << "Variable 'cond' not found or not a struct" << std::endl;
-        return false;
+    // Convert ProtocolFileData -> ProtocolInfo
+    // Index 0 is a dummy entry so that 1-based trial indexing works directly
+    // (MATLAB trial "001" -> index 1, "002" -> index 2, etc.)
+    protocol_info_.dircond.clear();
+    protocol_info_.nfcond.clear();
+    protocol_info_.spdcond.clear();
+    protocol_info_.repcond.clear();
+    protocol_info_.spddxlcond.clear();
+    
+    // Dummy index 0
+    protocol_info_.dircond.push_back("");
+    protocol_info_.nfcond.push_back(0);
+    protocol_info_.spdcond.push_back(0);
+    protocol_info_.repcond.push_back(0);
+    protocol_info_.spddxlcond.push_back(0.0);
+    
+    for (const auto& entry : protocol_data.trials) {
+        protocol_info_.dircond.push_back(entry.direction);
+        protocol_info_.nfcond.push_back(static_cast<int>(entry.force));
+        protocol_info_.spdcond.push_back(static_cast<int>(entry.speed));
+        protocol_info_.repcond.push_back(entry.repetition);
+        protocol_info_.spddxlcond.push_back(0.08);
     }
     
-    // Extract protocol data from cond struct
-    // For now, use dummy data as complete struct parsing is complex
-    // TODO: Complete implementation when detailed protocol info is needed
-    protocol_info_.dircond = {"", "Ubnf", "Rbnf", "Ubnf", "Rbnf", "Ubnf"};
-    protocol_info_.nfcond = {0, 1, 1, 5, 5, 1};
-    protocol_info_.spdcond = {0, 1, 1, 1, 1, 1};
-    protocol_info_.repcond = {0, 1, 1, 1, 1, 1};
-    
-    if (cond) Mat_VarFree(cond);
-    Mat_Close(matfp);
-    
-    std::cout << "Warning: Using dummy protocol data" << std::endl;
+    std::cout << "Protocol loaded: " << protocol_data.trials.size() << " trials" << std::endl;
+    if (config_.debug_mode) {
+        for (size_t i = 1; i < protocol_info_.dircond.size(); ++i) {
+            std::cout << "  Trial " << i << ": dir=" << protocol_info_.dircond[i]
+                      << " nf=" << protocol_info_.nfcond[i]
+                      << " spd=" << protocol_info_.spdcond[i]
+                      << " rep=" << protocol_info_.repcond[i] << std::endl;
+        }
+    }
     return true;
 }
 
 std::string StepDWorkflow::determineReferenceTrial(const std::string& trial) {
-    // Use config reference trial if set
+    // Manual override from config
     if (config_.ref_trial_id > 0) {
         std::ostringstream oss;
         oss << std::setw(3) << std::setfill('0') << config_.ref_trial_id;
+        std::cout << "Reference trial (manual override): " << oss.str() << std::endl;
         return oss.str();
     }
-
-    if (config_.debug_mode) {
-        std::cout << "Reference trial not set, using current trial: " << trial << std::endl;
+    
+    // Protocol-based reference trial selection (matching MATLAB stepD_2DDIC.m)
+    unsigned int trial_idx = std::stoi(trial);
+    
+    if (trial_idx > 0 && trial_idx < protocol_info_.nfcond.size()) {
+        int trial_nf = protocol_info_.nfcond[trial_idx];
+        
+        // Phase "loading" OR trial nf==1 → ref = first trial with nf==1 AND dir=="Ubnf"
+        if (config_.phase_id == "loading" || trial_nf == 1) {
+            for (size_t i = 1; i < protocol_info_.nfcond.size(); ++i) {
+                if (protocol_info_.nfcond[i] == 1 &&
+                    protocol_info_.dircond[i] == "Ubnf") {
+                    std::ostringstream oss;
+                    oss << std::setw(3) << std::setfill('0') << i;
+                    std::cout << "Reference trial (nf=1, Ubnf): " << oss.str() << std::endl;
+                    return oss.str();
+                }
+            }
+        }
+        // Phase "slide1" AND trial nf==5 → ref = first trial with nf==5 AND dir=="Ubnf"
+        else if (config_.phase_id == "slide1" && trial_nf == 5) {
+            for (size_t i = 1; i < protocol_info_.nfcond.size(); ++i) {
+                if (protocol_info_.nfcond[i] == 5 &&
+                    protocol_info_.dircond[i] == "Ubnf") {
+                    std::ostringstream oss;
+                    oss << std::setw(3) << std::setfill('0') << i;
+                    std::cout << "Reference trial (nf=5, Ubnf): " << oss.str() << std::endl;
+                    return oss.str();
+                }
+            }
+        }
+        
+        std::cerr << "Warning: No matching reference trial found for trial " << trial
+                  << " (phase=" << config_.phase_id << ", nf=" << trial_nf << ")" << std::endl;
+    } else {
+        std::cerr << "Warning: Trial index " << trial_idx << " out of protocol range" << std::endl;
     }
     
-    return trial;  // Fallback to current trial
+    // Fallback to current trial
+    std::cout << "Reference trial (fallback): " << trial << std::endl;
+    return trial;
 }
 
 bool StepDWorkflow::importVideoFrames(const std::string& trial,

@@ -129,6 +129,53 @@ public:
      */
     static void getCamerasForPair(int stereopair, int& cam_first, int& cam_second);
 
+     /**
+     * Build base data path
+     * @param config The base configuration class (required)
+     * @param with_data_or_dic_path Whether to include data/dic path in the path (required)
+     * @param with_rawdata Whether to include rawdata in the path (default as false)
+     * @param with_speckles Whether to include speckles in the path (default as false)
+     * @return The constructed path string
+     */
+    static std::string buildBaseDataPath(const Config& config, bool with_data_or_dic_path = false, bool with_rawdata = false, bool with_speckles = false);
+
+    /**
+     * Build the path based on activated parameters and return the proper string
+     * @param config The base configuration class (required)
+     * @param with_data_or_dic_path Whether to include data/dic path in the path (required)
+     * @param with_rawdata Whether to include rawdata in the path (default as false)
+     * @param with_speckles Whether to include speckles in the path (default as false)
+     * @param with_material Whether to include material in the path (default as false)
+     * @param with_video Whether to include video in the path (default as false)
+     * @param with_protocol Whether to include protocol in the path (default as false)
+     * @return The constructed path string
+     */
+    static std::string buildPath(const Config& config, bool with_data_or_dic_path = false, bool with_rawdata = false, bool with_speckles = false, bool with_material = false, bool with_video = false, bool with_protocol = false);
+
+     /**
+     * Build protocol path
+     * @param config The base configuration class (required)
+     * @param with_data_or_dic_path Whether to include data/dic path in the path (required)
+     * @param with_rawdata Whether to include rawdata in the path (default as false)
+     * @param with_speckles Whether to include speckles in the path (default as false)
+     * @param with_material Whether to include material in the path (default as false)
+     * @return The constructed path string
+     */
+    static std::string buildProtocolDir(const Config& config, bool with_data_or_dic_path = false, bool with_rawdata = false, bool with_speckles = false, bool with_material = false);
+
+
+    /**
+     * Build the video path
+     * @param config The base configuration class (required)
+     * @param with_data_or_dic_path Whether to include data/dic path in the path (required)
+     * @param with_rawdata Whether to include rawdata in the path (default as false)
+     * @param with_speckles Whether to include speckles in the path (default as false)
+     * @param with_material Whether to include material in the path (default as false)
+     * @return The constructed path string
+     */
+    static std::string buildVideoDir(const Config& config, bool with_data_or_dic_path = false, bool with_rawdata = false, bool with_speckles = false, bool with_material = false);
+
+
     /**
      * Build the path based on activated parameters and return the proper string
      * @param parameters The base parameters structure (required)

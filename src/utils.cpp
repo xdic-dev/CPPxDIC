@@ -148,13 +148,12 @@ bool Utils::checkSeedReferences(const Config& config) {
 }
 
 bool Utils::checkProtocolFiles(const Config& config) {
-    std::string protocol_path = config.data_path + "/rawdata/" + config.subject_id 
-                              + "/speckles/" + config.material + "/protocol/";
+    std::string protocol_dir = Utils::buildProtocolDir(config, true, true, true, true);
     
-    auto protocol_files = findFiles(protocol_path, "*.mat");
+    auto protocol_files = findFiles(protocol_dir, "*.mat");
     
     if (protocol_files.empty()) {
-        std::cerr << "Protocol files in " << protocol_path << " must exist to be able to run DIC analysis." << std::endl;
+        std::cerr << "Protocol files in " << protocol_dir << " must exist to be able to run DIC analysis." << std::endl;
         std::cerr << "Error: Protocol not found." << std::endl;
         return false;
     }
@@ -234,18 +233,17 @@ static bool ensure_dir(const std::string& path) {
     } catch (...) { return false; }
 }
 
-static std::string find_video_file(const std::string& base_raw_path,
+static std::string find_video_file(const std::string& video_dir,
                                    const std::string& subject,
                                    const std::string& material,
                                    const std::string& trialname,
                                    int cam_id) {
-    std::string vid_dir = base_raw_path + "/" + subject + "/speckles/" + material + "/vid";
-    //std::cout << "Video directory: " << vid_dir << std::endl;
-    if (!Utils::directoryExists(vid_dir)) return "";
+    //std::cout << "Video directory: " << video_dir << std::endl;
+    if (!Utils::directoryExists(video_dir)) return "";
     // Pattern like: <subject>_<material>_speckles_<trialname with 3 digits>_.*_cam<cam_id>.mp4
     // Example: S09_coating_speckles_007_545_050_trial005_cam_1.mp4
     std::regex pat(subject + "_" + material + "_speckles_" + trialname + "_.*_cam_" + std::to_string(cam_id) + ".*\\.mp4$");
-    for (const auto& entry : std::filesystem::directory_iterator(vid_dir)) {
+    for (const auto& entry : std::filesystem::directory_iterator(video_dir)) {
         if (!entry.is_regular_file()) continue;
         std::string name = entry.path().filename().string();
         if (std::regex_match(name, pat)) {
@@ -274,10 +272,10 @@ bool Utils::importRawVid(const Config& config,
         getCamerasForPair(stereopair, cam_first, cam_second);
 
         std::string trialname = padNumberWithZeros(trial, 3);
-        std::string base_raw = config.data_path + "/rawdata";
+        std::string video_dir = Utils::buildVideoDir(config, true, true, true, true);
 
-        std::string vid1 = find_video_file(base_raw, config.subject_id, config.material, trialname, cam_first);
-        std::string vid2 = find_video_file(base_raw, config.subject_id, config.material, trialname, cam_second);
+        std::string vid1 = find_video_file(video_dir, config.subject_id, config.material, trialname, cam_first);
+        std::string vid2 = find_video_file(video_dir, config.subject_id, config.material, trialname, cam_second);
         if (vid1.empty() || vid2.empty()) {
             std::cerr << "Video files not found for trial=" << trial << " pair=" << stereopair << std::endl;
             return false;
@@ -377,7 +375,8 @@ bool Utils::importVid(const Config& config,
 
     // Read protocol to compute ranges if available
     try {
-        std::string protocol_dir = config.data_path + "/rawdata/" + config.subject_id + "/speckles/" + config.material + "/protocol/";
+        std::string protocol_dir = Utils::buildProtocolDir(config, true, true, true, true);
+        
         auto protos = Utils::findFiles(protocol_dir, "*.mat");
         if (!protos.empty()) {
             std::string proto_file = protos.front();
@@ -924,6 +923,59 @@ std::vector<Eigen::Vector3d> Utils::applyRigidTransform(const std::vector<Eigen:
     }
     
     return points_out;
+}
+
+std::string Utils::buildBaseDataPath(const Config &config, bool with_data_or_dic_path, bool with_rawdata, bool with_speckles) {
+    std::string path = "";
+    
+    if (with_data_or_dic_path) {
+        path += config.data_path;
+
+        if (with_rawdata) {
+            path += "/rawdata";
+        }
+
+        path += "/" + config.subject_id;
+        
+        if (with_speckles) {
+            path += "/speckles";
+        }
+    } else {
+        path += config.dic_path;
+    }
+    
+    return path;
+}
+
+
+std::string Utils::buildPath(const Config& config, bool with_data_or_dic_path, bool with_rawdata, bool with_speckles, bool with_material, bool with_video, bool with_protocol) {
+    std::string path = buildBaseDataPath(config, with_data_or_dic_path, with_rawdata, with_speckles);
+    
+    if (with_material) {
+        path += "/" + config.material;
+    }
+    
+    if (with_video) {
+        path += "/vid";
+    }
+    
+    if (with_protocol) {
+        path += "/protocol";
+    }
+    
+    return path;
+}
+
+std::string Utils::buildProtocolDir(const Config& config, bool with_data_or_dic_path, bool with_rawdata, bool with_speckles, bool with_material) {
+    std::string path = buildPath(config, with_data_or_dic_path, with_rawdata, with_speckles, with_material, false, true);
+    
+    return path + "/";
+}
+
+std::string Utils::buildVideoDir(const Config& config, bool with_data_or_dic_path, bool with_rawdata, bool with_speckles, bool with_material) {
+    std::string path = buildPath(config, with_data_or_dic_path, with_rawdata, with_speckles, with_material, true, false);
+    
+    return path + "/";
 }
 
 std::string Utils::buildPath(const cppxdic::BaseParameters& parameters, bool with_material, bool with_trial, bool with_phase, bool with_cache) {
