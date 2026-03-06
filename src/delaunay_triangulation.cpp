@@ -80,9 +80,14 @@ std::vector<int> DelaunayTriangulation::filterByEdgeLength(
         int v1 = faces[idx + 1];
         int v2 = faces[idx + 2];
         
-        // Check bounds
-        if (v0 >= vertices.size() || v1 >= vertices.size() || v2 >= vertices.size()) {
-            std::cerr << "Warning: Invalid vertex index in triangle " << i << std::endl;
+        // Check bounds (explicit negative check before implicit unsigned conversion)
+        if (v0 < 0 || v1 < 0 || v2 < 0 ||
+            static_cast<size_t>(v0) >= vertices.size() || static_cast<size_t>(v1) >= vertices.size() || static_cast<size_t>(v2) >= vertices.size()) {
+            if (i < 5) {
+                std::cerr << "Warning: Invalid vertex index in triangle " << i 
+                          << " (v0=" << v0 << " v1=" << v1 << " v2=" << v2 
+                          << ", nVerts=" << vertices.size() << ")" << std::endl;
+            }
             continue;
         }
         

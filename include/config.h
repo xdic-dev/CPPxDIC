@@ -115,6 +115,11 @@ public:
     StepConfig step_e;                   // Step E: matching
     StepConfig step_f;                   // Step F: combined/final
     
+    // Step F specific parameters (deformation analysis)
+    bool step_f_temporal_filtering = true;   // Enable temporal filtering of displacements
+    double step_f_freq_filt = 10.0;          // Low-pass cutoff frequency (Hz) for temporal filter
+    bool step_f_compute_rbm = false;         // Compute rigid body motion (RBM) and ARBM deformation
+    
     // Data format for pipeline I/O: "mat", "bin", or "json"
     std::string data_format = "mat";
     

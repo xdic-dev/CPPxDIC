@@ -1251,11 +1251,15 @@ bool MatWriter::writeDIC2DPairResults(const std::string& filename,
         }
     }
     
-    // Write Faces (Nx3 matrix)
+    // Write Faces (Nx3 matrix, convert 0-indexed C++ to 1-indexed MATLAB)
     if (!results.Faces.empty()) {
         size_t n_faces = results.Faces.size() / 3;
         std::vector<size_t> dims = {n_faces, 3};
-        writeArrayVariable(matfp, "Faces", results.Faces.data(), dims, 
+        std::vector<int> faces_1indexed(results.Faces.size());
+        for (size_t i = 0; i < results.Faces.size(); ++i) {
+            faces_1indexed[i] = results.Faces[i] + 1;
+        }
+        writeArrayVariable(matfp, "Faces", faces_1indexed.data(), dims, 
                           MAT_T_INT32, MAT_C_INT32);
     }
     
@@ -1336,12 +1340,16 @@ bool MatWriter::write3DCombinedResults(const std::string& filename,
     
     Mat_VarSetStructFieldByName(combined_struct, "Points3D", 0, points3d_cell);
     
-    // Create Faces variable
+    // Create Faces variable (convert 0-indexed C++ to 1-indexed MATLAB)
     if (!combined.Faces.empty()) {
         size_t n_faces = combined.Faces.size() / 3;
         std::vector<size_t> dims = {n_faces, 3};
+        std::vector<int> faces_1indexed(combined.Faces.size());
+        for (size_t i = 0; i < combined.Faces.size(); ++i) {
+            faces_1indexed[i] = combined.Faces[i] + 1;
+        }
         matvar_t* faces_var = Mat_VarCreate("Faces", MAT_C_INT32, MAT_T_INT32,
-                                           2, dims.data(), (void*)combined.Faces.data(), 0);
+                                           2, dims.data(), (void*)faces_1indexed.data(), 0);
         Mat_VarSetStructFieldByName(combined_struct, "Faces", 0, faces_var);
     }
     
@@ -2134,11 +2142,14 @@ bool MatWriter::writeAllPairsResults(mat_t* matfp,
             Mat_VarSetStructFieldByName(pair_struct, "distortionPath", 0, path_cell);
         }
         
-        // Write Faces (3 x nFaces)
+        // Write Faces (3 x nFaces, convert 0-indexed C++ to 1-indexed MATLAB)
         if (!pair.Faces.empty()) {
             size_t nFaces = pair.Faces.size() / 3;
             std::vector<size_t> face_dims = {3, nFaces};
-            std::vector<double> faces_double(pair.Faces.begin(), pair.Faces.end());
+            std::vector<double> faces_double(pair.Faces.size());
+            for (size_t i = 0; i < pair.Faces.size(); ++i) {
+                faces_double[i] = static_cast<double>(pair.Faces[i] + 1);
+            }
             matvar_t* faces_var = Mat_VarCreate("Faces", MAT_C_DOUBLE, MAT_T_DOUBLE,
                                                2, face_dims.data(), faces_double.data(), 0);
             Mat_VarSetStructFieldByName(pair_struct, "Faces", 0, faces_var);
@@ -2423,11 +2434,14 @@ bool MatWriter::writeDIC2Dinfo(mat_t* matfp,
             Mat_VarSetStructFieldByName(dic2d_struct, "CorCoeffVec", 0, cc_cell);
         }
         
-        // Write Faces
+        // Write Faces (convert 0-indexed C++ to 1-indexed MATLAB)
         if (!dic2d.Faces.empty()) {
             size_t nFaces = dic2d.Faces.size() / 3;
             std::vector<size_t> face_dims = {3, nFaces};
-            std::vector<double> faces_double(dic2d.Faces.begin(), dic2d.Faces.end());
+            std::vector<double> faces_double(dic2d.Faces.size());
+            for (size_t fi = 0; fi < dic2d.Faces.size(); ++fi) {
+                faces_double[fi] = static_cast<double>(dic2d.Faces[fi] + 1);
+            }
             matvar_t* faces_var = Mat_VarCreate("Faces", MAT_C_DOUBLE, MAT_T_DOUBLE,
                                                2, face_dims.data(), faces_double.data(), 0);
             Mat_VarSetStructFieldByName(dic2d_struct, "Faces", 0, faces_var);

@@ -69,6 +69,13 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
             std::cout << "  Loaded: " << dic3d.Points3D.size() << " frames, "
                       << dic3d.Points3D[0].x.size() << " points, "
                       << dic3d.Faces.size() / 3 << " faces" << std::endl;
+            std::cout << "  corrComb: " << dic3d.corrComb.size() << " frames"
+                      << (dic3d.corrComb.empty() ? "" : " (" + std::to_string(dic3d.corrComb[0].size()) + " per frame)")
+                      << std::endl;
+            std::cout << "  FaceCorrComb: " << dic3d.FaceCorrComb.size() << " frames" << std::endl;
+            std::cout << "  FaceCentroids: " << dic3d.FaceCentroids.size() << " frames" << std::endl;
+            std::cout << "  Disp.DispVec: " << dic3d.Disp.DispVec.size() << " frames" << std::endl;
+            std::cout << "  Disp.DispMgn: " << dic3d.Disp.DispMgn.size() << " frames" << std::endl;
             
             // Convert Points3D to Eigen::Vector3d format for deformation computation
             std::cout << "\nConverting data to Eigen format..." << std::endl;
@@ -103,9 +110,8 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
             
             std::cout << "  Converted " << vertices_all_frames.size() << " frames" << std::endl;
             
-            // Apply temporal filtering to displacement fields (optional but recommended)
-            bool apply_temporal_filtering = true;  // Can be made configurable
-            if (apply_temporal_filtering && vertices_all_frames.size() > 3) {
+            // Apply temporal filtering to displacement fields
+            if (config_.step_f_temporal_filtering && vertices_all_frames.size() > 3) {
                 std::cout << "\nApplying temporal filtering..." << std::endl;
                 
                 // Organize data for filtering: nPoints x nFrames
@@ -123,8 +129,8 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                 }
                 
                 // Filter displacement components
-                double freq_filt = 10.0;  // Low-pass cutoff frequency (Hz)
-                double freq_acq = 50.0;   // Acquisition frequency (Hz) - adjust based on your data
+                double freq_filt = config_.step_f_freq_filt;
+                double freq_acq = config_.vid_sample_freq;
                 auto [filt_x, filt_y, filt_z] = filterTime3D(disp_x, disp_y, disp_z, freq_filt, freq_acq);
                 
                 // Reconstruct filtered vertex positions
@@ -138,9 +144,11 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                 
                 std::cout << "  ✓ Temporal filtering applied (freqFilt=" << freq_filt 
                           << " Hz, freqAcq=" << freq_acq << " Hz)" << std::endl;
-            } else if (apply_temporal_filtering) {
+            } else if (config_.step_f_temporal_filtering) {
                 std::cout << "\nSkipping temporal filtering (too few frames: " 
                           << vertices_all_frames.size() << ")" << std::endl;
+            } else {
+                std::cout << "\nTemporal filtering disabled (step_f_temporal_filtering=false)" << std::endl;
             }
             
             // Update Points3D with filtered data (matching MATLAB line 115)
@@ -198,79 +206,104 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                 std::vector<double>& centroids = dic3d.FaceCentroids[iframe];
                 centroids.resize(nFaces * 3);
                 
+                size_t nVerts = vertices_all_frames[iframe].size();
                 for (size_t iface = 0; iface < nFaces; ++iface) {
                     int v0 = dic3d.Faces[iface * 3 + 0];
                     int v1 = dic3d.Faces[iface * 3 + 1];
                     int v2 = dic3d.Faces[iface * 3 + 2];
                     
-                    double cx = (vertices_all_frames[iframe][v0].x() + 
-                                 vertices_all_frames[iframe][v1].x() + 
-                                 vertices_all_frames[iframe][v2].x()) / 3.0;
-                    double cy = (vertices_all_frames[iframe][v0].y() + 
-                                 vertices_all_frames[iframe][v1].y() + 
-                                 vertices_all_frames[iframe][v2].y()) / 3.0;
-                    double cz = (vertices_all_frames[iframe][v0].z() + 
-                                 vertices_all_frames[iframe][v1].z() + 
-                                 vertices_all_frames[iframe][v2].z()) / 3.0;
-                    
-                    centroids[iface * 3 + 0] = cx;
-                    centroids[iface * 3 + 1] = cy;
-                    centroids[iface * 3 + 2] = cz;
+                    if (v0 >= 0 && static_cast<size_t>(v0) < nVerts &&
+                        v1 >= 0 && static_cast<size_t>(v1) < nVerts &&
+                        v2 >= 0 && static_cast<size_t>(v2) < nVerts) {
+                        double cx = (vertices_all_frames[iframe][v0].x() + 
+                                     vertices_all_frames[iframe][v1].x() + 
+                                     vertices_all_frames[iframe][v2].x()) / 3.0;
+                        double cy = (vertices_all_frames[iframe][v0].y() + 
+                                     vertices_all_frames[iframe][v1].y() + 
+                                     vertices_all_frames[iframe][v2].y()) / 3.0;
+                        double cz = (vertices_all_frames[iframe][v0].z() + 
+                                     vertices_all_frames[iframe][v1].z() + 
+                                     vertices_all_frames[iframe][v2].z()) / 3.0;
+                        
+                        centroids[iface * 3 + 0] = cx;
+                        centroids[iface * 3 + 1] = cy;
+                        centroids[iface * 3 + 2] = cz;
+                    } else {
+                        centroids[iface * 3 + 0] = std::numeric_limits<double>::quiet_NaN();
+                        centroids[iface * 3 + 1] = std::numeric_limits<double>::quiet_NaN();
+                        centroids[iface * 3 + 2] = std::numeric_limits<double>::quiet_NaN();
+                    }
                 }
             }
             std::cout << "  ✓ Face centroids recomputed for " << vertices_all_frames.size() << " frames" << std::endl;
             
             // Recompute face correlation (worst of 3 vertices) (matching MATLAB line 61)
+            // MATLAB: DIC3D.FaceCorrComb{ii} = max(DIC3D.corrComb{ii}(F), [], 2);
             std::cout << "\nRecomputing face correlation after filtering..." << std::endl;
-            dic3d.FaceCorrComb.clear();
-            dic3d.FaceCorrComb.resize(vertices_all_frames.size());
-            
-            for (size_t iframe = 0; iframe < vertices_all_frames.size(); ++iframe) {
-                std::vector<double>& face_corr = dic3d.FaceCorrComb[iframe];
-                face_corr.resize(nFaces);
+            if (!dic3d.corrComb.empty() && dic3d.corrComb.size() >= vertices_all_frames.size()) {
+                dic3d.FaceCorrComb.clear();
+                dic3d.FaceCorrComb.resize(vertices_all_frames.size());
                 
-                const auto& point_corr = dic3d.corrComb[iframe];
-                
-                for (size_t iface = 0; iface < nFaces; ++iface) {
-                    int v0 = dic3d.Faces[iface * 3 + 0];
-                    int v1 = dic3d.Faces[iface * 3 + 1];
-                    int v2 = dic3d.Faces[iface * 3 + 2];
+                for (size_t iframe = 0; iframe < vertices_all_frames.size(); ++iframe) {
+                    std::vector<double>& face_corr = dic3d.FaceCorrComb[iframe];
+                    face_corr.resize(nFaces);
                     
-                    // Take worst (max) correlation of 3 vertices
-                    face_corr[iface] = std::max({point_corr[v0], point_corr[v1], point_corr[v2]});
+                    const auto& point_corr = dic3d.corrComb[iframe];
+                    size_t nCorr = point_corr.size();
+                    
+                    for (size_t iface = 0; iface < nFaces; ++iface) {
+                        int v0 = dic3d.Faces[iface * 3 + 0];
+                        int v1 = dic3d.Faces[iface * 3 + 1];
+                        int v2 = dic3d.Faces[iface * 3 + 2];
+                        
+                        if (v0 >= 0 && static_cast<size_t>(v0) < nCorr &&
+                            v1 >= 0 && static_cast<size_t>(v1) < nCorr &&
+                            v2 >= 0 && static_cast<size_t>(v2) < nCorr) {
+                            face_corr[iface] = std::max({point_corr[v0], point_corr[v1], point_corr[v2]});
+                        } else {
+                            face_corr[iface] = std::numeric_limits<double>::quiet_NaN();
+                        }
+                    }
                 }
+                std::cout << "  ✓ Face correlation recomputed for " << vertices_all_frames.size() << " frames" << std::endl;
+            } else {
+                std::cout << "  ⚠ corrComb not available (empty or frame count mismatch), skipping face correlation" << std::endl;
             }
-            std::cout << "  ✓ Face correlation recomputed for " << vertices_all_frames.size() << " frames" << std::endl;
             
-            // Compute rigid body motion (RBM) removal (matching MATLAB STEP4 lines 61-70)
-            std::cout << "\nComputing rigid body motion (RBM) transformations..." << std::endl;
-            std::vector<Utils::RigidTransform> rbm_transforms(vertices_all_frames.size());
+            // Compute RBM if enabled
+            std::vector<Utils::RigidTransform> rbm_transforms;
             std::vector<std::vector<Eigen::Vector3d>> vertices_all_frames_ARBM;
-            vertices_all_frames_ARBM.reserve(vertices_all_frames.size());
             
-            for (size_t iframe = 0; iframe < vertices_all_frames.size(); ++iframe) {
-                Utils::RigidTransform transform;
-                bool success = Utils::computeRigidTransform(
-                    vertices_all_frames[iframe],  // from
-                    vertices_ref,                  // to (reference frame)
-                    transform
-                );
+            if (config_.step_f_compute_rbm) {
+                std::cout << "\nComputing rigid body motion (RBM) transformations..." << std::endl;
+                rbm_transforms.resize(vertices_all_frames.size());
+                vertices_all_frames_ARBM.reserve(vertices_all_frames.size());
                 
-                rbm_transforms[iframe] = transform;
-                
-                if (success) {
-                    // Apply RBM transformation to get ARBM (After RBM) coordinates
-                    auto verts_arbm = Utils::applyRigidTransform(vertices_all_frames[iframe], transform);
-                    vertices_all_frames_ARBM.push_back(verts_arbm);
-                } else {
-                    std::cerr << "  Warning: RBM computation failed for frame " << iframe << std::endl;
-                    vertices_all_frames_ARBM.push_back(vertices_all_frames[iframe]);
+                for (size_t iframe = 0; iframe < vertices_all_frames.size(); ++iframe) {
+                    Utils::RigidTransform transform;
+                    bool success = Utils::computeRigidTransform(
+                        vertices_all_frames[iframe],  // from
+                        vertices_ref,                  // to (reference frame)
+                        transform
+                    );
+                    
+                    rbm_transforms[iframe] = transform;
+                    
+                    if (success) {
+                        auto verts_arbm = Utils::applyRigidTransform(vertices_all_frames[iframe], transform);
+                        vertices_all_frames_ARBM.push_back(verts_arbm);
+                    } else {
+                        std::cerr << "  Warning: RBM computation failed for frame " << iframe << std::endl;
+                        vertices_all_frames_ARBM.push_back(vertices_all_frames[iframe]);
+                    }
                 }
+                std::cout << "  ✓ RBM transformations computed for " << vertices_all_frames.size() << " frames" << std::endl;
+            } else {
+                std::cout << "\nRBM/ARBM computation disabled (step_f_compute_rbm=false)" << std::endl;
             }
-            std::cout << "  ✓ RBM transformations computed for " << vertices_all_frames.size() << " frames" << std::endl;
             
-            // Compute 3D deformation and strain (with original coordinates)
-            std::cout << "\nComputing 3D surface deformation (with RBM)..." << std::endl;
+            // Compute 3D deformation and strain
+            std::cout << "\nComputing 3D surface deformation..." << std::endl;
             std::cout << "  Method: Triangular Cosserat Point Elements (TCPE)" << std::endl;
             std::cout << "  Deformation type: Cumulative (reference = frame 1)" << std::endl;
             
@@ -281,21 +314,19 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                 true  // cumulative: use frame 1 as reference for all frames
             );
             
-            std::cout << "  ✓ Deformation computation complete (with RBM)" << std::endl;
+            std::cout << "  ✓ Deformation computation complete" << std::endl;
             
-            // Compute deformation after RBM removal (matching MATLAB STEP4 lines 84-85)
-            std::cout << "\nComputing 3D surface deformation (after RBM removal)..." << std::endl;
-            FrameDeformationResult deform_result_ARBM = computeTriSurfaceDeformation(
-                dic3d.Faces,
-                vertices_all_frames_ARBM[0],  // reference frame after RBM
-                vertices_all_frames_ARBM,
-                true  // cumulative
-            );
-            
-            std::cout << "  ✓ Deformation computation complete (ARBM)" << std::endl;
-            std::cout << "\n✓ Both deformation analyses complete!" << std::endl;
-            std::cout << "  - With RBM: Deformation gradient F, strain tensors E/e" << std::endl;
-            std::cout << "  - After RBM: Deformation gradient F_ARBM, strain tensors E_ARBM/e_ARBM" << std::endl;
+            FrameDeformationResult deform_result_ARBM;
+            if (config_.step_f_compute_rbm) {
+                std::cout << "\nComputing 3D surface deformation (after RBM removal)..." << std::endl;
+                deform_result_ARBM = computeTriSurfaceDeformation(
+                    dic3d.Faces,
+                    vertices_all_frames_ARBM[0],
+                    vertices_all_frames_ARBM,
+                    true  // cumulative
+                );
+                std::cout << "  ✓ Deformation computation complete (ARBM)" << std::endl;
+            }
             
             // Build DIC3DPPresults structure
             std::cout << "\nBuilding DIC3DPPresults structure..." << std::endl;
@@ -408,118 +439,92 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                 maxShear = frame.EShearMax;
             }
             
-            std::cout << "  Populated deformation data (with RBM) for " << ppresults.n_frames << " frames" << std::endl;
+            std::cout << "  Populated deformation data for " << ppresults.n_frames << " frames" << std::endl;
             
-            // Populate ARBM deformation data (after rigid body motion removal)
-            std::cout << "  Populating ARBM deformation data..." << std::endl;
-            ppresults.Deform_ARBM.F.resize(deform_result_ARBM.n_frames);
-            ppresults.Deform_ARBM.strain.resize(deform_result_ARBM.n_frames);
-            ppresults.Deform_ARBM.princStrain.resize(deform_result_ARBM.n_frames);
-            ppresults.Deform_ARBM.maxShearStrain.resize(deform_result_ARBM.n_frames);
-            
-            for (size_t iframe = 0; iframe < deform_result_ARBM.n_frames; ++iframe) {
-                const auto& frame = deform_result_ARBM.frames[iframe];
+            if (config_.step_f_compute_rbm) {
+                // Populate ARBM deformation data (after rigid body motion removal)
+                std::cout << "  Populating ARBM deformation data..." << std::endl;
+                ppresults.Deform_ARBM.F.resize(deform_result_ARBM.n_frames);
+                ppresults.Deform_ARBM.strain.resize(deform_result_ARBM.n_frames);
+                ppresults.Deform_ARBM.princStrain.resize(deform_result_ARBM.n_frames);
+                ppresults.Deform_ARBM.maxShearStrain.resize(deform_result_ARBM.n_frames);
                 
-                // Deformation gradient F_ARBM
-                DeformGradient& F = ppresults.Deform_ARBM.F[iframe];
-                F.F11.resize(nFaces);
-                F.F12.resize(nFaces);
-                F.F13.resize(nFaces);
-                F.F21.resize(nFaces);
-                F.F22.resize(nFaces);
-                F.F23.resize(nFaces);
-                F.F31.resize(nFaces);
-                F.F32.resize(nFaces);
-                F.F33.resize(nFaces);
-                
-                for (size_t iface = 0; iface < nFaces; ++iface) {
-                    F.F11[iface] = frame.Fmat[iface](0, 0);
-                    F.F12[iface] = frame.Fmat[iface](0, 1);
-                    F.F13[iface] = frame.Fmat[iface](0, 2);
-                    F.F21[iface] = frame.Fmat[iface](1, 0);
-                    F.F22[iface] = frame.Fmat[iface](1, 1);
-                    F.F23[iface] = frame.Fmat[iface](1, 2);
-                    F.F31[iface] = frame.Fmat[iface](2, 0);
-                    F.F32[iface] = frame.Fmat[iface](2, 1);
-                    F.F33[iface] = frame.Fmat[iface](2, 2);
+                for (size_t iframe = 0; iframe < deform_result_ARBM.n_frames; ++iframe) {
+                    const auto& frame = deform_result_ARBM.frames[iframe];
+                    
+                    DeformGradient& F = ppresults.Deform_ARBM.F[iframe];
+                    F.F11.resize(nFaces); F.F12.resize(nFaces); F.F13.resize(nFaces);
+                    F.F21.resize(nFaces); F.F22.resize(nFaces); F.F23.resize(nFaces);
+                    F.F31.resize(nFaces); F.F32.resize(nFaces); F.F33.resize(nFaces);
+                    
+                    for (size_t iface = 0; iface < nFaces; ++iface) {
+                        F.F11[iface] = frame.Fmat[iface](0, 0);
+                        F.F12[iface] = frame.Fmat[iface](0, 1);
+                        F.F13[iface] = frame.Fmat[iface](0, 2);
+                        F.F21[iface] = frame.Fmat[iface](1, 0);
+                        F.F22[iface] = frame.Fmat[iface](1, 1);
+                        F.F23[iface] = frame.Fmat[iface](1, 2);
+                        F.F31[iface] = frame.Fmat[iface](2, 0);
+                        F.F32[iface] = frame.Fmat[iface](2, 1);
+                        F.F33[iface] = frame.Fmat[iface](2, 2);
+                    }
+                    
+                    StrainTensor& E = ppresults.Deform_ARBM.strain[iframe];
+                    E.E11.resize(nFaces); E.E12.resize(nFaces); E.E13.resize(nFaces);
+                    E.E21.resize(nFaces); E.E22.resize(nFaces); E.E23.resize(nFaces);
+                    E.E31.resize(nFaces); E.E32.resize(nFaces); E.E33.resize(nFaces);
+                    
+                    for (size_t iface = 0; iface < nFaces; ++iface) {
+                        E.E11[iface] = frame.Emat[iface](0, 0);
+                        E.E12[iface] = frame.Emat[iface](0, 1);
+                        E.E13[iface] = frame.Emat[iface](0, 2);
+                        E.E21[iface] = frame.Emat[iface](1, 0);
+                        E.E22[iface] = frame.Emat[iface](1, 1);
+                        E.E23[iface] = frame.Emat[iface](1, 2);
+                        E.E31[iface] = frame.Emat[iface](2, 0);
+                        E.E32[iface] = frame.Emat[iface](2, 1);
+                        E.E33[iface] = frame.Emat[iface](2, 2);
+                    }
+                    
+                    std::vector<double>& princStrain = ppresults.Deform_ARBM.princStrain[iframe];
+                    princStrain.resize(nFaces * 2);
+                    for (size_t iface = 0; iface < nFaces; ++iface) {
+                        princStrain[iface * 2 + 0] = frame.Epc1[iface];
+                        princStrain[iface * 2 + 1] = frame.Epc2[iface];
+                    }
+                    ppresults.Deform_ARBM.maxShearStrain[iframe] = frame.EShearMax;
                 }
                 
-                // Strain tensor E_ARBM
-                StrainTensor& E = ppresults.Deform_ARBM.strain[iframe];
-                E.E11.resize(nFaces);
-                E.E12.resize(nFaces);
-                E.E13.resize(nFaces);
-                E.E21.resize(nFaces);
-                E.E22.resize(nFaces);
-                E.E23.resize(nFaces);
-                E.E31.resize(nFaces);
-                E.E32.resize(nFaces);
-                E.E33.resize(nFaces);
-                
-                for (size_t iface = 0; iface < nFaces; ++iface) {
-                    E.E11[iface] = frame.Emat[iface](0, 0);
-                    E.E12[iface] = frame.Emat[iface](0, 1);
-                    E.E13[iface] = frame.Emat[iface](0, 2);
-                    E.E21[iface] = frame.Emat[iface](1, 0);
-                    E.E22[iface] = frame.Emat[iface](1, 1);
-                    E.E23[iface] = frame.Emat[iface](1, 2);
-                    E.E31[iface] = frame.Emat[iface](2, 0);
-                    E.E32[iface] = frame.Emat[iface](2, 1);
-                    E.E33[iface] = frame.Emat[iface](2, 2);
+                // Populate RBM transformation matrices
+                ppresults.RBM.RotMat.resize(rbm_transforms.size());
+                ppresults.RBM.TransVec.resize(rbm_transforms.size());
+                for (size_t iframe = 0; iframe < rbm_transforms.size(); ++iframe) {
+                    const auto& transform = rbm_transforms[iframe];
+                    ppresults.RBM.RotMat[iframe].resize(9);
+                    for (int i = 0; i < 3; ++i)
+                        for (int j = 0; j < 3; ++j)
+                            ppresults.RBM.RotMat[iframe][i * 3 + j] = transform.R(i, j);
+                    ppresults.RBM.TransVec[iframe] = {transform.t(0), transform.t(1), transform.t(2)};
                 }
                 
-                // Principal strains
-                std::vector<double>& princStrain = ppresults.Deform_ARBM.princStrain[iframe];
-                princStrain.resize(nFaces * 2);
-                for (size_t iface = 0; iface < nFaces; ++iface) {
-                    princStrain[iface * 2 + 0] = frame.Epc1[iface];
-                    princStrain[iface * 2 + 1] = frame.Epc2[iface];
-                }
-                
-                // Max shear strain
-                ppresults.Deform_ARBM.maxShearStrain[iframe] = frame.EShearMax;
-            }
-            
-            // Populate RBM transformation matrices
-            ppresults.RBM.RotMat.resize(rbm_transforms.size());
-            ppresults.RBM.TransVec.resize(rbm_transforms.size());
-            for (size_t iframe = 0; iframe < rbm_transforms.size(); ++iframe) {
-                const auto& transform = rbm_transforms[iframe];
-                
-                // Rotation matrix (row-major 9 values)
-                ppresults.RBM.RotMat[iframe].resize(9);
-                for (int i = 0; i < 3; ++i) {
-                    for (int j = 0; j < 3; ++j) {
-                        ppresults.RBM.RotMat[iframe][i * 3 + j] = transform.R(i, j);
+                // Populate Points3D_ARBM
+                ppresults.Points3D_ARBM_x.resize(vertices_all_frames_ARBM.size());
+                ppresults.Points3D_ARBM_y.resize(vertices_all_frames_ARBM.size());
+                ppresults.Points3D_ARBM_z.resize(vertices_all_frames_ARBM.size());
+                for (size_t iframe = 0; iframe < vertices_all_frames_ARBM.size(); ++iframe) {
+                    const auto& verts = vertices_all_frames_ARBM[iframe];
+                    ppresults.Points3D_ARBM_x[iframe].resize(verts.size());
+                    ppresults.Points3D_ARBM_y[iframe].resize(verts.size());
+                    ppresults.Points3D_ARBM_z[iframe].resize(verts.size());
+                    for (size_t i = 0; i < verts.size(); ++i) {
+                        ppresults.Points3D_ARBM_x[iframe][i] = verts[i].x();
+                        ppresults.Points3D_ARBM_y[iframe][i] = verts[i].y();
+                        ppresults.Points3D_ARBM_z[iframe][i] = verts[i].z();
                     }
                 }
                 
-                // Translation vector (3 values)
-                ppresults.RBM.TransVec[iframe].resize(3);
-                ppresults.RBM.TransVec[iframe][0] = transform.t(0);
-                ppresults.RBM.TransVec[iframe][1] = transform.t(1);
-                ppresults.RBM.TransVec[iframe][2] = transform.t(2);
+                std::cout << "  ✓ Populated all deformation data (with RBM and ARBM)" << std::endl;
             }
-            
-            // Populate Points3D_ARBM
-            ppresults.Points3D_ARBM_x.resize(vertices_all_frames_ARBM.size());
-            ppresults.Points3D_ARBM_y.resize(vertices_all_frames_ARBM.size());
-            ppresults.Points3D_ARBM_z.resize(vertices_all_frames_ARBM.size());
-            
-            for (size_t iframe = 0; iframe < vertices_all_frames_ARBM.size(); ++iframe) {
-                const auto& verts = vertices_all_frames_ARBM[iframe];
-                ppresults.Points3D_ARBM_x[iframe].resize(verts.size());
-                ppresults.Points3D_ARBM_y[iframe].resize(verts.size());
-                ppresults.Points3D_ARBM_z[iframe].resize(verts.size());
-                
-                for (size_t i = 0; i < verts.size(); ++i) {
-                    ppresults.Points3D_ARBM_x[iframe][i] = verts[i].x();
-                    ppresults.Points3D_ARBM_y[iframe][i] = verts[i].y();
-                    ppresults.Points3D_ARBM_z[iframe][i] = verts[i].z();
-                }
-            }
-            
-            std::cout << "  ✓ Populated all deformation data (with RBM and ARBM) for " << ppresults.n_frames << " frames" << std::endl;
             
             // Save DIC3DPPresults using configured format
             {

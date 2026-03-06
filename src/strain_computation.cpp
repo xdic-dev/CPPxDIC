@@ -72,10 +72,15 @@ DeformationResult computeSingleFrameDeformation(
         int v1 = faces[idx + 1];
         int v2 = faces[idx + 2];
         
-        // Check bounds
-        if (v0 >= vertices_ref.size() || v1 >= vertices_ref.size() || v2 >= vertices_ref.size() ||
-            v0 >= vertices_cur.size() || v1 >= vertices_cur.size() || v2 >= vertices_cur.size()) {
-            std::cerr << "Warning: Invalid vertex index in triangle " << itri << std::endl;
+        // Check bounds (explicit negative check before implicit unsigned conversion)
+        if (v0 < 0 || v1 < 0 || v2 < 0 ||
+            static_cast<size_t>(v0) >= vertices_ref.size() || static_cast<size_t>(v1) >= vertices_ref.size() || static_cast<size_t>(v2) >= vertices_ref.size() ||
+            static_cast<size_t>(v0) >= vertices_cur.size() || static_cast<size_t>(v1) >= vertices_cur.size() || static_cast<size_t>(v2) >= vertices_cur.size()) {
+            if (itri < 5) {
+                std::cerr << "Warning: Invalid vertex index in triangle " << itri 
+                          << " (v0=" << v0 << " v1=" << v1 << " v2=" << v2 
+                          << ", nRef=" << vertices_ref.size() << " nCur=" << vertices_cur.size() << ")" << std::endl;
+            }
             // Fill with NaN
             result.Fmat[itri] = Eigen::Matrix3d::Constant(std::nan(""));
             continue;

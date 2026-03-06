@@ -5,6 +5,7 @@
 #include "mat_reader.h"
 #include "dic_structures.h"
 #include <iostream>
+#include <matio.h>
 #include <sstream>
 #include <cstring>
 #include <algorithm>
@@ -573,21 +574,60 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
         return false;
     }
 
-    // Faces (Nx3)
+    // Faces (Nx3) — handles both INT32 (C++-written) and DOUBLE (MATLAB-written)
     if (matvar_t* faces_var = getStructField(dic3d_var.get(), "Faces", 0)) {
-        if (faces_var->class_type == MAT_C_DOUBLE && faces_var->data && faces_var->rank >= 2) {
-            const size_t nFaces = faces_var->dims[0];
-            const double* faces_data = static_cast<const double*>(faces_var->data);
+        if (faces_var->data && faces_var->rank >= 2) {
+            const size_t dim0 = faces_var->dims[0];
+            const size_t dim1 = faces_var->dims[1];
+            // Determine nFaces: dims could be {nFaces,3} or {3,nFaces}
+            size_t nFaces = (dim1 == 3) ? dim0 : dim1;
 
             combined.Faces.clear();
             combined.Faces.reserve(nFaces * 3);
-            for (size_t i = 0; i < nFaces * 3; ++i) {
-                combined.Faces.push_back(static_cast<int>(faces_data[i]) - 1);
+
+            if (faces_var->class_type == MAT_C_INT32) {
+                // INT32: written by C++ writer (row-major, 1-indexed after fix)
+                const int32_t* d = static_cast<const int32_t*>(faces_var->data);
+                if (dim1 == 3) {
+                    // {nFaces, 3} row-major layout from C++ writer
+                    for (size_t i = 0; i < nFaces * 3; ++i) {
+                        combined.Faces.push_back(d[i] - 1);
+                    }
+                } else {
+                    // {3, nFaces} — transpose
+                    for (size_t r = 0; r < nFaces; ++r) {
+                        for (size_t c = 0; c < 3; ++c) {
+                            combined.Faces.push_back(d[c * nFaces + r] - 1);
+                        }
+                    }
+                }
+            } else if (faces_var->class_type == MAT_C_DOUBLE) {
+                // DOUBLE: written by MATLAB (column-major, 1-indexed)
+                const double* d = static_cast<const double*>(faces_var->data);
+                if (dim1 == 3) {
+                    // {nFaces, 3} column-major: col0[nFaces], col1[nFaces], col2[nFaces]
+                    for (size_t r = 0; r < nFaces; ++r) {
+                        combined.Faces.push_back(static_cast<int>(d[r]) - 1);
+                        combined.Faces.push_back(static_cast<int>(d[r + nFaces]) - 1);
+                        combined.Faces.push_back(static_cast<int>(d[r + 2 * nFaces]) - 1);
+                    }
+                } else {
+                    // {3, nFaces} column-major
+                    for (size_t r = 0; r < nFaces; ++r) {
+                        for (size_t c = 0; c < 3; ++c) {
+                            combined.Faces.push_back(static_cast<int>(d[c + r * 3]) - 1);
+                        }
+                    }
+                }
+            } else {
+                std::cerr << "Warning: Unexpected Faces class_type " << faces_var->class_type << '\n';
             }
+            std::cout << "Loaded " << nFaces << " faces (type=" << faces_var->class_type 
+                      << ", dims=" << dim0 << "x" << dim1 << ")" << std::endl;
         }
     }
 
-    // Points3D (cell frames)
+    // Points3D (cell array: each cell is a 1x1 struct with fields x, y, z)
     if (matvar_t* points3d_var = getStructField(dic3d_var.get(), "Points3D", 0)) {
         if (points3d_var->class_type == MAT_C_CELL) {
             const size_t nFrames = getCellArraySize(points3d_var);
@@ -595,19 +635,125 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
 
             for (size_t frame = 0; frame < nFrames; ++frame) {
                 matvar_t* frame_var = Mat_VarGetCell(points3d_var, frame);
-                if (!frame_var || frame_var->class_type != MAT_C_DOUBLE || !frame_var->data || frame_var->rank < 2) continue;
+                if (!frame_var || frame_var->class_type != MAT_C_STRUCT) {
+                    continue;
+                }
 
-                const size_t nPoints = frame_var->dims[0];
-                const double* pts_data = static_cast<const double*>(frame_var->data);
+                matvar_t* x_var = getStructField(frame_var, "x", 0);
+                matvar_t* y_var = getStructField(frame_var, "y", 0);
+                matvar_t* z_var = getStructField(frame_var, "z", 0);
 
-                combined.Points3D[frame].x.resize(nPoints);
-                combined.Points3D[frame].y.resize(nPoints);
-                combined.Points3D[frame].z.resize(nPoints);
+                if (!x_var || !y_var || !z_var ||
+                    x_var->class_type != MAT_C_DOUBLE || !x_var->data ||
+                    y_var->class_type != MAT_C_DOUBLE || !y_var->data ||
+                    z_var->class_type != MAT_C_DOUBLE || !z_var->data) {
+                    continue;
+                }
 
-                for (size_t i = 0; i < nPoints; ++i) {
-                    combined.Points3D[frame].x[i] = pts_data[i];
-                    combined.Points3D[frame].y[i] = pts_data[i + nPoints];
-                    combined.Points3D[frame].z[i] = pts_data[i + 2 * nPoints];
+                combined.Points3D[frame].x = readDoubleArray(x_var);
+                combined.Points3D[frame].y = readDoubleArray(y_var);
+                combined.Points3D[frame].z = readDoubleArray(z_var);
+
+                // Optional consistency check
+                if (combined.Points3D[frame].x.size() != combined.Points3D[frame].y.size() ||
+                    combined.Points3D[frame].x.size() != combined.Points3D[frame].z.size()) {
+                    std::cerr << "Warning: inconsistent x/y/z sizes in Points3D frame "
+                            << frame << " in " << mat_path << '\n';
+
+                    combined.Points3D[frame].x.clear();
+                    combined.Points3D[frame].y.clear();
+                    combined.Points3D[frame].z.clear();
+                }
+            }
+        }
+    }
+
+    // corrComb (cell array: each cell is Nx1 double vector, one per frame)
+    if (matvar_t* corr_var = getStructField(dic3d_var.get(), "corrComb", 0)) {
+        if (corr_var->class_type == MAT_C_CELL) {
+            const size_t nFrames = getCellArraySize(corr_var);
+            combined.corrComb.resize(nFrames);
+            for (size_t frame = 0; frame < nFrames; ++frame) {
+                matvar_t* cell = Mat_VarGetCell(corr_var, frame);
+                if (cell && cell->class_type == MAT_C_DOUBLE && cell->data) {
+                    combined.corrComb[frame] = readDoubleArray(cell);
+                }
+            }
+        }
+    }
+
+    // FaceCorrComb (cell array: each cell is Mx1 double vector, one per frame)
+    if (matvar_t* face_corr_var = getStructField(dic3d_var.get(), "FaceCorrComb", 0)) {
+        if (face_corr_var->class_type == MAT_C_CELL) {
+            const size_t nFrames = getCellArraySize(face_corr_var);
+            combined.FaceCorrComb.resize(nFrames);
+            for (size_t frame = 0; frame < nFrames; ++frame) {
+                matvar_t* cell = Mat_VarGetCell(face_corr_var, frame);
+                if (cell && cell->class_type == MAT_C_DOUBLE && cell->data) {
+                    combined.FaceCorrComb[frame] = readDoubleArray(cell);
+                }
+            }
+        }
+    }
+
+    // FaceCentroids (cell array: each cell is Mx3 double matrix, stored flat as Mx3)
+    if (matvar_t* fc_var = getStructField(dic3d_var.get(), "FaceCentroids", 0)) {
+        if (fc_var->class_type == MAT_C_CELL) {
+            const size_t nFrames = getCellArraySize(fc_var);
+            combined.FaceCentroids.resize(nFrames);
+            for (size_t frame = 0; frame < nFrames; ++frame) {
+                matvar_t* cell = Mat_VarGetCell(fc_var, frame);
+                if (cell && cell->class_type == MAT_C_DOUBLE && cell->data && cell->rank >= 2) {
+                    // Mx3 matrix stored column-major in MATLAB, read as flat row-major
+                    size_t nRows = cell->dims[0];
+                    size_t nCols = cell->dims[1];
+                    const double* d = static_cast<const double*>(cell->data);
+                    combined.FaceCentroids[frame].resize(nRows * nCols);
+                    for (size_t r = 0; r < nRows; ++r) {
+                        for (size_t c = 0; c < nCols; ++c) {
+                            combined.FaceCentroids[frame][r * nCols + c] = d[c * nRows + r];
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Disp (struct with DispVec and DispMgn cell arrays)
+    if (matvar_t* disp_var = getStructField(dic3d_var.get(), "Disp", 0)) {
+        if (disp_var->class_type == MAT_C_STRUCT) {
+            // DispVec: cell array, each cell is Nx3 double matrix
+            if (matvar_t* dv_var = getStructField(disp_var, "DispVec", 0)) {
+                if (dv_var->class_type == MAT_C_CELL) {
+                    const size_t nFrames = getCellArraySize(dv_var);
+                    combined.Disp.DispVec.resize(nFrames);
+                    for (size_t frame = 0; frame < nFrames; ++frame) {
+                        matvar_t* cell = Mat_VarGetCell(dv_var, frame);
+                        if (cell && cell->class_type == MAT_C_DOUBLE && cell->data && cell->rank >= 2) {
+                            size_t nRows = cell->dims[0];
+                            size_t nCols = cell->dims[1];
+                            const double* d = static_cast<const double*>(cell->data);
+                            combined.Disp.DispVec[frame].resize(nRows * nCols);
+                            for (size_t r = 0; r < nRows; ++r) {
+                                for (size_t c = 0; c < nCols; ++c) {
+                                    combined.Disp.DispVec[frame][r * nCols + c] = d[c * nRows + r];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // DispMgn: cell array, each cell is Nx1 double vector
+            if (matvar_t* dm_var = getStructField(disp_var, "DispMgn", 0)) {
+                if (dm_var->class_type == MAT_C_CELL) {
+                    const size_t nFrames = getCellArraySize(dm_var);
+                    combined.Disp.DispMgn.resize(nFrames);
+                    for (size_t frame = 0; frame < nFrames; ++frame) {
+                        matvar_t* cell = Mat_VarGetCell(dm_var, frame);
+                        if (cell && cell->class_type == MAT_C_DOUBLE && cell->data) {
+                            combined.Disp.DispMgn[frame] = readDoubleArray(cell);
+                        }
+                    }
                 }
             }
         }
@@ -615,17 +761,17 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
 
     // FacePairInds / PointPairInds
     if (matvar_t* facepair_var = getStructField(dic3d_var.get(), "FacePairInds", 0)) {
-        if (facepair_var->class_type == MAT_C_DOUBLE && facepair_var->data) {
+        if (facepair_var->data) {
             const size_t n = facepair_var->dims[0];
-            const double* data = static_cast<const double*>(facepair_var->data);
+            const int* data = static_cast<const int*>(facepair_var->data);
             combined.FacePairInds.assign(data, data + n);
         }
     }
 
     if (matvar_t* pointpair_var = getStructField(dic3d_var.get(), "PointPairInds", 0)) {
-        if (pointpair_var->class_type == MAT_C_DOUBLE && pointpair_var->data) {
+        if (pointpair_var->data) {
             const size_t n = pointpair_var->dims[0];
-            const double* data = static_cast<const double*>(pointpair_var->data);
+            const int* data = static_cast<const int*>(pointpair_var->data);
             combined.PointPairInds.assign(data, data + n);
         }
     }

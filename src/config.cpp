@@ -286,6 +286,14 @@ bool Config::loadFromDicParamsFile(const std::string& filepath) {
         } else if (!(value = parseConfigValue(line, "step_f_initial_seed")).empty()) {
             step_f.initial_seed = parseIntList(value);
         }
+        // Step F specific parameters (deformation analysis)
+        else if (!(value = parseConfigValue(line, "step_f_temporal_filtering")).empty()) {
+            step_f_temporal_filtering = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "step_f_freq_filt")).empty()) {
+            step_f_freq_filt = std::stod(value);
+        } else if (!(value = parseConfigValue(line, "step_f_compute_rbm")).empty()) {
+            step_f_compute_rbm = parseBool(value);
+        }
     }
     
     file.close();
