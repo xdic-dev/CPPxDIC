@@ -8,212 +8,374 @@
 #include <sstream>
 #include <cstring>
 #include <algorithm>
+#include <cstdint>
 
 namespace cppxdic {
+
+// ============================================================================
+// RAII convenience helpers
+// ============================================================================
+
+MatReader::MatFilePtr MatReader::openMat(const std::string& path) {
+    return MatFilePtr(Mat_Open(path.c_str(), MAT_ACC_RDONLY));
+}
+
+MatReader::MatVarPtr MatReader::readVar(mat_t* matfp, const std::string& name) {
+    if (!matfp) return MatVarPtr{};
+    return MatVarPtr(Mat_VarRead(matfp, name.c_str()));
+}
+
+MatReader::MatVarPtr MatReader::readFirstVar(mat_t* matfp) {
+    if (!matfp) return MatVarPtr{};
+    return MatVarPtr(Mat_VarRead(matfp, nullptr));
+}
+
+// ============================================================================
+// Internal helpers
+// ============================================================================
+
+matvar_t* MatReader::getStructField(matvar_t* s, const char* field, size_t index) noexcept {
+    if (!s || s->class_type != MAT_C_STRUCT) return nullptr;
+    return Mat_VarGetStructFieldByName(s, field, index);
+}
+
+bool MatReader::readTopInt(mat_t* matfp, const char* name, int& out) noexcept {
+    out = 0;
+    MatVarPtr v(Mat_VarRead(matfp, name));
+    if (!v || !v->data) return false;
+    out = static_cast<int>(readScalar(v.get()));
+    return true;
+}
+
+bool MatReader::readTopDouble(mat_t* matfp, const char* name, double& out) noexcept {
+    out = 0.0;
+    MatVarPtr v(Mat_VarRead(matfp, name));
+    if (!v || !v->data) return false;
+    out = readScalar(v.get());
+    return true;
+}
+
+bool MatReader::readTopString(mat_t* matfp, const char* name, std::string& out) {
+    out.clear();
+    MatVarPtr v(Mat_VarRead(matfp, name));
+    if (!v || !v->data) return false;
+    out = readString(v.get());
+    return true;
+}
+
+bool MatReader::readStructInt(matvar_t* s, const char* field, int& out, size_t index) noexcept {
+    out = 0;
+    matvar_t* f = getStructField(s, field, index);
+    if (!f || !f->data) return false;
+    out = static_cast<int>(readScalar(f));
+    return true;
+}
+
+bool MatReader::readStructDouble(matvar_t* s, const char* field, double& out, size_t index) noexcept {
+    out = 0.0;
+    matvar_t* f = getStructField(s, field, index);
+    if (!f || !f->data) return false;
+    out = readScalar(f);
+    return true;
+}
+
+bool MatReader::readStructBool(matvar_t* s, const char* field, bool& out, size_t index) noexcept {
+    out = false;
+    matvar_t* f = getStructField(s, field, index);
+    if (!f || !f->data) return false;
+    out = static_cast<int>(readScalar(f)) != 0;
+    return true;
+}
+
+bool MatReader::readStructString(matvar_t* s, const char* field, std::string& out, size_t index) {
+    out.clear();
+    matvar_t* f = getStructField(s, field, index);
+    if (!f || !f->data) return false;
+    out = readString(f);
+    return true;
+}
+
+// ============================================================================
+// DLT Calibration Loading
+// ============================================================================
+
+bool MatReader::loadDLTCalibration(const std::string& mat_path, DLTCalibrationData& calib) {
+    auto matfp = openMat(mat_path);
+    if (!matfp) {
+        std::cerr << "Failed to open DLT calibration file: " << mat_path << '\n';
+        return false;
+    }
+
+    auto dlt_var = readVar(matfp.get(), "DLTstructCam");
+    if (!dlt_var || dlt_var->class_type != MAT_C_STRUCT) {
+        std::cerr << "Variable 'DLTstructCam' not found or not a struct in " << mat_path << '\n';
+        return false;
+    }
+
+    calib.filePath = mat_path;
+
+    // DLTparams (float64 1d array, 11 elements)
+    if (matvar_t* f = getStructField(dlt_var.get(), "DLTparams", 0)) {
+        calib.DLTparams = readDoubleArray(f);
+    }
+    if (calib.DLTparams.size() != 11) {
+        std::cerr << "DLTparams has " << calib.DLTparams.size() << " elements (expected 11) in " << mat_path << '\n';
+        return false;
+    }
+
+    // indCam (int scalar)
+    readStructInt(dlt_var.get(), "indCam", calib.indCam);
+
+    // imageCentroids (float64 Nx2, column-major in MATLAB)
+    if (matvar_t* f = getStructField(dlt_var.get(), "imageCentroids", 0)) {
+        if (f->data && f->class_type == MAT_C_DOUBLE && f->rank >= 2) {
+            size_t rows = f->dims[0];
+            size_t cols = f->dims[1];
+            calib.imageCentroids_rows = rows;
+            const double* d = static_cast<const double*>(f->data);
+            // Convert column-major to row-major (Nx2)
+            calib.imageCentroids.resize(rows * cols);
+            for (size_t r = 0; r < rows; ++r) {
+                for (size_t c = 0; c < cols; ++c) {
+                    calib.imageCentroids[r * cols + c] = d[c * rows + r];
+                }
+            }
+        }
+    }
+
+    // columns (uint8 1d array)
+    if (matvar_t* f = getStructField(dlt_var.get(), "columns", 0)) {
+        if (f->data) {
+            size_t n = 1;
+            for (int i = 0; i < f->rank; ++i) n *= f->dims[i];
+            if (f->class_type == MAT_C_UINT8) {
+                const uint8_t* d = static_cast<const uint8_t*>(f->data);
+                calib.columns.assign(d, d + n);
+            } else if (f->class_type == MAT_C_DOUBLE) {
+                const double* d = static_cast<const double*>(f->data);
+                calib.columns.resize(n);
+                for (size_t i = 0; i < n; ++i) calib.columns[i] = static_cast<uint8_t>(d[i]);
+            }
+        }
+    }
+
+    // C3Dtrue (float64 3d array dim0 x dim1 x 3, column-major)
+    if (matvar_t* f = getStructField(dlt_var.get(), "C3Dtrue", 0)) {
+        if (f->data && f->class_type == MAT_C_DOUBLE && f->rank >= 3) {
+            size_t d0 = f->dims[0];
+            size_t d1 = f->dims[1];
+            size_t d2 = f->dims[2];  // should be 3
+            calib.C3Dtrue_dim0 = d0;
+            calib.C3Dtrue_dim1 = d1;
+            const double* src = static_cast<const double*>(f->data);
+            // Convert column-major (d0 x d1 x d2) to row-major
+            calib.C3Dtrue.resize(d0 * d1 * d2);
+            for (size_t k = 0; k < d2; ++k) {
+                for (size_t j = 0; j < d1; ++j) {
+                    for (size_t i = 0; i < d0; ++i) {
+                        calib.C3Dtrue[(i * d1 + j) * d2 + k] = src[k * d1 * d0 + j * d0 + i];
+                    }
+                }
+            }
+        }
+    }
+
+    std::cout << "Loaded DLT calibration: cam " << calib.indCam
+              << ", " << calib.DLTparams.size() << " DLT params"
+              << ", " << calib.imageCentroids_rows << " centroids"
+              << " from " << mat_path << '\n';
+
+    return true;
+}
 
 // ============================================================================
 // Protocol Loading
 // ============================================================================
 
 bool MatReader::loadProtocol(const std::string& protocol_path, ProtocolFileData& protocol) {
-    mat_t* matfp = Mat_Open(protocol_path.c_str(), MAT_ACC_RDONLY);
+    auto matfp = openMat(protocol_path);
     if (!matfp) {
-        std::cerr << "Failed to open protocol file: " << protocol_path << std::endl;
+        std::cerr << "Failed to open protocol file: " << protocol_path << '\n';
         return false;
     }
-    
-    bool success = false;
-    
-    // Read 'cond' structure
-    matvar_t* cond_var = Mat_VarRead(matfp, "cond");
+
+    // Read 'cond' structure (or fallback to 'protocol')
+    MatVarPtr cond_var(Mat_VarRead(matfp.get(), "cond"));
     if (!cond_var) {
-        // Try alternative name 'protocol'
-        cond_var = Mat_VarRead(matfp, "protocol");
+        cond_var.reset(Mat_VarRead(matfp.get(), "protocol"));
     }
-    
-    if (cond_var && cond_var->class_type == MAT_C_STRUCT) {
-        // Read titles field (cell array of strings)
-        matvar_t* titles_var = Mat_VarGetStructFieldByName(cond_var, "titles", 0);
-        if (titles_var && titles_var->class_type == MAT_C_CELL) {
+
+    if (!cond_var || cond_var->class_type != MAT_C_STRUCT) {
+        return false;
+    }
+
+    // Read titles field (cell array of strings)
+    if (matvar_t* titles_var = getStructField(cond_var.get(), "titles", 0)) {
+        if (titles_var->class_type == MAT_C_CELL) {
             protocol.titles = readCellStrings(titles_var);
         }
-        
-        // Read table field
-        matvar_t* table_var = Mat_VarGetStructFieldByName(cond_var, "table", 0);
-        if (table_var && table_var->class_type == MAT_C_CELL) {
-            size_t n_trials = table_var->dims[0];
-            size_t n_fields = table_var->dims[1];
-            
-            protocol.n_trials = n_trials;
-            protocol.n_fields = n_fields;
-            
-            // Find column indices for important fields
-            int dir_idx = -1, nf_idx = -1, spd_idx = -1, rep_idx = -1;
-            for (size_t i = 0; i < protocol.titles.size(); ++i) {
-                if (protocol.titles[i] == "dir") dir_idx = i;
-                else if (protocol.titles[i] == "nf") nf_idx = i;
-                else if (protocol.titles[i] == "spd") spd_idx = i;
-                else if (protocol.titles[i] == "rep") rep_idx = i;
-            }
-            
-            // Read trial data
-            for (size_t trial = 0; trial < n_trials; ++trial) {
-                ProtocolFileData::TrialEntry info;
-                info.trial_number = trial + 1;  // 1-based indexing
-                
-                // Read direction
-                if (dir_idx >= 0) {
-                    matvar_t* cell = Mat_VarGetCell(table_var, trial * n_fields + dir_idx);
-                    if (cell) {
-                        if (cell->class_type == MAT_C_CHAR) {
-                            info.direction = std::string(static_cast<char*>(cell->data), cell->nbytes);
-                            // Remove trailing spaces
-                            info.direction.erase(info.direction.find_last_not_of(" \t\n\r") + 1);
-                        }
-                    }
-                }
-                
-                // Read force
-                if (nf_idx >= 0) {
-                    matvar_t* cell = Mat_VarGetCell(table_var, trial * n_fields + nf_idx);
-                    if (cell && cell->class_type == MAT_C_DOUBLE) {
-                        info.force = *static_cast<double*>(cell->data);
-                    }
-                }
-                
-                // Read speed
-                if (spd_idx >= 0) {
-                    matvar_t* cell = Mat_VarGetCell(table_var, trial * n_fields + spd_idx);
-                    if (cell && cell->class_type == MAT_C_DOUBLE) {
-                        info.speed = *static_cast<double*>(cell->data);
-                    }
-                }
-                
-                // Read repetition
-                if (rep_idx >= 0) {
-                    matvar_t* cell = Mat_VarGetCell(table_var, trial * n_fields + rep_idx);
-                    if (cell && cell->class_type == MAT_C_DOUBLE) {
-                        info.repetition = static_cast<int>(*static_cast<double*>(cell->data));
-                    }
-                }
-                
-                protocol.trials.push_back(info);
+    }
+
+    // Read table field
+    matvar_t* table_var = getStructField(cond_var.get(), "table", 0);
+    if (!table_var || table_var->class_type != MAT_C_CELL || table_var->rank < 2) {
+        return false;
+    }
+
+    const size_t n_trials = table_var->dims[0];
+    const size_t n_fields = table_var->dims[1];
+
+    protocol.n_trials = n_trials;
+    protocol.n_fields = n_fields;
+    protocol.trials.clear();
+    protocol.trials.reserve(n_trials);
+
+    // Find column indices for important fields
+    int dir_idx = -1, nf_idx = -1, spd_idx = -1, rep_idx = -1;
+    for (size_t i = 0; i < protocol.titles.size(); ++i) {
+        if (protocol.titles[i] == "dir") dir_idx = static_cast<int>(i);
+        else if (protocol.titles[i] == "nf") nf_idx = static_cast<int>(i);
+        else if (protocol.titles[i] == "spd") spd_idx = static_cast<int>(i);
+        else if (protocol.titles[i] == "rep") rep_idx = static_cast<int>(i);
+    }
+
+    // Read trial data
+    for (size_t trial = 0; trial < n_trials; ++trial) {
+        ProtocolFileData::TrialEntry info{};
+        info.trial_number = static_cast<int>(trial + 1);
+
+        auto readCellAt = [&](size_t col) -> matvar_t* {
+            // Mat_VarGetCell uses linear index = row + col*rows for MATLAB-style 2D cells.
+            // Your prior code used trial*n_fields + col (row-major). That *can* be wrong depending on matio layout.
+            // To be safe, use matio’s Mat_VarGetCell with MATLAB linear indexing:
+            // idx = trial + col*n_trials
+            const size_t idx = trial + col * n_trials;
+            return Mat_VarGetCell(table_var, idx);
+        };
+
+        // direction
+        if (dir_idx >= 0) {
+            matvar_t* cell = readCellAt(static_cast<size_t>(dir_idx));
+            if (cell && cell->class_type == MAT_C_CHAR && cell->data) {
+                std::string s(static_cast<char*>(cell->data), cell->nbytes);
+                s.erase(s.find_last_not_of(" \t\n\r") + 1);
+                info.direction = std::move(s);
             }
         }
-        
-        Mat_VarFree(cond_var);
-        success = true;
+
+        // force
+        if (nf_idx >= 0) {
+            matvar_t* cell = readCellAt(static_cast<size_t>(nf_idx));
+            if (cell && cell->class_type == MAT_C_DOUBLE && cell->data) {
+                info.force = *static_cast<double*>(cell->data);
+            }
+        }
+
+        // speed
+        if (spd_idx >= 0) {
+            matvar_t* cell = readCellAt(static_cast<size_t>(spd_idx));
+            if (cell && cell->class_type == MAT_C_DOUBLE && cell->data) {
+                info.speed = *static_cast<double*>(cell->data);
+            }
+        }
+
+        // repetition
+        if (rep_idx >= 0) {
+            matvar_t* cell = readCellAt(static_cast<size_t>(rep_idx));
+            if (cell && cell->class_type == MAT_C_DOUBLE && cell->data) {
+                info.repetition = static_cast<int>(*static_cast<double*>(cell->data));
+            }
+        }
+
+        protocol.trials.push_back(std::move(info));
     }
-    
-    Mat_Close(matfp);
-    return success;
+
+    return true; // matfp auto-closed
 }
 
 std::vector<std::string> MatReader::readCellStrings(matvar_t* cell_var) {
     std::vector<std::string> strings;
-    
-    if (!cell_var || cell_var->class_type != MAT_C_CELL) {
-        return strings;
-    }
-    
-    size_t n_cells = 1;
-    for (int i = 0; i < cell_var->rank; ++i) {
-        n_cells *= cell_var->dims[i];
-    }
-    
+    if (!cell_var || cell_var->class_type != MAT_C_CELL) return strings;
+
+    const size_t n_cells = getCellArraySize(cell_var);
+    strings.reserve(n_cells);
+
     for (size_t i = 0; i < n_cells; ++i) {
         matvar_t* cell = Mat_VarGetCell(cell_var, i);
-        if (cell && cell->class_type == MAT_C_CHAR) {
+        if (cell && cell->class_type == MAT_C_CHAR && cell->data) {
             std::string str(static_cast<char*>(cell->data), cell->nbytes);
-            // Remove trailing spaces
             str.erase(str.find_last_not_of(" \t\n\r") + 1);
-            strings.push_back(str);
+            strings.push_back(std::move(str));
         } else {
-            strings.push_back("");  // Empty string for non-string cells
+            strings.emplace_back();
         }
     }
-    
     return strings;
 }
 
-matvar_t* MatReader::readStructField(mat_t* matfp, 
-                                     const std::string& struct_name,
-                                     const std::string& field_name) {
+// ============================================================================
+// Struct field readers (legacy raw-pointer API preserved)
+// ============================================================================
+
+matvar_t* MatReader::readStructField(mat_t* matfp,
+                                    const std::string& struct_name,
+                                    const std::string& field_name) {
     if (!matfp) return nullptr;
-    
-    // Read struct variable
-    matvar_t* struct_var = Mat_VarRead(matfp, struct_name.c_str());
-    if (!struct_var || struct_var->class_type != MAT_C_STRUCT) {
-        if (struct_var) Mat_VarFree(struct_var);
-        return nullptr;
-    }
-    
-    // Get field
-    matvar_t* field = Mat_VarGetStructFieldByName(struct_var, field_name.c_str(), 0);
-    matvar_t* result = nullptr;
-    if (field) {
-        result = Mat_VarDuplicate(field, 1);  // Deep copy
-    }
-    
-    Mat_VarFree(struct_var);
-    return result;
+
+    MatVarPtr struct_var(Mat_VarRead(matfp, struct_name.c_str()));
+    if (!struct_var || struct_var->class_type != MAT_C_STRUCT) return nullptr;
+
+    matvar_t* field = Mat_VarGetStructFieldByName(struct_var.get(), field_name.c_str(), 0);
+    if (!field) return nullptr;
+
+    // Deep copy, caller frees
+    return Mat_VarDuplicate(field, 1);
 }
 
 matvar_t* MatReader::readNestedField(mat_t* matfp, const std::string& path) {
     if (!matfp) return nullptr;
-    
+
     // Split path by '.'
     std::vector<std::string> parts;
     std::istringstream iss(path);
     std::string part;
-    while (std::getline(iss, part, '.')) {
-        parts.push_back(part);
-    }
-    
+    while (std::getline(iss, part, '.')) parts.push_back(part);
     if (parts.empty()) return nullptr;
-    
-    // Read root variable
-    matvar_t* current = Mat_VarRead(matfp, parts[0].c_str());
+
+    MatVarPtr current(Mat_VarRead(matfp, parts[0].c_str()));
     if (!current) return nullptr;
-    
-    // Navigate through nested fields
+
     for (size_t i = 1; i < parts.size(); ++i) {
-        if (current->class_type != MAT_C_STRUCT) {
-            Mat_VarFree(current);
-            return nullptr;
-        }
-        
-        matvar_t* field = Mat_VarGetStructFieldByName(current, parts[i].c_str(), 0);
-        if (!field) {
-            Mat_VarFree(current);
-            return nullptr;
-        }
-        
-        matvar_t* temp = Mat_VarDuplicate(field, 1);
-        Mat_VarFree(current);
-        current = temp;
+        if (current->class_type != MAT_C_STRUCT) return nullptr;
+
+        matvar_t* field = Mat_VarGetStructFieldByName(current.get(), parts[i].c_str(), 0);
+        if (!field) return nullptr;
+
+        MatVarPtr next(Mat_VarDuplicate(field, 1)); // deep copy
+        current.swap(next);
     }
-    
-    return current;
+
+    return current.release(); // legacy API
 }
+
+// ============================================================================
+// Primitive readers (kept mostly as-is, small safety tweaks)
+// ============================================================================
 
 std::vector<double> MatReader::readDoubleArray(matvar_t* var) {
     std::vector<double> result;
     if (!var || !var->data) return result;
-    
+
     if (var->class_type != MAT_C_DOUBLE) {
-        std::cerr << "Warning: Variable is not double type" << std::endl;
+        std::cerr << "Warning: Variable is not double type\n";
         return result;
     }
-    
+
     size_t n_elements = 1;
-    for (int i = 0; i < var->rank; ++i) {
-        n_elements *= var->dims[i];
-    }
-    
+    for (int i = 0; i < var->rank; ++i) n_elements *= var->dims[i];
+
     const double* data = static_cast<const double*>(var->data);
     result.assign(data, data + n_elements);
-    
     return result;
 }
 
@@ -221,259 +383,227 @@ std::vector<double> MatReader::readDouble2DArray(matvar_t* var, size_t& rows, si
     std::vector<double> result;
     rows = 0;
     cols = 0;
-    
+
     if (!var || !var->data || var->rank < 2) return result;
-    
+
     if (var->class_type != MAT_C_DOUBLE) {
-        std::cerr << "Warning: Variable is not double type" << std::endl;
+        std::cerr << "Warning: Variable is not double type\n";
         return result;
     }
-    
+
     rows = var->dims[0];
     cols = var->dims[1];
-    
+
     const double* data = static_cast<const double*>(var->data);
-    size_t n_elements = rows * cols;
-    
-    // MATLAB stores in column-major, convert to row-major
+    const size_t n_elements = rows * cols;
+
+    // MATLAB column-major -> row-major
     result.resize(n_elements);
     for (size_t r = 0; r < rows; ++r) {
         for (size_t c = 0; c < cols; ++c) {
             result[r * cols + c] = data[c * rows + r];
         }
     }
-    
     return result;
 }
 
 cv::Mat MatReader::readImage(matvar_t* var) {
     if (!var || !var->data) return cv::Mat();
-    
+
     if (var->rank != 2) {
-        std::cerr << "Warning: Expected 2D array for image" << std::endl;
+        std::cerr << "Warning: Expected 2D array for image\n";
         return cv::Mat();
     }
-    
-    size_t rows = var->dims[0];
-    size_t cols = var->dims[1];
-    
-    cv::Mat img;
-    
+
+    const size_t rows = var->dims[0];
+    const size_t cols = var->dims[1];
+
     if (var->class_type == MAT_C_DOUBLE) {
         const double* data = static_cast<const double*>(var->data);
-        img = cv::Mat(rows, cols, CV_64F);
-        
-        // Convert from column-major (MATLAB) to row-major (OpenCV)
+        cv::Mat img(rows, cols, CV_64F);
         for (size_t r = 0; r < rows; ++r) {
             for (size_t c = 0; c < cols; ++c) {
                 img.at<double>(r, c) = data[c * rows + r];
             }
         }
-    } else if (var->class_type == MAT_C_UINT8) {
+        return img;
+    }
+
+    if (var->class_type == MAT_C_UINT8) {
         const uint8_t* data = static_cast<const uint8_t*>(var->data);
-        img = cv::Mat(rows, cols, CV_8U);
-        
-        // Check if this is a MATLAB logical array (values are 0 and 1)
-        bool is_logical = (var->isLogical != 0);
-        
+        cv::Mat img(rows, cols, CV_8U);
+
+        const bool is_logical = (var->isLogical != 0);
         for (size_t r = 0; r < rows; ++r) {
             for (size_t c = 0; c < cols; ++c) {
-                uint8_t value = data[c * rows + r];
-                // Scale logical values (0,1) to image values (0,255) for proper visualization and processing
+                const uint8_t value = data[c * rows + r];
                 img.at<uint8_t>(r, c) = is_logical ? (value * 255) : value;
             }
         }
-    } else {
-        std::cerr << "Warning: Unsupported image data type" << std::endl;
-        return cv::Mat();
+        return img;
     }
-    
-    return img;
+
+    std::cerr << "Warning: Unsupported image data type\n";
+    return cv::Mat();
 }
 
 double MatReader::readScalar(matvar_t* var) {
     if (!var || !var->data) return 0.0;
-    
+
     if (var->class_type == MAT_C_DOUBLE) {
-        const double* data = static_cast<const double*>(var->data);
-        return data[0];
-    } else if (var->class_type == MAT_C_INT32) {
-        const int32_t* data = static_cast<const int32_t*>(var->data);
-        return static_cast<double>(data[0]);
-    } else if (var->class_type == MAT_C_UINT8) {
-        const uint8_t* data = static_cast<const uint8_t*>(var->data);
-        return static_cast<double>(data[0]);
+        return static_cast<const double*>(var->data)[0];
     }
-    
-    std::cerr << "Warning: Unsupported scalar type" << std::endl;
+    if (var->class_type == MAT_C_INT32) {
+        return static_cast<double>(static_cast<const int32_t*>(var->data)[0]);
+    }
+    if (var->class_type == MAT_C_UINT8) {
+        return static_cast<double>(static_cast<const uint8_t*>(var->data)[0]);
+    }
+
+    std::cerr << "Warning: Unsupported scalar type\n";
     return 0.0;
 }
 
 std::string MatReader::readString(matvar_t* var) {
     if (!var || !var->data) return "";
-    
+
+    size_t len = 1;
+    for (int i = 0; i < var->rank; ++i) len *= var->dims[i];
+
     if (var->class_type == MAT_C_CHAR) {
-        const char* data = static_cast<const char*>(var->data);
-        size_t len = 1;
-        for (int i = 0; i < var->rank; ++i) {
-            len *= var->dims[i];
-        }
-        return std::string(data, len);
-    } else if (var->class_type == MAT_C_UINT16) {
-        // MATLAB often stores strings as uint16
-        const uint16_t* data = static_cast<const uint16_t*>(var->data);
-        size_t len = 1;
-        for (int i = 0; i < var->rank; ++i) {
-            len *= var->dims[i];
-        }
-        std::string result;
-        for (size_t i = 0; i < len; ++i) {
-            result += static_cast<char>(data[i]);
-        }
-        return result;
+        return std::string(static_cast<const char*>(var->data), len);
     }
-    
-    std::cerr << "Warning: Unsupported string type" << std::endl;
+
+    if (var->class_type == MAT_C_UINT16) {
+        const uint16_t* data = static_cast<const uint16_t*>(var->data);
+        std::string out;
+        out.reserve(len);
+        for (size_t i = 0; i < len; ++i) out.push_back(static_cast<char>(data[i]));
+        return out;
+    }
+
+    std::cerr << "Warning: Unsupported string type\n";
     return "";
 }
 
 size_t MatReader::getCellArraySize(matvar_t* var) {
     if (!var || var->class_type != MAT_C_CELL) return 0;
-    
+
     size_t n_cells = 1;
-    for (int i = 0; i < var->rank; ++i) {
-        n_cells *= var->dims[i];
-    }
-    
+    for (int i = 0; i < var->rank; ++i) n_cells *= var->dims[i];
     return n_cells;
 }
 
 matvar_t* MatReader::getCellElement(matvar_t* var, size_t index) {
     if (!var || var->class_type != MAT_C_CELL) return nullptr;
-    
-    size_t n_cells = getCellArraySize(var);
+    const size_t n_cells = getCellArraySize(var);
     if (index >= n_cells) return nullptr;
-    
-    matvar_t** cells = static_cast<matvar_t**>(var->data);
-    return cells[index];
+
+    // Safer than peeking into var->data:
+    return Mat_VarGetCell(var, index);
 }
+
+// ============================================================================
+// Higher-level readers
+// ============================================================================
 
 std::map<std::string, double> MatReader::readDispInfo(mat_t* matfp) {
     std::map<std::string, double> params;
-    
     if (!matfp) return params;
-    
-    // Try to read from data_dic_save.dispinfo
-    matvar_t* dispinfo = readNestedField(matfp, "data_dic_save.dispinfo");
-    if (!dispinfo || dispinfo->class_type != MAT_C_STRUCT) {
-        if (dispinfo) Mat_VarFree(dispinfo);
-        return params;
-    }
-    
-    // Read common dispinfo fields
-    std::vector<std::string> field_names = {
+
+    MatVarPtr dispinfo(readNestedField(matfp, "data_dic_save.dispinfo"));
+    if (!dispinfo || dispinfo->class_type != MAT_C_STRUCT) return params;
+
+    const std::vector<std::string> field_names = {
         "cutoff_corrcoef", "cutoff_diffnorm", "cutoff_iteration",
         "radius", "spacing", "subsettrunc", "total_threads"
     };
-    
+
     for (const auto& field : field_names) {
-        matvar_t* field_var = Mat_VarGetStructFieldByName(dispinfo, field.c_str(), 0);
+        matvar_t* field_var = Mat_VarGetStructFieldByName(dispinfo.get(), field.c_str(), 0);
         if (field_var && field_var->data) {
-            double value = readScalar(field_var);
-            params[field] = value;
+            params[field] = readScalar(field_var);
         }
     }
-    
-    Mat_VarFree(dispinfo);
+
     return params;
 }
 
 bool MatReader::variableExists(mat_t* matfp, const std::string& var_name) {
     if (!matfp) return false;
-    
-    matvar_t* var = Mat_VarRead(matfp, var_name.c_str());
-    if (var) {
-        Mat_VarFree(var);
-        return true;
-    }
-    
-    return false;
+    MatVarPtr var(Mat_VarRead(matfp, var_name.c_str()));
+    return static_cast<bool>(var);
 }
 
 cv::Mat MatReader::readROIMask(const std::string& mat_path, const std::string& var_name) {
-    mat_t* matfp = Mat_Open(mat_path.c_str(), MAT_ACC_RDONLY);
+    auto matfp = openMat(mat_path);
     if (!matfp) {
-        std::cerr << "Failed to open MAT file: " << mat_path << std::endl;
+        std::cerr << "Failed to open MAT file: " << mat_path << '\n';
         return cv::Mat();
     }
-    
-    matvar_t* var = Mat_VarRead(matfp, var_name.c_str());
-    cv::Mat mask;
-    
-    if (var) {
-        mask = readImage(var);
-        Mat_VarFree(var);
-    } else {
-        std::cerr << "Variable '" << var_name << "' not found in " << mat_path << std::endl;
+
+    auto var = readVar(matfp.get(), var_name);
+    if (!var) {
+        std::cerr << "Variable '" << var_name << "' not found in " << mat_path << '\n';
+        return cv::Mat();
     }
-    
-    Mat_Close(matfp);
-    return mask;
+
+    return readImage(var.get());
 }
 
 bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& combined) {
-    mat_t* matfp = Mat_Open(mat_path.c_str(), MAT_ACC_RDONLY);
+    auto matfp = openMat(mat_path);
     if (!matfp) {
-        std::cerr << "Failed to open MAT file: " << mat_path << std::endl;
+        std::cerr << "Failed to open MAT file: " << mat_path << '\n';
         return false;
     }
-    
-    // Read the main structure (usually just the variable itself, not nested)
-    matvar_t* dic3d_var = Mat_VarRead(matfp, nullptr);  // Read first variable
+
+    // Read first variable, else try common names
+    MatVarPtr dic3d_var = readFirstVar(matfp.get());
     if (!dic3d_var) {
-        // Try common variable names
         const char* var_names[] = {"DIC3Dcombined", "DIC3D", "data"};
         for (const char* name : var_names) {
-            dic3d_var = Mat_VarRead(matfp, name);
+            dic3d_var.reset(Mat_VarRead(matfp.get(), name));
             if (dic3d_var) break;
         }
     }
-    
+
     if (!dic3d_var || dic3d_var->class_type != MAT_C_STRUCT) {
-        std::cerr << "DIC3Dcombined structure not found in " << mat_path << std::endl;
-        if (dic3d_var) Mat_VarFree(dic3d_var);
-        Mat_Close(matfp);
+        std::cerr << "DIC3Dcombined structure not found in " << mat_path << '\n';
         return false;
     }
-    
-    // Read Faces (Nx3 matrix)
-    matvar_t* faces_var = Mat_VarGetStructFieldByName(dic3d_var, "Faces", 0);
-    if (faces_var && faces_var->class_type == MAT_C_DOUBLE) {
-        size_t nFaces = faces_var->dims[0];
-        const double* faces_data = static_cast<const double*>(faces_var->data);
-        combined.Faces.clear();
-        combined.Faces.reserve(nFaces * 3);
-        for (size_t i = 0; i < nFaces * 3; ++i) {
-            combined.Faces.push_back(static_cast<int>(faces_data[i]) - 1);  // MATLAB 1-indexed to C++ 0-indexed
+
+    // Faces (Nx3)
+    if (matvar_t* faces_var = getStructField(dic3d_var.get(), "Faces", 0)) {
+        if (faces_var->class_type == MAT_C_DOUBLE && faces_var->data && faces_var->rank >= 2) {
+            const size_t nFaces = faces_var->dims[0];
+            const double* faces_data = static_cast<const double*>(faces_var->data);
+
+            combined.Faces.clear();
+            combined.Faces.reserve(nFaces * 3);
+            for (size_t i = 0; i < nFaces * 3; ++i) {
+                combined.Faces.push_back(static_cast<int>(faces_data[i]) - 1);
+            }
         }
     }
-    
-    // Read Points3D (cell array of frames)
-    matvar_t* points3d_var = Mat_VarGetStructFieldByName(dic3d_var, "Points3D", 0);
-    if (points3d_var && points3d_var->class_type == MAT_C_CELL) {
-        size_t nFrames = points3d_var->dims[0] * points3d_var->dims[1];
-        combined.Points3D.resize(nFrames);
-        
-        for (size_t frame = 0; frame < nFrames; ++frame) {
-            matvar_t* frame_var = Mat_VarGetCell(points3d_var, frame);
-            if (frame_var && frame_var->class_type == MAT_C_DOUBLE) {
-                size_t nPoints = frame_var->dims[0];
+
+    // Points3D (cell frames)
+    if (matvar_t* points3d_var = getStructField(dic3d_var.get(), "Points3D", 0)) {
+        if (points3d_var->class_type == MAT_C_CELL) {
+            const size_t nFrames = getCellArraySize(points3d_var);
+            combined.Points3D.resize(nFrames);
+
+            for (size_t frame = 0; frame < nFrames; ++frame) {
+                matvar_t* frame_var = Mat_VarGetCell(points3d_var, frame);
+                if (!frame_var || frame_var->class_type != MAT_C_DOUBLE || !frame_var->data || frame_var->rank < 2) continue;
+
+                const size_t nPoints = frame_var->dims[0];
                 const double* pts_data = static_cast<const double*>(frame_var->data);
-                
+
                 combined.Points3D[frame].x.resize(nPoints);
                 combined.Points3D[frame].y.resize(nPoints);
                 combined.Points3D[frame].z.resize(nPoints);
-                
+
                 for (size_t i = 0; i < nPoints; ++i) {
                     combined.Points3D[frame].x[i] = pts_data[i];
                     combined.Points3D[frame].y[i] = pts_data[i + nPoints];
@@ -482,282 +612,210 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
             }
         }
     }
-    
-    // Read FacePairInds
-    matvar_t* facepair_var = Mat_VarGetStructFieldByName(dic3d_var, "FacePairInds", 0);
-    if (facepair_var && facepair_var->class_type == MAT_C_DOUBLE) {
-        size_t n = facepair_var->dims[0];
-        const double* data = static_cast<const double*>(facepair_var->data);
-        combined.FacePairInds.assign(data, data + n);
+
+    // FacePairInds / PointPairInds
+    if (matvar_t* facepair_var = getStructField(dic3d_var.get(), "FacePairInds", 0)) {
+        if (facepair_var->class_type == MAT_C_DOUBLE && facepair_var->data) {
+            const size_t n = facepair_var->dims[0];
+            const double* data = static_cast<const double*>(facepair_var->data);
+            combined.FacePairInds.assign(data, data + n);
+        }
     }
-    
-    // Read PointPairInds
-    matvar_t* pointpair_var = Mat_VarGetStructFieldByName(dic3d_var, "PointPairInds", 0);
-    if (pointpair_var && pointpair_var->class_type == MAT_C_DOUBLE) {
-        size_t n = pointpair_var->dims[0];
-        const double* data = static_cast<const double*>(pointpair_var->data);
-        combined.PointPairInds.assign(data, data + n);
+
+    if (matvar_t* pointpair_var = getStructField(dic3d_var.get(), "PointPairInds", 0)) {
+        if (pointpair_var->class_type == MAT_C_DOUBLE && pointpair_var->data) {
+            const size_t n = pointpair_var->dims[0];
+            const double* data = static_cast<const double*>(pointpair_var->data);
+            combined.PointPairInds.assign(data, data + n);
+        }
     }
-    
-    std::cout << "Loaded DIC3Dcombined: " 
+
+    std::cout << "Loaded DIC3Dcombined: "
               << combined.Points3D.size() << " frames, "
               << (combined.Points3D.empty() ? 0 : combined.Points3D[0].x.size()) << " points, "
-              << combined.Faces.size() / 3 << " faces" << std::endl;
-    
-    Mat_VarFree(dic3d_var);
-    Mat_Close(matfp);
+              << combined.Faces.size() / 3 << " faces\n";
+
     return true;
 }
 
 std::vector<int> MatReader::readIntArray(matvar_t* var) {
     std::vector<int> result;
     if (!var || !var->data) return result;
-    
+
     size_t n_elements = 1;
-    for (int i = 0; i < var->rank; ++i) {
-        n_elements *= var->dims[i];
-    }
-    
+    for (int i = 0; i < var->rank; ++i) n_elements *= var->dims[i];
+
+    result.reserve(n_elements);
+
     if (var->class_type == MAT_C_DOUBLE) {
         const double* data = static_cast<const double*>(var->data);
-        result.reserve(n_elements);
-        for (size_t i = 0; i < n_elements; ++i) {
-            result.push_back(static_cast<int>(data[i]));
-        }
-    } else if (var->class_type == MAT_C_INT32) {
+        for (size_t i = 0; i < n_elements; ++i) result.push_back(static_cast<int>(data[i]));
+        return result;
+    }
+
+    if (var->class_type == MAT_C_INT32) {
         const int32_t* data = static_cast<const int32_t*>(var->data);
         result.assign(data, data + n_elements);
-    } else if (var->class_type == MAT_C_UINT16) {
-        const uint16_t* data = static_cast<const uint16_t*>(var->data);
-        result.reserve(n_elements);
-        for (size_t i = 0; i < n_elements; ++i) {
-            result.push_back(static_cast<int>(data[i]));
-        }
-    } else if (var->class_type == MAT_C_UINT32) {
-        const uint32_t* data = static_cast<const uint32_t*>(var->data);
-        result.reserve(n_elements);
-        for (size_t i = 0; i < n_elements; ++i) {
-            result.push_back(static_cast<int>(data[i]));
-        }
+        return result;
     }
-    
+
+    if (var->class_type == MAT_C_UINT16) {
+        const uint16_t* data = static_cast<const uint16_t*>(var->data);
+        for (size_t i = 0; i < n_elements; ++i) result.push_back(static_cast<int>(data[i]));
+        return result;
+    }
+
+    if (var->class_type == MAT_C_UINT32) {
+        const uint32_t* data = static_cast<const uint32_t*>(var->data);
+        for (size_t i = 0; i < n_elements; ++i) result.push_back(static_cast<int>(data[i]));
+        return result;
+    }
+
     return result;
 }
 
+// ============================================================================
+// Updated DIC2DPairResults (top-level fields, RAII, no leaks)
+// ============================================================================
+
 bool MatReader::readDIC2DPairResults(const std::string& mat_path, DIC2DPairResults& result) {
-    mat_t* matfp = Mat_Open(mat_path.c_str(), MAT_ACC_RDONLY);
+    auto matfp = openMat(mat_path);
     if (!matfp) {
-        std::cerr << "Failed to open MAT file: " << mat_path << std::endl;
+        std::cerr << "Failed to open MAT file: " << mat_path << '\n';
         return false;
     }
-    
-    // Read the main structure - try common variable names
-    matvar_t* dic2d_var = nullptr;
-    const char* var_names[] = {"DIC2DpairResults", "DIC2D", "data"};
-    for (const char* name : var_names) {
-        dic2d_var = Mat_VarRead(matfp, name);
-        if (dic2d_var) break;
+
+    // Top-level scalars
+    readTopInt(matfp.get(), "nCamRef", result.nCamRef);
+    readTopInt(matfp.get(), "nCamDef", result.nCamDef);
+    readTopInt(matfp.get(), "nImages", result.nImages);
+
+    // ROImask
+    if (auto roi_var = readVar(matfp.get(), "ROImask")) {
+        result.ROImask = readImage(roi_var.get());
     }
-    
-    if (!dic2d_var || dic2d_var->class_type != MAT_C_STRUCT) {
-        std::cerr << "DIC2DpairResults structure not found in " << mat_path << std::endl;
-        if (dic2d_var) Mat_VarFree(dic2d_var);
-        Mat_Close(matfp);
-        return false;
-    }
-    
-    // Read scalar fields: nCamRef, nCamDef, nImages
-    matvar_t* nCamRef_var = Mat_VarGetStructFieldByName(dic2d_var, "nCamRef", 0);
-    if (nCamRef_var) {
-        result.nCamRef = static_cast<int>(readScalar(nCamRef_var));
-    }
-    
-    matvar_t* nCamDef_var = Mat_VarGetStructFieldByName(dic2d_var, "nCamDef", 0);
-    if (nCamDef_var) {
-        result.nCamDef = static_cast<int>(readScalar(nCamDef_var));
-    }
-    
-    matvar_t* nImages_var = Mat_VarGetStructFieldByName(dic2d_var, "nImages", 0);
-    if (nImages_var) {
-        result.nImages = static_cast<int>(readScalar(nImages_var));
-    }
-    
-    // Read ROImask (uint8 2D array)
-    matvar_t* roi_var = Mat_VarGetStructFieldByName(dic2d_var, "ROImask", 0);
-    if (roi_var) {
-        result.ROImask = readImage(roi_var);
-    }
-    
-    // Read Faces (Nx3 or 3xN array)
-    matvar_t* faces_var = Mat_VarGetStructFieldByName(dic2d_var, "Faces", 0);
-    if (faces_var && faces_var->data) {
-        size_t rows = faces_var->dims[0];
-        size_t cols = faces_var->dims[1];
-        size_t nFaces = (cols == 3) ? rows : cols;  // Handle both orientations
-        
-        result.Faces.clear();
-        result.Faces.reserve(nFaces * 3);
-        
-        if (faces_var->class_type == MAT_C_DOUBLE) {
-            const double* data = static_cast<const double*>(faces_var->data);
-            for (size_t i = 0; i < nFaces * 3; ++i) {
-                result.Faces.push_back(static_cast<int>(data[i]) - 1);  // MATLAB 1-indexed to 0-indexed
-            }
-        } else if (faces_var->class_type == MAT_C_UINT16) {
-            const uint16_t* data = static_cast<const uint16_t*>(faces_var->data);
-            for (size_t i = 0; i < nFaces * 3; ++i) {
-                result.Faces.push_back(static_cast<int>(data[i]) - 1);
-            }
-        }
-    }
-    
-    // Read FaceColors (1D array)
-    matvar_t* facecolors_var = Mat_VarGetStructFieldByName(dic2d_var, "FaceColors", 0);
-    if (facecolors_var) {
-        result.FaceColors = readDoubleArray(facecolors_var);
-    }
-    
-    // Read Points (cell array: each cell is Nx2 array)
-    matvar_t* points_var = Mat_VarGetStructFieldByName(dic2d_var, "Points", 0);
-    if (points_var && points_var->class_type == MAT_C_CELL) {
-        size_t nFrames = getCellArraySize(points_var);
-        result.Points.resize(nFrames);
-        
-        for (size_t frame = 0; frame < nFrames; ++frame) {
-            matvar_t* frame_var = getCellElement(points_var, frame);
-            if (frame_var && frame_var->class_type == MAT_C_DOUBLE && frame_var->data) {
-                size_t nPoints = frame_var->dims[0];
-                const double* pts_data = static_cast<const double*>(frame_var->data);
-                
-                result.Points[frame].x.resize(nPoints);
-                result.Points[frame].y.resize(nPoints);
-                
-                // MATLAB stores column-major: [x1,x2,...,xN,y1,y2,...,yN]
-                for (size_t i = 0; i < nPoints; ++i) {
-                    result.Points[frame].x[i] = pts_data[i];           // First column
-                    result.Points[frame].y[i] = pts_data[i + nPoints]; // Second column
+
+    // Faces (Nx3 or 3xN)
+    if (auto faces_var = readVar(matfp.get(), "Faces")) {
+        if (faces_var->data && faces_var->rank >= 2) {
+            const size_t rows = faces_var->dims[0];
+            const size_t cols = faces_var->dims[1];
+            const size_t nFaces = (cols == 3) ? rows : ((rows == 3) ? cols : 0);
+
+            result.Faces.clear();
+
+            if (nFaces == 0) {
+                std::cerr << "Faces has unexpected shape (" << rows << "x" << cols
+                          << "), expected Nx3 or 3xN in " << mat_path << '\n';
+            } else {
+                result.Faces.reserve(nFaces * 3);
+
+                auto pushFaces = [&](auto* dataPtr) {
+                    for (size_t i = 0; i < nFaces * 3; ++i) {
+                        result.Faces.push_back(static_cast<int>(dataPtr[i]) - 1);
+                    }
+                };
+
+                if (faces_var->class_type == MAT_C_DOUBLE) {
+                    pushFaces(static_cast<const double*>(faces_var->data));
+                } else if (faces_var->class_type == MAT_C_UINT16) {
+                    pushFaces(static_cast<const uint16_t*>(faces_var->data));
+                } else if (faces_var->class_type == MAT_C_UINT32) {
+                    pushFaces(static_cast<const uint32_t*>(faces_var->data));
+                } else if (faces_var->class_type == MAT_C_INT32) {
+                    pushFaces(static_cast<const int32_t*>(faces_var->data));
+                } else {
+                    std::cerr << "Faces has unsupported type (class_type=" << faces_var->class_type
+                              << ") in " << mat_path << '\n';
                 }
             }
         }
     }
-    
-    // Read CorCoeffVec (cell array: each cell is Nx1 array)
-    matvar_t* corr_var = Mat_VarGetStructFieldByName(dic2d_var, "CorCoeffVec", 0);
-    if (corr_var && corr_var->class_type == MAT_C_CELL) {
-        size_t nFrames = getCellArraySize(corr_var);
-        result.CorCoeffVec.resize(nFrames);
-        
-        for (size_t frame = 0; frame < nFrames; ++frame) {
-            matvar_t* frame_var = getCellElement(corr_var, frame);
-            if (frame_var && frame_var->class_type == MAT_C_DOUBLE && frame_var->data) {
-                result.CorCoeffVec[frame] = readDoubleArray(frame_var);
+
+    // FaceColors
+    if (auto facecolors_var = readVar(matfp.get(), "FaceColors")) {
+        result.FaceColors = readDoubleArray(facecolors_var.get());
+    }
+
+    // Points (cell array)
+    if (auto points_var = readVar(matfp.get(), "Points")) {
+        if (points_var->class_type == MAT_C_CELL) {
+            const size_t nFrames = getCellArraySize(points_var.get());
+            result.Points.resize(nFrames);
+
+            for (size_t frame = 0; frame < nFrames; ++frame) {
+                matvar_t* frame_var = Mat_VarGetCell(points_var.get(), frame);
+                if (!frame_var || frame_var->class_type != MAT_C_DOUBLE || !frame_var->data || frame_var->rank < 2)
+                    continue;
+
+                const size_t nPoints = frame_var->dims[0];
+                const size_t nCols = frame_var->dims[1];
+                if (nCols < 2) continue;
+
+                const double* pts_data = static_cast<const double*>(frame_var->data);
+
+                result.Points[frame].x.resize(nPoints);
+                result.Points[frame].y.resize(nPoints);
+
+                for (size_t i = 0; i < nPoints; ++i) {
+                    result.Points[frame].x[i] = pts_data[i];
+                    result.Points[frame].y[i] = pts_data[i + nPoints];
+                }
             }
         }
     }
-    
-    // Read ncorrInfo structure
-    matvar_t* ncorr_var = Mat_VarGetStructFieldByName(dic2d_var, "ncorrInfo", 0);
-    if (ncorr_var && ncorr_var->class_type == MAT_C_STRUCT) {
-        // cutoff_corrcoef (array)
-        matvar_t* cutoff_cc = Mat_VarGetStructFieldByName(ncorr_var, "cutoff_corrcoef", 0);
-        if (cutoff_cc) {
-            result.ncorrInfo.cutoff_corrcoef = readDoubleArray(cutoff_cc);
-        }
-        
-        // cutoff_diffnorm (scalar)
-        matvar_t* cutoff_dn = Mat_VarGetStructFieldByName(ncorr_var, "cutoff_diffnorm", 0);
-        if (cutoff_dn) {
-            result.ncorrInfo.cutoff_diffnorm = readScalar(cutoff_dn);
-        }
-        
-        // cutoff_iteration (scalar)
-        matvar_t* cutoff_it = Mat_VarGetStructFieldByName(ncorr_var, "cutoff_iteration", 0);
-        if (cutoff_it) {
-            result.ncorrInfo.cutoff_iteration = static_cast<int>(readScalar(cutoff_it));
-        }
-        
-        // radius (scalar)
-        matvar_t* radius_var = Mat_VarGetStructFieldByName(ncorr_var, "radius", 0);
-        if (radius_var) {
-            result.ncorrInfo.radius = static_cast<int>(readScalar(radius_var));
-        }
-        
-        // spacing (scalar)
-        matvar_t* spacing_var = Mat_VarGetStructFieldByName(ncorr_var, "spacing", 0);
-        if (spacing_var) {
-            result.ncorrInfo.spacing = static_cast<int>(readScalar(spacing_var));
-        }
-        
-        // pixtounits (scalar)
-        matvar_t* ptu_var = Mat_VarGetStructFieldByName(ncorr_var, "pixtounits", 0);
-        if (ptu_var) {
-            result.ncorrInfo.pixtounits = readScalar(ptu_var);
-        }
-        
-        // lenscoef (scalar)
-        matvar_t* lens_var = Mat_VarGetStructFieldByName(ncorr_var, "lenscoef", 0);
-        if (lens_var) {
-            result.ncorrInfo.lenscoef = static_cast<int>(readScalar(lens_var));
-        }
-        
-        // subsettrunc (bool/int)
-        matvar_t* subset_var = Mat_VarGetStructFieldByName(ncorr_var, "subsettrunc", 0);
-        if (subset_var) {
-            result.ncorrInfo.subsettrunc = static_cast<int>(readScalar(subset_var)) != 0;
-        }
-        
-        // total_threads (scalar)
-        matvar_t* threads_var = Mat_VarGetStructFieldByName(ncorr_var, "total_threads", 0);
-        if (threads_var) {
-            result.ncorrInfo.total_threads = static_cast<int>(readScalar(threads_var));
-        }
-        
-        // type (string)
-        matvar_t* type_var = Mat_VarGetStructFieldByName(ncorr_var, "type", 0);
-        if (type_var) {
-            result.ncorrInfo.type = readString(type_var);
-        }
-        
-        // units (string)
-        matvar_t* units_var = Mat_VarGetStructFieldByName(ncorr_var, "units", 0);
-        if (units_var) {
-            result.ncorrInfo.units = readString(units_var);
-        }
-        
-        // stepanalysis struct
-        matvar_t* step_var = Mat_VarGetStructFieldByName(ncorr_var, "stepanalysis", 0);
-        if (step_var && step_var->class_type == MAT_C_STRUCT) {
-            matvar_t* enabled_var = Mat_VarGetStructFieldByName(step_var, "enabled", 0);
-            if (enabled_var) {
-                result.ncorrInfo.stepanalysis.enabled = static_cast<int>(readScalar(enabled_var)) != 0;
-            }
-            
-            matvar_t* step_type_var = Mat_VarGetStructFieldByName(step_var, "type", 0);
-            if (step_type_var) {
-                result.ncorrInfo.stepanalysis.type = readString(step_type_var);
-            }
-            
-            matvar_t* auto_var = Mat_VarGetStructFieldByName(step_var, "auto", 0);
-            if (auto_var) {
-                result.ncorrInfo.stepanalysis.auto_update = static_cast<int>(readScalar(auto_var)) != 0;
-            }
-            
-            matvar_t* step_step_var = Mat_VarGetStructFieldByName(step_var, "step", 0);
-            if (step_step_var) {
-                result.ncorrInfo.stepanalysis.step = static_cast<int>(readScalar(step_step_var));
+
+    // CorCoeffVec (cell array)
+    if (auto corr_var = readVar(matfp.get(), "CorCoeffVec")) {
+        if (corr_var->class_type == MAT_C_CELL) {
+            const size_t nFrames = getCellArraySize(corr_var.get());
+            result.CorCoeffVec.resize(nFrames);
+
+            for (size_t frame = 0; frame < nFrames; ++frame) {
+                matvar_t* frame_var = Mat_VarGetCell(corr_var.get(), frame);
+                if (frame_var && frame_var->class_type == MAT_C_DOUBLE && frame_var->data) {
+                    result.CorCoeffVec[frame] = readDoubleArray(frame_var);
+                }
             }
         }
     }
-    
-    std::cout << "Loaded DIC2DPairResults: " 
-              << "nCamRef=" << result.nCamRef 
+
+    // ncorrInfo (struct)
+    if (auto ncorr_var = readVar(matfp.get(), "ncorrInfo")) {
+        if (ncorr_var->class_type == MAT_C_STRUCT) {
+            if (matvar_t* cutoff_cc = getStructField(ncorr_var.get(), "cutoff_corrcoef", 0)) {
+                result.ncorrInfo.cutoff_corrcoef = readDoubleArray(cutoff_cc);
+            }
+
+            readStructDouble(ncorr_var.get(), "cutoff_diffnorm", result.ncorrInfo.cutoff_diffnorm);
+            readStructInt(ncorr_var.get(), "cutoff_iteration", result.ncorrInfo.cutoff_iteration);
+            readStructInt(ncorr_var.get(), "radius", result.ncorrInfo.radius);
+            readStructInt(ncorr_var.get(), "spacing", result.ncorrInfo.spacing);
+            readStructDouble(ncorr_var.get(), "pixtounits", result.ncorrInfo.pixtounits);
+            readStructInt(ncorr_var.get(), "lenscoef", result.ncorrInfo.lenscoef);
+            readStructBool(ncorr_var.get(), "subsettrunc", result.ncorrInfo.subsettrunc);
+            readStructInt(ncorr_var.get(), "total_threads", result.ncorrInfo.total_threads);
+            readStructString(ncorr_var.get(), "type", result.ncorrInfo.type);
+            readStructString(ncorr_var.get(), "units", result.ncorrInfo.units);
+
+            // stepanalysis nested struct
+            matvar_t* step_var = getStructField(ncorr_var.get(), "stepanalysis", 0);
+            if (step_var && step_var->class_type == MAT_C_STRUCT) {
+                readStructBool(step_var, "enabled", result.ncorrInfo.stepanalysis.enabled);
+                readStructString(step_var, "type", result.ncorrInfo.stepanalysis.type);
+                readStructBool(step_var, "auto", result.ncorrInfo.stepanalysis.auto_update);
+                readStructInt(step_var, "step", result.ncorrInfo.stepanalysis.step);
+            }
+        }
+    }
+
+    std::cout << "Loaded DIC2DPairResults: "
+              << "nCamRef=" << result.nCamRef
               << ", nCamDef=" << result.nCamDef
               << ", nImages=" << result.nImages
               << ", " << result.Points.size() << " frames"
-              << ", " << result.Faces.size() / 3 << " faces" << std::endl;
-    
-    Mat_VarFree(dic2d_var);
-    Mat_Close(matfp);
+              << ", " << result.Faces.size() / 3 << " faces\n";
+
     return true;
 }
 

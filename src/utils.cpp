@@ -819,6 +819,58 @@ cv::Point2d Utils::undistortPoint(const cv::Point2d& point_in,
 }
 
 // ============================================================================
+// DLT11 Calibration (matches MATLAB DLT11Calibration.m)
+// ============================================================================
+
+bool Utils::DLT11Calibration(const double* P2, const double* P3, size_t N,
+                              std::vector<double>& L) {
+    if (N < 6) {
+        std::cerr << "DLT11Calibration: need at least 6 point correspondences, got " << N << std::endl;
+        return false;
+    }
+
+    // Build the 2N x 11 matrix M and 2N x 1 vector b (P2array)
+    // MATLAB:
+    //   M(1:2:2*N-1,:) = [P3 ones(N,1) zeros(N,4)        -u.*P3]
+    //   M(2:2:2*N,:)   = [zeros(N,4)   P3 ones(N,1)      -v.*P3]
+    //   P2array(1:2:2*N-1) = u
+    //   P2array(2:2:2*N)   = v
+    //   L = M \ P2array
+    Eigen::MatrixXd M = Eigen::MatrixXd::Zero(2 * N, 11);
+    Eigen::VectorXd b(2 * N);
+
+    for (size_t i = 0; i < N; ++i) {
+        double u = P2[i * 2 + 0];
+        double v = P2[i * 2 + 1];
+        double X = P3[i * 3 + 0];
+        double Y = P3[i * 3 + 1];
+        double Z = P3[i * 3 + 2];
+
+        // Odd row (2i): [X Y Z 1  0 0 0 0  -u*X -u*Y -u*Z]
+        size_t r1 = 2 * i;
+        M(r1, 0) = X;  M(r1, 1) = Y;  M(r1, 2) = Z;  M(r1, 3) = 1.0;
+        M(r1, 8) = -u * X;  M(r1, 9) = -u * Y;  M(r1, 10) = -u * Z;
+        b(r1) = u;
+
+        // Even row (2i+1): [0 0 0 0  X Y Z 1  -v*X -v*Y -v*Z]
+        size_t r2 = 2 * i + 1;
+        M(r2, 4) = X;  M(r2, 5) = Y;  M(r2, 6) = Z;  M(r2, 7) = 1.0;
+        M(r2, 8) = -v * X;  M(r2, 9) = -v * Y;  M(r2, 10) = -v * Z;
+        b(r2) = v;
+    }
+
+    // Solve via least squares: L = M \ b
+    Eigen::VectorXd result = M.colPivHouseholderQr().solve(b);
+
+    L.resize(11);
+    for (int i = 0; i < 11; ++i) {
+        L[i] = result(i);
+    }
+
+    return true;
+}
+
+// ============================================================================
 // Rigid Body Motion (RBM) Transformation
 // ============================================================================
 

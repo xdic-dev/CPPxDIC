@@ -3,6 +3,7 @@
  */
 
 #include "dic_analysis.h"
+#include "mat_reader.h"
 #include "utils.h"
 #include "step_d_workflow.h"
 #include "data_serializer.h"
@@ -21,11 +22,10 @@
 #include <Eigen/Dense>
 #include <cctype>
 #include <cmath>
-#include <fstream>
-// JSON
-#include <nlohmann/json.hpp>
 #include <algorithm>
 #include <array>
+#include <numeric>
+#include <set>
 
 using namespace ncorr;
 using namespace cppxdic;
@@ -595,11 +595,6 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
     std::cout << "Starting 3D Reconstruction (Step E)..." << std::endl;
     try {
 
-        auto write_bin = [](const std::string& path, const std::vector<double>& buf){
-            std::ofstream ofs(path, std::ios::binary);
-            ofs.write(reinterpret_cast<const char*>(buf.data()), static_cast<std::streamsize>(buf.size()*sizeof(double)));
-        };
-
         auto build_faces_from_roi = [](const ncorr::ROI2D& roi, std::vector<int>& faces, std::vector<int>& indexLUT, int& W, int& H){
             const auto& mask = roi.get_mask();
             H = static_cast<int>(mask.height());
@@ -693,12 +688,186 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
             std::ostringstream trial_str;
             trial_str << std::setw(3) << std::setfill('0') << trial;
             
+            // ------------------------------------------------------------------
+            // Load DLT calibrations for ALL cameras upfront (matches MATLAB step3)
+            // MATLAB: DLTstructAllCams{ic} = load(DLTpath{ic}).DLTstructCam
+            // ------------------------------------------------------------------
+            std::string calib_dir = config_.data_path + "/rawdata/" + config_.subject_id
+                                  + "/speckles/" + config_.material + "/calibration/";
+            
+            // Collect unique camera indices across all pairs
+            std::set<int> unique_cams;
+            for (int p = 1; p <= config_.num_pair; ++p) {
+                int c1, c2;
+                Utils::getCamerasForPair(p, c1, c2);
+                unique_cams.insert(c1);
+                unique_cams.insert(c2);
+            }
+            
+            // Load DLT calibration for each unique camera
+            std::map<int, DLTCalibrationData> dlt_all_cams;
+            for (int cam_id : unique_cams) {
+                // Match MATLAB pattern: DLTstruct_cam_<id>.mat (or *cam_<id>.mat via glob)
+                std::string dlt_path;
+                if (std::filesystem::exists(calib_dir)) {
+                    std::string search_suffix = "cam_" + std::to_string(cam_id) + ".mat";
+                    for (const auto& entry : std::filesystem::directory_iterator(calib_dir)) {
+                        if (!entry.is_regular_file()) continue;
+                        auto name = entry.path().filename().string();
+                        if (name.size() >= search_suffix.size() &&
+                            name.compare(name.size() - search_suffix.size(), search_suffix.size(), search_suffix) == 0) {
+                            dlt_path = entry.path().string();
+                            break;
+                        }
+                    }
+                }
+                
+                if (dlt_path.empty()) {
+                    std::cerr << "DLT calibration file not found for camera " << cam_id
+                              << " in " << calib_dir << std::endl;
+                    continue;
+                }
+                
+                DLTCalibrationData calib;
+                if (cppxdic::MatReader::loadDLTCalibration(dlt_path, calib)) {
+                    dlt_all_cams[cam_id] = std::move(calib);
+                } else {
+                    std::cerr << "Failed to load DLT calibration for camera " << cam_id << std::endl;
+                }
+            }
+            
+            if (dlt_all_cams.empty()) {
+                std::cerr << "No DLT calibrations loaded. Cannot proceed with 3D reconstruction." << std::endl;
+                continue;
+            }
+            std::cout << "Loaded DLT calibrations for " << dlt_all_cams.size() << " cameras" << std::endl;
+            
+            // ------------------------------------------------------------------
+            // Load distortion parameters for all cameras (if available)
+            // ------------------------------------------------------------------
+            std::map<int, Utils::CameraParameters> distortion_all_cams;
+            std::map<int, std::string> distortion_paths;
+            if (std::filesystem::exists(calib_dir)) {
+                for (int cam_id : unique_cams) {
+                    std::string search_str = "cam_" + std::to_string(cam_id);
+                    for (const auto& entry : std::filesystem::directory_iterator(calib_dir)) {
+                        if (!entry.is_regular_file()) continue;
+                        auto name = entry.path().filename().string();
+                        std::string lower = name;
+                        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                        if (lower.find("cameracbparameters") != std::string::npos &&
+                            lower.find(search_str) != std::string::npos) {
+                            Utils::CameraParameters params;
+                            if (Utils::loadCameraParameters(entry.path().string(), params)) {
+                                distortion_all_cams[cam_id] = params;
+                                distortion_paths[cam_id] = entry.path().string();
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            bool use_distortion_removal = (distortion_all_cams.size() == unique_cams.size());
+            if (use_distortion_removal) {
+                std::cout << "Distortion removal enabled for all " << unique_cams.size() << " cameras" << std::endl;
+                
+                // ------------------------------------------------------------------
+                // Recalculate DLT parameters from undistorted calibration centroids
+                // Matches MATLAB step3 lines 84-98:
+                //   P2Dtemp = DLTstructAllCams{ic}.imageCentroids;
+                //   [P2Dtemp] = undistortPoints(P2Dtemp, distortionPar{ic});
+                //   C3Dtemp = reshape(C3Dtrue(:,columns,:), nRows*nCols, 3);
+                //   L = DLT11Calibration(P2Dtemp, C3Dtemp);
+                //   DLTstructAllCams{ic}.DLTparams = L;
+                // ------------------------------------------------------------------
+                for (int cam_id : unique_cams) {
+                    auto& dlt = dlt_all_cams[cam_id];
+                    const auto& dist = distortion_all_cams[cam_id];
+                    
+                    if (dlt.imageCentroids.empty() || dlt.C3Dtrue.empty() || dlt.columns.empty()) {
+                        std::cout << "  Camera " << cam_id << ": missing calibration data for DLT recalculation, "
+                                  << "using original DLT params with per-point undistortion fallback" << std::endl;
+                        continue;
+                    }
+                    
+                    // Undistort calibration image centroids (Nx2 row-major)
+                    size_t nCentroids = dlt.imageCentroids_rows;
+                    std::vector<cv::Point2d> centroids_in(nCentroids);
+                    for (size_t i = 0; i < nCentroids; ++i) {
+                        centroids_in[i] = cv::Point2d(dlt.imageCentroids[i * 2 + 0],
+                                                       dlt.imageCentroids[i * 2 + 1]);
+                    }
+                    std::vector<cv::Point2d> centroids_undist;
+                    Utils::undistortPoints(centroids_in, dist, centroids_undist);
+                    
+                    // Convert undistorted centroids back to flat array (Nx2)
+                    std::vector<double> P2D(nCentroids * 2);
+                    for (size_t i = 0; i < nCentroids; ++i) {
+                        P2D[i * 2 + 0] = centroids_undist[i].x;
+                        P2D[i * 2 + 1] = centroids_undist[i].y;
+                    }
+                    
+                    // Reshape C3Dtrue(:, columns, :) -> (nRows * nSelectedCols) x 3
+                    // C3Dtrue is stored row-major as (dim0 x dim1 x 3)
+                    // columns contains 1-based column indices used in calibration
+                    size_t d0 = dlt.C3Dtrue_dim0;  // nRows
+                    size_t nCols = dlt.columns.size();
+                    std::vector<double> P3D(d0 * nCols * 3);
+                    for (size_t ci = 0; ci < nCols; ++ci) {
+                        size_t col = static_cast<size_t>(dlt.columns[ci]) - 1;  // MATLAB 1-based to 0-based
+                        for (size_t row = 0; row < d0; ++row) {
+                            size_t dst_idx = (ci * d0 + row);  // column-major order matching MATLAB reshape
+                            size_t src_idx = (row * dlt.C3Dtrue_dim1 + col);  // row-major C3Dtrue indexing
+                            P3D[dst_idx * 3 + 0] = dlt.C3Dtrue[src_idx * 3 + 0];
+                            P3D[dst_idx * 3 + 1] = dlt.C3Dtrue[src_idx * 3 + 1];
+                            P3D[dst_idx * 3 + 2] = dlt.C3Dtrue[src_idx * 3 + 2];
+                        }
+                    }
+                    
+                    size_t nPoints = d0 * nCols;
+                    if (nPoints != nCentroids) {
+                        std::cerr << "  Camera " << cam_id << ": centroid count (" << nCentroids
+                                  << ") != C3D point count (" << nPoints << "), skipping DLT recalculation" << std::endl;
+                        continue;
+                    }
+                    
+                    // Recalculate DLT parameters
+                    std::vector<double> L_new;
+                    if (Utils::DLT11Calibration(P2D.data(), P3D.data(), nPoints, L_new)) {
+                        dlt.DLTparams = L_new;
+                        std::cout << "  Camera " << cam_id << ": DLT params recalculated from " 
+                                  << nPoints << " undistorted calibration points" << std::endl;
+                    } else {
+                        std::cerr << "  Camera " << cam_id << ": DLT11Calibration failed" << std::endl;
+                    }
+                }
+            } else if (!distortion_all_cams.empty()) {
+                std::cout << "Distortion parameters found for " << distortion_all_cams.size() 
+                          << "/" << unique_cams.size() << " cameras (disabled - need all)" << std::endl;
+                use_distortion_removal = false;
+            }
+            
+            // ------------------------------------------------------------------
+            // Process each stereo pair
+            // ------------------------------------------------------------------
             for (int pair = 1; pair <= config_.num_pair; ++pair) {
                 std::cout << "\n=== Processing Pair " << pair << " ===" << std::endl;
                 
-                // Get camera numbers for this pair (pair 1 -> cams 1,2; pair 2 -> cams 3,4)
-                int cam_1 = (pair - 1) * 2 + 1;
-                int cam_2 = (pair - 1) * 2 + 2;
+                // Get camera numbers for this pair
+                int cam_1, cam_2;
+                Utils::getCamerasForPair(pair, cam_1, cam_2);
+                
+                // Look up DLT parameters for this pair's cameras
+                if (dlt_all_cams.find(cam_1) == dlt_all_cams.end() ||
+                    dlt_all_cams.find(cam_2) == dlt_all_cams.end()) {
+                    std::cerr << "Missing DLT calibration for pair " << pair 
+                              << " (cam " << cam_1 << " or " << cam_2 << "). Skipping." << std::endl;
+                    continue;
+                }
+                const auto& dlt_cam1 = dlt_all_cams[cam_1];
+                const auto& dlt_cam2 = dlt_all_cams[cam_2];
+                const std::vector<double>& L1 = dlt_cam1.DLTparams;
+                const std::vector<double>& L2 = dlt_cam2.DLTparams;
                 
                 // Load ncorr DIC outputs from output directory (ncorr native .bin format)
                 std::string output_dir = config_.dic_path + "/" + config_.subject_id + "/" + config_.material + "/" + trial_str.str() + "/" + config_.phase_id;
@@ -717,111 +886,9 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     std::cout << "[DEBUG] Loading 2D DIC data from:" << std::endl;
                     std::cout << "[DEBUG]   Cam" << cam_1 << ": " << cam1_bin << std::endl;
                     std::cout << "[DEBUG]   Cam" << cam_2 << ": " << cam2_bin << std::endl;
+                    std::cout << "[DEBUG]   DLT cam" << cam_1 << ": " << dlt_cam1.filePath << std::endl;
+                    std::cout << "[DEBUG]   DLT cam" << cam_2 << ": " << dlt_cam2.filePath << std::endl;
                 }
-
-                // Locate calibration .mat files for this camera pair
-                std::string calib_dir = config_.data_path + "/rawdata/" + config_.subject_id + "/speckles/" + config_.material + "/calibration/";
-                std::string calib_cam1, calib_cam2;
-                std::string cam1_str = "cam" + std::to_string(cam_1);
-                std::string cam2_str = "cam" + std::to_string(cam_2);
-                std::string camera1_str = "camera" + std::to_string(cam_1);
-                std::string camera2_str = "camera" + std::to_string(cam_2);
-                
-                if (std::filesystem::exists(calib_dir)) {
-                    for (const auto& entry : std::filesystem::directory_iterator(calib_dir)) {
-                        if (!entry.is_regular_file()) continue;
-                        auto name = entry.path().filename().string();
-                        std::string lower = name; std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-                        if (lower.find(cam1_str) != std::string::npos || lower.find(camera1_str) != std::string::npos) calib_cam1 = entry.path().string();
-                        if (lower.find(cam2_str) != std::string::npos || lower.find(camera2_str) != std::string::npos) calib_cam2 = entry.path().string();
-                        if (!calib_cam1.empty() && !calib_cam2.empty()) break;
-                    }
-                }
-
-                // Read DLT parameters from calibration MAT files (match Matlab field names)
-                auto read_dltparams = [&](const std::string& matpath)->std::vector<double> {
-                    std::vector<double> L;
-                    if (matpath.empty()) return L;
-                    mat_t *fp = Mat_Open(matpath.c_str(), MAT_ACC_RDONLY);
-                    if (!fp) return L;
-                    // Expect variable 'DLTstructCam' with field 'DLTparams'
-                    matvar_t *st = Mat_VarRead(fp, "DLTstructCam");
-                    if (st && st->class_type == MAT_C_STRUCT) {
-                        matvar_t *field = Mat_VarGetStructFieldByName(st, "DLTparams", 0);
-                        if (field && field->data && field->class_type == MAT_C_DOUBLE) {
-                            size_t n = 1;
-                            for (int i=0;i<field->rank;i++) n *= field->dims[i];
-                            const double* d = static_cast<const double*>(field->data);
-                            L.assign(d, d + n);
-                        }
-                    }
-                    if (st) Mat_VarFree(st);
-                    Mat_Close(fp);
-                    return L;
-                };
-
-                std::vector<double> L1 = read_dltparams(calib_cam1);
-                std::vector<double> L2 = read_dltparams(calib_cam2);
-                
-                // Load distortion parameters (if available)
-                Utils::CameraParameters distortion_cam1, distortion_cam2;
-                std::string distortion_cam1_path, distortion_cam2_path;
-                bool use_distortion_removal = false;
-                
-                // Look for distortion parameter files in calibration directory
-                if (std::filesystem::exists(calib_dir)) {
-                    // Build search strings for this camera pair
-                    std::string cam_1_search = "cam_" + std::to_string(cam_1);
-                    std::string cam_2_search = "cam_" + std::to_string(cam_2);
-                    std::string camera_1_search = "camera_" + std::to_string(cam_1);
-                    std::string camera_2_search = "camera_" + std::to_string(cam_2);
-                    
-                    for (const auto& entry : std::filesystem::directory_iterator(calib_dir)) {
-                        if (!entry.is_regular_file()) continue;
-                        auto name = entry.path().filename().string();
-                        std::string lower = name;
-                        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-                        // Look for cameraCBparameters files
-                        if (lower.find("cameracbparameters") != std::string::npos) {
-                            if (lower.find(cam_1_search) != std::string::npos || lower.find(camera_1_search) != std::string::npos) {
-                                distortion_cam1_path = entry.path().string();
-                            }
-                            if (lower.find(cam_2_search) != std::string::npos || lower.find(camera_2_search) != std::string::npos) {
-                                distortion_cam2_path = entry.path().string();
-                            }
-                        }
-                    }
-                    
-                    // Load distortion parameters if found
-                    if (!distortion_cam1_path.empty() && !distortion_cam2_path.empty()) {
-                        bool cam1_loaded = Utils::loadCameraParameters(distortion_cam1_path, distortion_cam1);
-                        bool cam2_loaded = Utils::loadCameraParameters(distortion_cam2_path, distortion_cam2);
-                        if (cam1_loaded && cam2_loaded) {
-                            use_distortion_removal = true;
-                            std::cout << "  ✓ Distortion removal enabled" << std::endl;
-                        } else {
-                            std::cout << "  ! Distortion parameters found but failed to load" << std::endl;
-                        }
-                    } else {
-                        std::cout << "  ! No distortion parameters found (undistorted points will be used as-is)" << std::endl;
-                    }
-                }
-                
-                // Persist a calibration.json for traceability
-                try {
-                    std::ostringstream cjson;
-                    cjson << config_.dic_path << "/" << config_.subject_id << "/" << config_.material << "/calibration.json";
-                    nlohmann::json jc;
-                    jc["subject"] = config_.subject_id;
-                    jc["material"] = config_.material;
-                    jc["phase"] = config_.phase_id;
-                    jc["cam1_mat"] = calib_cam1;
-                    jc["cam2_mat"] = calib_cam2;
-                    if (!L1.empty()) jc["DLTparameters"]["cam1"] = L1;
-                    if (!L2.empty()) jc["DLTparameters"]["cam2"] = L2;
-                    std::ofstream oc(cjson.str());
-                    oc << jc.dump(2) << std::endl;
-                } catch (...) {}
 
                 // Load DIC outputs
                 auto dic1 = DIC_analysis_output::load(cam1_bin);
@@ -855,7 +922,7 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 // Create individual pair result structure
                 DIC3DpairResults pair_result;
                 pair_result.cameraPairInd = {cam_1, cam_2};  // Camera pair indices
-                pair_result.DLTpath = {calib_cam1, calib_cam2};
+                pair_result.DLTpath = {dlt_cam1.filePath, dlt_cam2.filePath};
                 pair_result.DLTparameters = {L1, L2};
                 
                 std::vector<double> P3D_ref; // frame 1 reference
@@ -974,37 +1041,8 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                         extract_points2D(d2, pts2, indexLUT, W, H);
                     }
                     
-                    // Apply distortion removal if enabled (matching MATLAB STEP3 lines 128-161)
-                    if (use_distortion_removal) {
-                        size_t N = pts1.size() / 2;
-                        
-                        // Convert to cv::Point2d format for undistortion
-                        std::vector<cv::Point2d> pts1_cv, pts2_cv;
-                        pts1_cv.reserve(N);
-                        pts2_cv.reserve(N);
-                        
-                        for (size_t k = 0; k < N; ++k) {
-                            pts1_cv.emplace_back(pts1[k*2+0], pts1[k*2+1]);
-                            pts2_cv.emplace_back(pts2[k*2+0], pts2[k*2+1]);
-                        }
-                        
-                        // Undistort points
-                        std::vector<cv::Point2d> pts1_undist, pts2_undist;
-                        Utils::undistortPoints(pts1_cv, distortion_cam1, pts1_undist);
-                        Utils::undistortPoints(pts2_cv, distortion_cam2, pts2_undist);
-                        
-                        // Convert back to flat array
-                        for (size_t k = 0; k < N; ++k) {
-                            pts1[k*2+0] = pts1_undist[k].x;
-                            pts1[k*2+1] = pts1_undist[k].y;
-                            pts2[k*2+0] = pts2_undist[k].x;
-                            pts2[k*2+1] = pts2_undist[k].y;
-                        }
-                        
-                        if (fi == 0) {
-                            std::cout << "  ✓ Applied distortion removal to 2D points (frame 1)" << std::endl;
-                        }
-                    }
+                    // Note: distortion is handled by recalculating DLT params from undistorted
+                    // calibration centroids (MATLAB step3 approach), not by per-point undistortion.
                     size_t N = pts1.size()/2;
                     std::vector<double> pts3d; pts3d.resize(N*3, std::numeric_limits<double>::quiet_NaN());
                     for (size_t k=0; k<N; ++k){
@@ -1088,8 +1126,8 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 pair_result.Faces = faces;
                 // Set distortion info (if available)
                 if (use_distortion_removal) {
-                    pair_result.distortionModel = {"distortion", "distortion"};  // Placeholder
-                    pair_result.distortionPath = {distortion_cam1_path, distortion_cam2_path};
+                    pair_result.distortionModel = {"distortion", "distortion"};
+                    pair_result.distortionPath = {distortion_paths[cam_1], distortion_paths[cam_2]};
                 } else {
                     pair_result.distortionModel = {"none", "none"};
                     pair_result.distortionPath = {"none", "none"};
@@ -1120,10 +1158,10 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 auto d_serializer = cppxdic::DataSerializer::create(config_.data_format);
                 std::string output_dir = config_.dic_path + "/" + config_.subject_id + "/" + config_.material;
                 for (int pair = 1; pair <= config_.num_pair; ++pair) {
-                    int cam_1 = (pair - 1) * 2 + 1;
-                    int cam_2 = (pair - 1) * 2 + 2;
+                    int cam_1, cam_2;
+                    Utils::getCamerasForPair(pair, cam_1, cam_2);
                     
-                    std::string dic2d_file = output_dir + "/myDIC2DpairResults_C_" + 
+                    std::string dic2d_file = output_dir + "/" + trial_str.str() + "/" + config_.phase_id + "/myDIC2DpairResults_C_" + 
                         std::to_string(cam_1) + "_C_" + std::to_string(cam_2) + d_serializer->extension();
                     
                     if (std::filesystem::exists(dic2d_file)) {

@@ -89,6 +89,20 @@ public:
     static cv::Point2d undistortPoint(const cv::Point2d& point_in,
                                       const CameraParameters& params);
     
+    /**
+     * Compute DLT (Direct Linear Transformation) 11 parameters from 2D-3D point correspondences
+     * Matches MATLAB: L = DLT11Calibration(P2, P3)
+     * Solves the 2Nx11 least squares system M \ P2array for 11 DLT parameters
+     * 
+     * @param P2 2D image points (Nx2 row-major: [u1,v1, u2,v2, ...])
+     * @param P3 3D world points (Nx3 row-major: [X1,Y1,Z1, X2,Y2,Z2, ...])
+     * @param N Number of point correspondences
+     * @param L Output: 11 DLT parameters
+     * @return true if successful
+     */
+    static bool DLT11Calibration(const double* P2, const double* P3, size_t N,
+                                  std::vector<double>& L);
+
     // Rigid Body Motion (RBM) transformation
     struct RigidTransform {
         Eigen::Matrix3d R;  // Rotation matrix

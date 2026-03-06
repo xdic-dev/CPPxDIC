@@ -101,9 +101,9 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     std::cout << "--> STEP: Matching REF to Trial loaded and formatted" << std::endl;
 
 
-    cv::imshow("refmask_REF", refmask_REF);
-    cv::imshow("refmask_trial", refmask_trial);
-    cv::waitKey(0);
+    //cv::imshow("refmask_REF", refmask_REF);
+    //cv::imshow("refmask_trial", refmask_trial);
+    //cv::waitKey(0);
     
     // III. Matching inside a Trial between cameras (cam1 -> cam2 at frame 1)
     cv::Mat refmask_trial_matched;
@@ -118,8 +118,8 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
 
     std::cout << "DEBUG: initial_seed_point_set2 = " << initial_seed_point_set2.pw[0] << ", " << initial_seed_point_set2.pw[1] << std::endl;
 
-    cv::imshow("refmask_trial_matched", refmask_trial_matched);
-    cv::waitKey(0);
+    //cv::imshow("refmask_trial_matched", refmask_trial_matched);
+    //cv::waitKey(0);
     
     // post-III. Image filtering
     std::vector<cv::Mat> cam_first, cam_second;
