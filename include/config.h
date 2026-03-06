@@ -61,7 +61,7 @@ public:
     // Frame settings
     int idx_frame_start = 1;
     int idx_frame_end = 150;
-    int frame_jump = 5;
+    int frame_jump = 1;
     
     // Visualization settings (equivalent to MATLAB optStructPlot)
     bool showvisu = false;               // Boolean for visualization
@@ -153,7 +153,7 @@ public:
     bool csv_include_header = true;      // Include header in CSV
     
     // Visualization: Video options
-    bool generate_videos = false;        // Generate videos
+    bool generate_videos = true;        // Generate videos
     int video_fps = 10;                  // Video FPS
     std::string video_codec = "MJPG";    // Video codec
     int video_quality = 90;              // Video quality (0-100)

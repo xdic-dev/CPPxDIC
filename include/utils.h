@@ -9,6 +9,7 @@
 #include "config.h"
 #include "parameters.h"
 #include <string>
+#include <string_view>
 #include <vector>
 #include <opencv2/opencv.hpp>
 #include <Eigen/Dense>
@@ -153,6 +154,23 @@ public:
      */
     static std::string buildBaseDataPath(const Config& config, bool with_data_or_dic_path = false, bool with_rawdata = false, bool with_speckles = false);
 
+     /**
+     * Build output dir until Trial folder
+     * @param config The base configuration class (required)
+     * @param trial The trial number
+     * @return The constructed path string
+     */
+    static std::string buildOutputUntilTrialDir(const Config& config, int trial);
+
+    /**
+     * Build output dir until the Phase folder
+     * @param config The base configuration class (required)
+     * @param trial The trial number
+     * @return The constructed path string
+     */
+    static std::string buildOutputUntilPhaseDir(const Config& config, int trial);
+
+    
     /**
      * Build the path based on activated parameters and return the proper string
      * @param config The base configuration class (required)
@@ -166,6 +184,23 @@ public:
      * @return The constructed path string
      */
     static std::string buildPath(const Config& config, bool with_data_or_dic_path = false, bool with_rawdata = false, bool with_speckles = false, bool with_material = false, bool with_video = false, bool with_protocol = false, bool with_calib = false);
+    
+    /**
+     * Build path until material folder
+     * @param config The base configuration class (required)
+     * @param with_data_or_dic_path Whether to include data/dic path in the path (required)
+     * @param with_rawdata Whether to include rawdata in the path (default as false)
+     * @param with_speckles Whether to include speckles in the path (default as false)
+     * @return The constructed path string
+     */
+    static std::string buildUntilMaterialDir(const Config& config, bool with_data_or_dic_path, bool with_rawdata, bool with_speckles);
+
+    /**
+     * Build output path until material folder
+     * @param config The base configuration class (required)
+     * @return The constructed path string
+     */
+    static std::string buildOutputUntilMaterialDir(const Config& config);
 
      /**
      * Build protocol path
@@ -222,6 +257,10 @@ public:
      */
     static std::string buildOutputCachePath(const cppxdic::BaseParameters& parameters);
 
+    static std::string likeRoiOrSeedPath(const std::string& path, const std::string_view& prefix, const std::string& reftrial, const std::string& phase, int stereopair, const std::string& extension); 
+    static std::string likeRoiPath(const std::string& path, const std::string& reftrial, const std::string& phase, int stereopair, const std::string& extension);
+    static std::string likeSeedPath(const std::string& path, const std::string& reftrial, const std::string& phase, int stereopair, const std::string& extension);
+
     /**
      * Build the roi file path
      * @param parameters The base parameters structure (required)
@@ -252,6 +291,12 @@ public:
      * @return The constructed path string
      */
     static std::string buildMatchingFilePath(const cppxdic::BaseParameters& parameters, std::string reftrial, int stereopair, const std::string& extension = ".bin");
+
+    static std::string buildDic3DCombinedFilePath(const std::string pathdir, int num_pair, const std::string& ext);
+    static std::string buildDic3DPPresultsFilePath(const std::string pathdir, int num_pair, const std::string& fileversion, const std::string& ext);
+    static std::string buildVizPath(const std::string pathdir, const std::string filename);
+    static std::string buildDic2DPairResultsFilePath(const std::string pathdir, int cam_1, int cam_2, const std::string& extension);
+    static std::string buildNcorrFilePath(const std::string pathdir, int cam_1, int cam_2 = -1, const std::string& extension = ".bin");
 
 private:
     static bool checkROIReferences(const Config& config);

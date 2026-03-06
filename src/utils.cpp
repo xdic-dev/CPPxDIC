@@ -16,6 +16,7 @@
 // JSON
 #include <nlohmann/json.hpp>
 #include <string>
+#include <string_view>
 
 bool Utils::dicCheck(const Config& config) {
     std::cout << "Checking data and protocol..." << std::endl;
@@ -104,12 +105,10 @@ bool Utils::checkROIReferences(const Config& config) {
     std::cout << "Checking ROI References..." << std::endl;
     
     for (int pair_i = 1; pair_i <= config.num_pair; ++pair_i) {
-        std::ostringstream oss;
-        oss << config.dic_path << "/" << config.subject_id << "/" << config.material 
-            << "/REF_MASK_" << std::setfill('0') << std::setw(3) << config.ref_trial_id 
-            << "_" << config.phase_id << "_pair" << pair_i << ".mat";
+        std::ostringstream ref_trial_id_oss;
+        ref_trial_id_oss << std::setfill('0') << std::setw(3) << config.ref_trial_id;
         
-        std::string roifile = oss.str();
+        std::string roifile = Utils::likeRoiPath(Utils::buildOutputUntilMaterialDir(config), ref_trial_id_oss.str(), config.phase_id, pair_i, ".mat");
         
         if (!fileExists(roifile)) {
             std::cerr << "This file " << roifile << " must exist to be able to run DIC analysis in parallel." << std::endl;
@@ -128,12 +127,10 @@ bool Utils::checkSeedReferences(const Config& config) {
     std::cout << "Checking SEED References..." << std::endl;
     
     for (int pair_i = 1; pair_i <= config.num_pair; ++pair_i) {
-        std::ostringstream oss;
-        oss << config.dic_path << "/" << config.subject_id << "/" << config.material 
-            << "/REF_SEED_" << std::setfill('0') << std::setw(3) << config.ref_trial_id 
-            << "_" << config.phase_id << "_pair" << pair_i << ".mat";
+        std::ostringstream ref_trial_id_oss;
+        ref_trial_id_oss << std::setfill('0') << std::setw(3) << config.ref_trial_id;
         
-        std::string seedfile = oss.str();
+        std::string seedfile = Utils::likeSeedPath(Utils::buildOutputUntilMaterialDir(config), ref_trial_id_oss.str(), config.phase_id, pair_i, ".mat");
         
         if (!fileExists(seedfile)) {
             std::cerr << "This file " << seedfile << " must exist to be able to run DIC analysis in parallel." << std::endl;
@@ -1001,6 +998,24 @@ std::string Utils::buildBaseDataPath(const Config &config, bool with_data_or_dic
     return path;
 }
 
+std::string Utils::buildOutputUntilTrialDir(const Config& config, int trial) {
+    std::ostringstream output_ss;
+    output_ss << buildBaseDataPath(config, false, false, false);
+    output_ss << "/" << config.material;
+    output_ss << "/" << std::setw(3) << std::setfill('0') << trial;
+    output_ss << "/";
+    return output_ss.str();
+}
+
+std::string Utils::buildOutputUntilPhaseDir(const Config& config, int trial) {
+    std::ostringstream output_ss;
+    output_ss << buildBaseDataPath(config, false, false, false);
+    output_ss << "/" << config.material;
+    output_ss << "/" << std::setw(3) << std::setfill('0') << trial;
+    output_ss << "/" << config.phase_id << "/";
+    return output_ss.str();
+}
+
 
 std::string Utils::buildPath(const Config& config, bool with_data_or_dic_path, bool with_rawdata, bool with_speckles, bool with_material, bool with_video, bool with_protocol, bool with_calib) {
     std::string path = buildBaseDataPath(config, with_data_or_dic_path, with_rawdata, with_speckles);
@@ -1023,6 +1038,18 @@ std::string Utils::buildPath(const Config& config, bool with_data_or_dic_path, b
     
     return path;
 }
+
+std::string Utils::buildUntilMaterialDir(const Config& config, bool with_data_or_dic_path, bool with_rawdata, bool with_speckles) {
+    std::string path = buildPath(config, with_data_or_dic_path, with_rawdata, with_speckles, true, false, false);
+    
+    return path + "/";
+}
+
+
+std::string Utils::buildOutputUntilMaterialDir(const Config& config) {
+    return buildUntilMaterialDir(config, false, false, false);
+}
+
 
 std::string Utils::buildProtocolDir(const Config& config, bool with_data_or_dic_path, bool with_rawdata, bool with_speckles, bool with_material) {
     std::string path = buildPath(config, with_data_or_dic_path, with_rawdata, with_speckles, with_material, false, true);
@@ -1073,14 +1100,25 @@ std::string Utils::buildOutputCachePath(const cppxdic::BaseParameters& parameter
     return buildPath(parameters, true, true, true, true);
 }
 
+std::string Utils::likeRoiOrSeedPath(const std::string& path, const std::string_view& prefix, const std::string& reftrial, const std::string& phase, int stereopair, const std::string& extension) {
+    std::ostringstream oss;
+    oss << path << "/" << prefix
+        << reftrial << "_" << phase << "_pair" << stereopair << extension;
+    
+    return oss.str(); 
+}
+
+std::string Utils::likeRoiPath(const std::string& path, const std::string& reftrial, const std::string& phase, int stereopair, const std::string& extension) {
+    return likeRoiOrSeedPath(path, "REF_MASK_", reftrial, phase, stereopair, extension);
+}
+
+std::string Utils::likeSeedPath(const std::string& path, const std::string& reftrial, const std::string& phase, int stereopair, const std::string& extension) {
+    return likeRoiOrSeedPath(path, "REF_SEED_", reftrial, phase, stereopair, extension);
+}
+
 
 std::string Utils::buildRoiOrSeedLikeFilePath(const cppxdic::BaseParameters& parameters, std::string reftrial, int stereopair, std::string_view prefix, const std::string& extension) {
-    std::ostringstream oss;
-    
-    oss << buildPath(parameters, true, false, false, false) << "/" << prefix
-        << reftrial << "_" << parameters.phase << "_pair" << stereopair << extension;
-    
-    return oss.str();
+    return likeRoiOrSeedPath(buildPath(parameters, true, false, false, false), prefix, reftrial, parameters.phase, stereopair, extension);
 }
 
 std::string Utils::buildRoiFilePath(const cppxdic::BaseParameters& parameters, std::string reftrial, int stereopair, const std::string& extension) {
@@ -1094,6 +1132,32 @@ std::string Utils::buildSeedFilePath(const cppxdic::BaseParameters& parameters, 
 std::string Utils::buildMatchingFilePath(const cppxdic::BaseParameters& parameters, std::string reftrial, int stereopair, const std::string& extension) {
     return parameters.outputPath + "/MATCHING2" + reftrial + "_pair" + std::to_string(stereopair) + extension;
 }
+
+std::string Utils::buildDic3DCombinedFilePath(const std::string pathdir, int num_pair, const std::string& ext) {
+    return pathdir + "DIC3Dcombined_" + std::to_string(num_pair) + "Pairs_stitched" + ext;
+}
+
+std::string Utils::buildDic3DPPresultsFilePath(const std::string pathdir, int num_pair, const std::string& fileversion, const std::string& ext) {
+    return pathdir + "DIC3DPPresults_" + std::to_string(num_pair) + "Pairs_cum_" + fileversion + ext;
+}
+                   
+std::string Utils::buildVizPath(const std::string pathdir, const std::string filename) {
+    return pathdir + "viz/" + filename;
+}
+
+std::string Utils::buildDic2DPairResultsFilePath(const std::string pathdir, int cam_1, int cam_2, const std::string& extension) {
+    return pathdir + "/myDIC2DpairResults_C_" + 
+           std::to_string(cam_1) + "_C_" + std::to_string(cam_2) + extension;
+}
+
+std::string Utils::buildNcorrFilePath(const std::string pathdir, int cam_1, int cam_2, const std::string& extension) {
+    if (cam_2 == -1) {
+        return pathdir + "/ncorr" + std::to_string(cam_1) + extension;
+    }
+    return pathdir + "/ncorr" + std::to_string(cam_1) + std::to_string(cam_2) + extension;
+}
+
+
 
 
 

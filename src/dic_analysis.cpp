@@ -40,12 +40,11 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
     try {
         for (int trial : trial_target) {
             // Step F works on combined 3D reconstruction, not per-pair
-            std::string output_dir = config_.dic_path + "/" + config_.subject_id + "/" + config_.material;
+            std::string output_dir = Utils::buildOutputUntilPhaseDir(config_, trial);
             
             // Load DIC3Dcombined from Step E output using configured format
             auto serializer = cppxdic::DataSerializer::create(config_.data_format);
-            std::string dic3d_file = output_dir + "/DIC3Dcombined_" + std::to_string(config_.num_pair) 
-                                   + "Pairs_stitched" + serializer->extension();
+            std::string dic3d_file = Utils::buildDic3DCombinedFilePath(output_dir, config_.num_pair, serializer->extension());
             
             if (!std::filesystem::exists(dic3d_file)) {
                 std::cerr << "ERROR: DIC3Dcombined file not found: " << dic3d_file << std::endl;
@@ -529,8 +528,7 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
             // Save DIC3DPPresults using configured format
             {
                 auto pp_serializer = cppxdic::DataSerializer::create(config_.data_format);
-                std::string ppout = output_dir + "/DIC3DPPresults_" + std::to_string(config_.num_pair) 
-                                  + "Pairs_cum_" + config_.fileversion + pp_serializer->extension();
+                std::string ppout = Utils::buildDic3DPPresultsFilePath(output_dir, config_.num_pair, config_.fileversion, pp_serializer->extension());
                 
                 if (std::filesystem::exists(ppout)) {
                     std::cout << "\nCheckpoint found: " << ppout << " (skipping)" << std::endl;
@@ -558,24 +556,17 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                     
                     // Prepare visualization data
                     auto vis_data = viz.prepareVisualizationData(ppresults);
-                    
-                    // Export visualization data
-                    std::ostringstream viz_path;
-                    viz_path << output_dir << "/viz/trial_" 
-                             << std::setfill('0') << std::setw(3) << trial 
-                             << "_" << config_.phase_id;
-                    
+            
                     // Create viz directory if needed
-                    std::filesystem::create_directories(output_dir + "/viz");
-                    
-                    viz.exportData(vis_data, viz_path.str());
+                    std::filesystem::create_directories(output_dir + "viz");
+
+                    // Export visualization data
+                    auto viz_path = Utils::buildVizPath(output_dir, "trial.txt");
+                    viz.exportData(vis_data, viz_path);
                     
                     // Generate summary statistics
-                    std::ostringstream stats_path;
-                    stats_path << output_dir << "/viz/trial_" 
-                               << std::setfill('0') << std::setw(3) << trial 
-                               << "_summary.txt";
-                    viz.generateSummaryStats(ppresults, stats_path.str());
+                    auto stats_path = Utils::buildVizPath(output_dir, "trial_summary.txt");
+                    viz.generateSummaryStats(ppresults, stats_path);
                     
                     std::cout << "✓ Visualization exports complete" << std::endl;
                     
@@ -874,10 +865,10 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 const std::vector<double>& L2 = dlt_cam2.DLTparams;
                 
                 // Load ncorr DIC outputs from output directory (ncorr native .bin format)
-                std::string output_dir = config_.dic_path + "/" + config_.subject_id + "/" + config_.material + "/" + trial_str.str() + "/" + config_.phase_id;
-                std::string cam1_bin = output_dir + "/ncorr" + std::to_string(cam_1) + ".bin";
-                std::string cam2_bin = output_dir + "/ncorr" + std::to_string(cam_2) + ".bin";
-                std::string matching_bin = output_dir + "/ncorr" + std::to_string(cam_1) + std::to_string(cam_2) + ".bin";
+                std::string output_dir = Utils::buildOutputUntilPhaseDir(config_, trial);
+                std::string cam1_bin = Utils::buildNcorrFilePath(output_dir, cam_1, -1, ".bin");
+                std::string cam2_bin = Utils::buildNcorrFilePath(output_dir, cam_2, -1, ".bin");
+                std::string matching_bin = Utils::buildNcorrFilePath(output_dir, cam_1, cam_2, ".bin");
                 
                 if (!std::filesystem::exists(cam1_bin) || !std::filesystem::exists(cam2_bin)) {
                     std::cerr << "Missing cached 2D outputs for trial " << trial << ", pair " << pair << ". Skipping." << std::endl;
@@ -1160,13 +1151,12 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 // Load DIC2D pair results from Step D output files
                 std::cout << "\n=== Loading DIC2D pair results ===" << std::endl;
                 auto d_serializer = cppxdic::DataSerializer::create(config_.data_format);
-                std::string output_dir = config_.dic_path + "/" + config_.subject_id + "/" + config_.material;
+                std::string output_dir = Utils::buildOutputUntilPhaseDir(config_, trial);
                 for (int pair = 1; pair <= config_.num_pair; ++pair) {
                     int cam_1, cam_2;
                     Utils::getCamerasForPair(pair, cam_1, cam_2);
                     
-                    std::string dic2d_file = output_dir + "/" + trial_str.str() + "/" + config_.phase_id + "/myDIC2DpairResults_C_" + 
-                        std::to_string(cam_1) + "_C_" + std::to_string(cam_2) + d_serializer->extension();
+                    std::string dic2d_file = Utils::buildDic2DPairResultsFilePath(output_dir, cam_1, cam_2, d_serializer->extension());
                     
                     if (std::filesystem::exists(dic2d_file)) {
                         DIC2DPairResults dic2d_result;
@@ -1198,9 +1188,8 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
             // Save DIC3Dcombined using configured format
             {
                 auto e_serializer = cppxdic::DataSerializer::create(config_.data_format);
-                std::string e_out = config_.dic_path + "/" + config_.subject_id + "/" + config_.material
-                                  + "/DIC3Dcombined_" + std::to_string(config_.num_pair) 
-                                  + "Pairs_stitched" + e_serializer->extension();
+                auto output_dir = Utils::buildOutputUntilPhaseDir(config_, trial);
+                std::string e_out = Utils::buildDic3DCombinedFilePath(output_dir, config_.num_pair, e_serializer->extension());
                 
                 if (std::filesystem::exists(e_out)) {
                     std::cout << "Checkpoint found: " << e_out << " (skipping)" << std::endl;
@@ -1277,17 +1266,13 @@ bool DicAnalysis::run() {
     // Helper lambda: Check if 2D DIC outputs exist for all trials/pairs
     auto check_2d_outputs_exist = [&]() -> bool {
         for (int trial : trial_target) {
+            auto output_dir = Utils::buildOutputUntilPhaseDir(config_, trial);
             for (int pair = 1; pair <= config_.num_pair; ++pair) {
                 int cam1, cam2;
                 Utils::getCamerasForPair(pair, cam1, cam2);
 
-                std::ostringstream path;
-                path << config_.dic_path << "/" << config_.subject_id << "/" 
-                     << config_.material << "/"
-                     << std::setfill('0') << std::setw(3) << trial << "/"
-                     << config_.phase_id << "/"
-                     << "myDIC2DpairResults_C_" << cam1 << "_C_" << cam2 << ext;
-                if (!std::filesystem::exists(path.str())) {
+                std::string path = Utils::buildDic2DPairResultsFilePath(output_dir, cam1, cam2, ext);
+                if (!std::filesystem::exists(path)) {
                     return false;
                 }
             }
@@ -1297,19 +1282,26 @@ bool DicAnalysis::run() {
     
     // Helper lambda: Check if 3D reconstruction outputs exist
     auto check_3d_outputs_exist = [&]() -> bool {
-        std::string dic3d_file = config_.dic_path + "/" + config_.subject_id + "/" 
-                               + config_.material + "/DIC3Dcombined_" 
-                               + std::to_string(config_.num_pair) + "Pairs_stitched" + ext;
-        return std::filesystem::exists(dic3d_file);
+        for (int trial : trial_target) {
+            auto output_dir = Utils::buildOutputUntilPhaseDir(config_, trial);
+            std::string dic3d_file = Utils::buildDic3DCombinedFilePath(output_dir, config_.num_pair, ext);
+            if (!std::filesystem::exists(dic3d_file)) {
+                return false;
+            }
+        }
+        return true;
     };
     
     // Helper lambda: Check if deformation analysis outputs exist
     auto check_deformation_outputs_exist = [&]() -> bool {
-        std::string pp_file = config_.dic_path + "/" + config_.subject_id + "/" 
-                            + config_.material + "/DIC3DPPresults_" 
-                            + std::to_string(config_.num_pair) + "Pairs_cum_" 
-                            + config_.fileversion + ext;
-        return std::filesystem::exists(pp_file);
+        for (int trial : trial_target) {
+            auto output_dir = Utils::buildOutputUntilPhaseDir(config_, trial);
+            std::string pp_file = Utils::buildDic3DPPresultsFilePath(output_dir, config_.num_pair, config_.fileversion, ext);
+            if (!std::filesystem::exists(pp_file)) {
+                return false;
+            }
+        }
+        return true;
     };
     
     // STEP D: 2D-DIC
