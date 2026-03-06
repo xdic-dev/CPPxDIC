@@ -15,6 +15,7 @@
 #include <matio.h>
 // JSON
 #include <nlohmann/json.hpp>
+#include <string>
 
 bool Utils::dicCheck(const Config& config) {
     std::cout << "Checking data and protocol..." << std::endl;
@@ -53,7 +54,7 @@ bool Utils::dicCheck(const Config& config) {
 
 bool Utils::checkCalibrationFiles(const Config& config) {
     try {
-        std::string calib_dir = config.dic_path + "/" + config.subject_id + "/calib/" + config.calib_folder_set + "/";
+        std::string calib_dir = Utils::buildCalibDir(config);
         if (!std::filesystem::exists(calib_dir)) {
             std::cerr << "Calibration directory not found: " << calib_dir << std::endl;
             return false;
@@ -994,13 +995,14 @@ std::string Utils::buildBaseDataPath(const Config &config, bool with_data_or_dic
         }
     } else {
         path += config.dic_path;
+        path += "/" + config.subject_id;
     }
     
     return path;
 }
 
 
-std::string Utils::buildPath(const Config& config, bool with_data_or_dic_path, bool with_rawdata, bool with_speckles, bool with_material, bool with_video, bool with_protocol) {
+std::string Utils::buildPath(const Config& config, bool with_data_or_dic_path, bool with_rawdata, bool with_speckles, bool with_material, bool with_video, bool with_protocol, bool with_calib) {
     std::string path = buildBaseDataPath(config, with_data_or_dic_path, with_rawdata, with_speckles);
     
     if (with_material) {
@@ -1015,6 +1017,10 @@ std::string Utils::buildPath(const Config& config, bool with_data_or_dic_path, b
         path += "/protocol";
     }
     
+    if (with_calib) {
+        path += "/calib/" + config.calib_folder_set;
+    }
+    
     return path;
 }
 
@@ -1026,6 +1032,12 @@ std::string Utils::buildProtocolDir(const Config& config, bool with_data_or_dic_
 
 std::string Utils::buildVideoDir(const Config& config, bool with_data_or_dic_path, bool with_rawdata, bool with_speckles, bool with_material) {
     std::string path = buildPath(config, with_data_or_dic_path, with_rawdata, with_speckles, with_material, true, false);
+    
+    return path + "/";
+}
+
+std::string Utils::buildCalibDir(const Config &config) {
+    std::string path = buildPath(config, false, false, false, false, false, false, true);
     
     return path + "/";
 }

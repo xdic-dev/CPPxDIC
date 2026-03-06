@@ -692,8 +692,7 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
             // Load DLT calibrations for ALL cameras upfront (matches MATLAB step3)
             // MATLAB: DLTstructAllCams{ic} = load(DLTpath{ic}).DLTstructCam
             // ------------------------------------------------------------------
-            std::string calib_dir = config_.data_path + "/rawdata/" + config_.subject_id
-                                  + "/speckles/" + config_.material + "/calibration/";
+            std::string calib_dir = Utils::buildCalibDir(config_);
             
             // Collect unique camera indices across all pairs
             std::set<int> unique_cams;

@@ -17,7 +17,7 @@
  *         ncorr2.bin                      (cam2 DIC output)
  *         ncorr12.bin                     (matching displacement)
  *       myDIC2DpairResults_C_1_C_2.mat    (optional, from formatOutput)
- *     rawdata/<subject>/speckles/<material>/calibration/
+ *     dic_output/<subject>/calib/calib_folder_set/
  *       DLTstruct_cam1.mat                (DLT calibration cam1)
  *       DLTstruct_cam2.mat                (DLT calibration cam2)
  *     matlab_reference/

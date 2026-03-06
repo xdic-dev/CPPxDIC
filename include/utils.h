@@ -162,9 +162,10 @@ public:
      * @param with_material Whether to include material in the path (default as false)
      * @param with_video Whether to include video in the path (default as false)
      * @param with_protocol Whether to include protocol in the path (default as false)
+     * @param with_calib Whether to include calib and calib folder set in the path (default as false)
      * @return The constructed path string
      */
-    static std::string buildPath(const Config& config, bool with_data_or_dic_path = false, bool with_rawdata = false, bool with_speckles = false, bool with_material = false, bool with_video = false, bool with_protocol = false);
+    static std::string buildPath(const Config& config, bool with_data_or_dic_path = false, bool with_rawdata = false, bool with_speckles = false, bool with_material = false, bool with_video = false, bool with_protocol = false, bool with_calib = false);
 
      /**
      * Build protocol path
@@ -189,6 +190,12 @@ public:
      */
     static std::string buildVideoDir(const Config& config, bool with_data_or_dic_path = false, bool with_rawdata = false, bool with_speckles = false, bool with_material = false);
 
+    /**
+     * Build the calib path
+     * @param config The base configuration class (required)
+     * @return The constructed path string
+     */
+    static std::string buildCalibDir(const Config& config);
 
     /**
      * Build the path based on activated parameters and return the proper string
