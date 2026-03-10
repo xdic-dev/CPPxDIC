@@ -59,7 +59,7 @@ public:
     int ref_trial_id = 5;
     
     // Frame settings
-    int idx_frame_start = 1;
+    int idx_frame_start = 10;
     int idx_frame_end = 150;
     int frame_jump = 1;
     

@@ -568,6 +568,22 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                     auto stats_path = Utils::buildVizPath(output_dir, "trial_summary.txt");
                     viz.generateSummaryStats(ppresults, stats_path);
                     
+                    // Generate videos if enabled
+                    if (config_.generate_videos) {
+                        std::cout << "\n--- Generating Videos ---" << std::endl;
+                        for (const auto& field : config_.plotopt) {
+                            std::string video_path = output_dir + "viz/" + field + "_video.avi";
+                            viz.generateVideo(vis_data, video_path, field);
+                        }
+                        // Also generate displacement magnitude video if not in plotopt
+                        if (std::find(config_.plotopt.begin(), config_.plotopt.end(), "DispMgn") == config_.plotopt.end()) {
+                            if (vis_data.FaceScalars.count("DispMgn") || !ppresults.Disp.DispMgn.empty()) {
+                                std::string video_path = output_dir + "viz/DispMgn_video.avi";
+                                viz.generateVideo(vis_data, video_path, "DispMgn");
+                            }
+                        }
+                    }
+                    
                     std::cout << "✓ Visualization exports complete" << std::endl;
                     
                 } catch (const std::exception& e) {

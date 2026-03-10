@@ -4,11 +4,13 @@
 
 #include "visualization.h"
 #include "dic_structures.h"
+#include "strain_computation.h"
 #include <fstream>
 #include <iostream>
 #include <iomanip>
 #include <cmath>
 #include <algorithm>
+#include <functional>
 #include <filesystem>
 #include <map>
 #include <set>
@@ -352,19 +354,37 @@ std::vector<std::vector<double>> Visualization::extractScalarField(
         field_data = results.Disp.DispMgn;
     } else if (field_name == "FaceCorrComb") {
         field_data = results.FaceCorrComb;
-    } else if (field_name == "Epc1" || field_name == "Epc2") {
-        // Compute principal strains
-        std::vector<std::vector<double>> Epc1, Epc2;
-        // Note: This requires the Deform data to be populated
-        // For now, return empty if not available
-        std::cout << "Warning: Principal strain computation requires Deform data" << std::endl;
-    } else if (field_name == "J") {
-        // Jacobian/volume change
-        // Note: Requires Deform data
-        std::cout << "Warning: J field requires Deform data" << std::endl;
-    } else if (field_name == "EShearMax") {
-        // Max shear strain
-        std::cout << "Warning: Max shear strain requires Deform data" << std::endl;
+    } else if (!results.deform_full.frames.empty()) {
+        // Extract from deform_full (FrameDeformationResult) — all 15 scalar fields
+        size_t df_frames = results.deform_full.n_frames;
+        
+        // Map field name to member accessor
+        std::function<const std::vector<double>&(const DeformationResult&)> accessor;
+        if      (field_name == "Epc1")      accessor = [](const DeformationResult& d) -> const std::vector<double>& { return d.Epc1; };
+        else if (field_name == "Epc2")      accessor = [](const DeformationResult& d) -> const std::vector<double>& { return d.Epc2; };
+        else if (field_name == "epc1")      accessor = [](const DeformationResult& d) -> const std::vector<double>& { return d.epc1; };
+        else if (field_name == "epc2")      accessor = [](const DeformationResult& d) -> const std::vector<double>& { return d.epc2; };
+        else if (field_name == "J")         accessor = [](const DeformationResult& d) -> const std::vector<double>& { return d.J; };
+        else if (field_name == "EShearMax") accessor = [](const DeformationResult& d) -> const std::vector<double>& { return d.EShearMax; };
+        else if (field_name == "eShearMax") accessor = [](const DeformationResult& d) -> const std::vector<double>& { return d.eShearMax; };
+        else if (field_name == "Emgn")      accessor = [](const DeformationResult& d) -> const std::vector<double>& { return d.Emgn; };
+        else if (field_name == "emgn")      accessor = [](const DeformationResult& d) -> const std::vector<double>& { return d.emgn; };
+        else if (field_name == "Eeq")       accessor = [](const DeformationResult& d) -> const std::vector<double>& { return d.Eeq; };
+        else if (field_name == "eeq")       accessor = [](const DeformationResult& d) -> const std::vector<double>& { return d.eeq; };
+        else if (field_name == "Lamda1")    accessor = [](const DeformationResult& d) -> const std::vector<double>& { return d.Lamda1; };
+        else if (field_name == "Lamda2")    accessor = [](const DeformationResult& d) -> const std::vector<double>& { return d.Lamda2; };
+        else if (field_name == "Area")      accessor = [](const DeformationResult& d) -> const std::vector<double>& { return d.Area; };
+        else if (field_name == "Dnorm")     accessor = [](const DeformationResult& d) -> const std::vector<double>& { return d.Dnorm; };
+        
+        if (accessor) {
+            for (size_t i = 0; i < df_frames && i < results.deform_full.frames.size(); ++i) {
+                field_data.push_back(accessor(results.deform_full.frames[i]));
+            }
+        } else {
+            std::cerr << "Warning: Unknown deformation field '" << field_name << "'" << std::endl;
+        }
+    } else {
+        std::cerr << "Warning: No deformation data available for field '" << field_name << "'" << std::endl;
     }
     
     return field_data;
@@ -1053,6 +1073,227 @@ std::vector<std::vector<double>> Visualization::butterworthFilter(
               << " point time series" << std::endl;
     
     return result;
+}
+
+cv::Vec3b Visualization::applyJetColormap(double val) {
+    // Clamp to [0, 1]
+    val = std::max(0.0, std::min(1.0, val));
+    
+    // Use OpenCV's built-in jet colormap via LUT
+    cv::Mat gray(1, 1, CV_8UC1, cv::Scalar(static_cast<uchar>(val * 255)));
+    cv::Mat color;
+    cv::applyColorMap(gray, color, cv::COLORMAP_JET);
+    return color.at<cv::Vec3b>(0, 0);
+}
+
+cv::Mat Visualization::renderFrame(const VisData& vis_data, int frame_idx,
+                                    const std::string& field_name,
+                                    double data_min, double data_max,
+                                    int width, int height) {
+    cv::Mat img(height, width, CV_8UC3, cv::Scalar(255, 255, 255)); // white background
+    
+    const auto& pts = vis_data.Points3D[frame_idx];
+    size_t n_points = pts.x.size();
+    size_t n_faces = vis_data.Faces.size() / 3;
+    
+    if (n_points == 0 || n_faces == 0) return img;
+    
+    // Get scalar data for this frame (if available)
+    const std::vector<double>* scalar_data = nullptr;
+    if (!field_name.empty()) {
+        auto it = vis_data.FaceScalars.find(field_name);
+        if (it != vis_data.FaceScalars.end() && 
+            frame_idx < static_cast<int>(it->second.size())) {
+            scalar_data = &it->second[frame_idx];
+        }
+    }
+    
+    // Compute bounding box for orthographic projection
+    double xmin = *std::min_element(pts.x.begin(), pts.x.end());
+    double xmax = *std::max_element(pts.x.begin(), pts.x.end());
+    double ymin = *std::min_element(pts.y.begin(), pts.y.end());
+    double ymax = *std::max_element(pts.y.begin(), pts.y.end());
+    
+    double range_x = xmax - xmin;
+    double range_y = ymax - ymin;
+    if (range_x < 1e-10) range_x = 1.0;
+    if (range_y < 1e-10) range_y = 1.0;
+    
+    // Fit mesh into image with margin
+    int margin = 40;
+    int draw_w = width - 2 * margin;
+    int draw_h = height - 2 * margin - 40; // extra space for colorbar
+    double scale = std::min(draw_w / range_x, draw_h / range_y);
+    double cx = (xmin + xmax) / 2.0;
+    double cy = (ymin + ymax) / 2.0;
+    
+    // Project 3D points to 2D (orthographic: use X and Y, ignore Z for now)
+    auto project = [&](size_t idx) -> cv::Point {
+        int px = margin + static_cast<int>((pts.x[idx] - cx) * scale + draw_w / 2.0);
+        int py = margin + static_cast<int>((cy - pts.y[idx]) * scale + draw_h / 2.0); // flip Y
+        return cv::Point(px, py);
+    };
+    
+    // Sort faces by average Z (painter's algorithm: draw far faces first)
+    struct FaceZ { size_t idx; double z; };
+    std::vector<FaceZ> sorted_faces(n_faces);
+    for (size_t i = 0; i < n_faces; ++i) {
+        int v0 = vis_data.Faces[i * 3];
+        int v1 = vis_data.Faces[i * 3 + 1];
+        int v2 = vis_data.Faces[i * 3 + 2];
+        double avg_z = 0;
+        int cnt = 0;
+        if (v0 >= 0 && v0 < static_cast<int>(n_points)) { avg_z += pts.z[v0]; cnt++; }
+        if (v1 >= 0 && v1 < static_cast<int>(n_points)) { avg_z += pts.z[v1]; cnt++; }
+        if (v2 >= 0 && v2 < static_cast<int>(n_points)) { avg_z += pts.z[v2]; cnt++; }
+        sorted_faces[i] = {i, cnt > 0 ? avg_z / cnt : 0.0};
+    }
+    std::sort(sorted_faces.begin(), sorted_faces.end(),
+              [](const FaceZ& a, const FaceZ& b) { return a.z < b.z; });
+    
+    // Draw triangles
+    double data_range = data_max - data_min;
+    if (data_range < 1e-15) data_range = 1.0;
+    
+    for (const auto& fz : sorted_faces) {
+        size_t fi = fz.idx;
+        int v0 = vis_data.Faces[fi * 3];
+        int v1 = vis_data.Faces[fi * 3 + 1];
+        int v2 = vis_data.Faces[fi * 3 + 2];
+        
+        if (v0 < 0 || v0 >= static_cast<int>(n_points) ||
+            v1 < 0 || v1 >= static_cast<int>(n_points) ||
+            v2 < 0 || v2 >= static_cast<int>(n_points)) continue;
+        
+        cv::Point tri[3] = { project(v0), project(v1), project(v2) };
+        
+        // Determine face color
+        cv::Scalar color(200, 200, 200); // default gray
+        if (scalar_data && fi < scalar_data->size()) {
+            double val = (*scalar_data)[fi];
+            if (!std::isnan(val)) {
+                double norm = (val - data_min) / data_range;
+                cv::Vec3b c = applyJetColormap(norm);
+                color = cv::Scalar(c[0], c[1], c[2]);
+            }
+        }
+        
+        cv::fillConvexPoly(img, tri, 3, color);
+        // Draw wireframe edges
+        cv::line(img, tri[0], tri[1], cv::Scalar(60, 60, 60), 1, cv::LINE_AA);
+        cv::line(img, tri[1], tri[2], cv::Scalar(60, 60, 60), 1, cv::LINE_AA);
+        cv::line(img, tri[2], tri[0], cv::Scalar(60, 60, 60), 1, cv::LINE_AA);
+    }
+    
+    // Draw colorbar at bottom
+    if (scalar_data) {
+        int cb_x = margin;
+        int cb_y = height - 35;
+        int cb_w = width - 2 * margin;
+        int cb_h = 15;
+        for (int x = 0; x < cb_w; ++x) {
+            double norm = static_cast<double>(x) / cb_w;
+            cv::Vec3b c = applyJetColormap(norm);
+            cv::line(img, cv::Point(cb_x + x, cb_y), cv::Point(cb_x + x, cb_y + cb_h),
+                     cv::Scalar(c[0], c[1], c[2]));
+        }
+        cv::rectangle(img, cv::Point(cb_x, cb_y), cv::Point(cb_x + cb_w, cb_y + cb_h),
+                       cv::Scalar(0, 0, 0), 1);
+        
+        // Labels
+        std::ostringstream ss_min, ss_max;
+        ss_min << std::fixed << std::setprecision(4) << data_min;
+        ss_max << std::fixed << std::setprecision(4) << data_max;
+        cv::putText(img, ss_min.str(), cv::Point(cb_x, cb_y + cb_h + 12),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.35, cv::Scalar(0, 0, 0), 1);
+        cv::putText(img, ss_max.str(), cv::Point(cb_x + cb_w - 50, cb_y + cb_h + 12),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.35, cv::Scalar(0, 0, 0), 1);
+        if (!field_name.empty()) {
+            cv::putText(img, field_name, cv::Point(cb_x + cb_w / 2 - 20, cb_y - 5),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(0, 0, 0), 1);
+        }
+    }
+    
+    // Frame number label
+    cv::putText(img, "Frame " + std::to_string(frame_idx),
+                cv::Point(width - 100, 20), cv::FONT_HERSHEY_SIMPLEX, 0.4,
+                cv::Scalar(0, 0, 0), 1);
+    
+    return img;
+}
+
+void Visualization::generateVideo(const VisData& vis_data,
+                                   const std::string& output_path,
+                                   const std::string& field_name) {
+    if (vis_data.n_frames == 0) {
+        std::cerr << "Warning: No frames to generate video" << std::endl;
+        return;
+    }
+    
+    int width = 800;
+    int height = 600;
+    int fps = config_.video_fps;
+    
+    // Parse codec from config (e.g., "MJPG")
+    int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
+    if (config_.video_codec.size() >= 4) {
+        fourcc = cv::VideoWriter::fourcc(
+            config_.video_codec[0], config_.video_codec[1],
+            config_.video_codec[2], config_.video_codec[3]);
+    }
+    
+    // Determine data range across all frames for consistent colormap
+    double data_min = std::numeric_limits<double>::max();
+    double data_max = std::numeric_limits<double>::lowest();
+    
+    std::string active_field = field_name;
+    if (active_field.empty() && !vis_data.FaceScalars.empty()) {
+        active_field = vis_data.FaceScalars.begin()->first;
+    }
+    
+    if (!active_field.empty()) {
+        auto it = vis_data.FaceScalars.find(active_field);
+        if (it != vis_data.FaceScalars.end()) {
+            for (const auto& frame_data : it->second) {
+                for (double v : frame_data) {
+                    if (!std::isnan(v)) {
+                        data_min = std::min(data_min, v);
+                        data_max = std::max(data_max, v);
+                    }
+                }
+            }
+        }
+    }
+    if (data_min >= data_max) { data_min = 0; data_max = 1; }
+    
+    // Override with manual range if configured
+    if (config_.colormap_range_mode == "manual") {
+        data_min = config_.colormap_min;
+        data_max = config_.colormap_max;
+    }
+    
+    std::cout << "Generating video: " << output_path 
+              << " (" << vis_data.n_frames << " frames, " << fps << " fps, field=" 
+              << active_field << ", range=[" << data_min << ", " << data_max << "])" << std::endl;
+    
+    // Create output directory if needed
+    std::filesystem::create_directories(std::filesystem::path(output_path).parent_path());
+    
+    cv::VideoWriter writer(output_path, fourcc, fps, cv::Size(width, height));
+    if (!writer.isOpened()) {
+        std::cerr << "Error: Failed to open video writer: " << output_path << std::endl;
+        return;
+    }
+    
+    for (size_t i = 0; i < vis_data.n_frames; ++i) {
+        cv::Mat frame = renderFrame(vis_data, static_cast<int>(i),
+                                     active_field, data_min, data_max,
+                                     width, height);
+        writer.write(frame);
+    }
+    
+    writer.release();
+    std::cout << "✓ Video saved: " << output_path << std::endl;
 }
 
 } // namespace cppxdic

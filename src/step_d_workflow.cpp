@@ -1076,6 +1076,26 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     
     std::cout << "  Created both Lagrangian and Eulerian perspectives" << std::endl;
     
+    // Save debug videos if debug mode is enabled
+    if (config_.debug_mode) {
+        std::string video_dir = std::filesystem::path(output_path).parent_path().string() + "/debug_video/";
+        std::filesystem::create_directories(video_dir);
+        std::string base_name = std::filesystem::path(output_path).stem().string();
+        double alpha = config_.video_alpha;
+        double fps = static_cast<double>(config_.video_fps);
+        
+        std::cout << "  Saving debug DIC videos to " << video_dir << std::endl;
+        try {
+            ncorr::save_DIC_video(video_dir + base_name + "_v_eulerian.avi",
+                           dic_input, dic_eulerian, ncorr::DISP::V, alpha, fps);
+            ncorr::save_DIC_video(video_dir + base_name + "_u_eulerian.avi",
+                           dic_input, dic_eulerian, ncorr::DISP::U, alpha, fps);
+            std::cout << "  ✓ Debug DIC videos saved" << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "  Warning: Failed to save debug videos: " << e.what() << std::endl;
+        }
+    }
+    
     // Save ncorr output directly as binary (ncorr's native format)
     // output_path already has .bin extension
     save(dic_lagrangian, output_path);

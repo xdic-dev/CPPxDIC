@@ -187,7 +187,23 @@ public:
      * @return Success status
      */
     static bool write3DCombinedResults(const std::string& filename,
-                                       const DIC3Dcombined& combined);
+                                       const DIC3Dcombined& combined,
+                                       const std::string& struct_name = "DIC3Dcombined");
+    
+    /**
+     * Build combined struct fields as a matvar_t* (for embedding in parent struct)
+     * Does NOT write to file. Caller is responsible for writing and freeing.
+     * 
+     * @param matfp MAT file pointer (needed for AllPairsResults/DIC2Dinfo)
+     * @param combined 3D combined results structure
+     * @param struct_name Name of the wrapping struct
+     * @param extra_fields Additional field names to add to the struct
+     * @return matvar_t* struct with all fields populated (caller must write+free)
+     */
+    static matvar_t* buildCombinedStructFields(mat_t* matfp,
+                                                const DIC3Dcombined& combined,
+                                                const std::string& struct_name,
+                                                const std::vector<std::string>& extra_fields = {});
     
     /**
      * Write DIC3DPPresults_XPairs_Y_v1.mat file
@@ -212,6 +228,13 @@ public:
     static bool writeDeformationGroup(mat_t* matfp,
                                       const std::string& group_name,
                                       const FrameDeformationResult& deform_data);
+    
+    /**
+     * Build deformation struct as matvar_t* for embedding in parent struct
+     * Does NOT write to file. Caller owns the returned pointer.
+     */
+    static matvar_t* buildDeformationStruct(const std::string& group_name,
+                                             const FrameDeformationResult& deform_data);
     
     /**
      * Write displacement group (DispVec, DispMgn)

@@ -1275,28 +1275,28 @@ bool MatWriter::writeDIC2DPairResults(const std::string& filename,
     return true;
 }
 
-bool MatWriter::write3DCombinedResults(const std::string& filename,
-                                       const DIC3Dcombined& combined) {
-    mat_t* matfp = createMatFileHDF5(filename);
-    if (!matfp) {
-        std::cerr << "Failed to create DIC3Dcombined file: " << filename << std::endl;
-        return false;
-    }
-    
-    // Create parent struct to wrap all fields
+matvar_t* MatWriter::buildCombinedStructFields(mat_t* matfp,
+                                                 const DIC3Dcombined& combined,
+                                                 const std::string& struct_name,
+                                                 const std::vector<std::string>& extra_fields) {
+    // Base fields for DIC3Dcombined
     std::vector<std::string> combined_fields = {
         "pairIndices", "Points3D", "Faces", "FaceColors", "corrComb",
         "FaceCorrComb", "FaceCentroids", "Disp", "FacePairInds",
         "PointPairInds", "calibration", "distortion", "AllPairsResults", "DIC2Dinfo"
     };
-    matvar_t* combined_struct = createStructVariable("DIC3Dcombined", combined_fields);
-    if (!combined_struct) {
-        std::cerr << "Failed to create DIC3Dcombined struct" << std::endl;
-        Mat_Close(matfp);
-        return false;
+    // Append any extra fields (e.g. Deform, FaceIsoInd for PPresults)
+    for (const auto& f : extra_fields) {
+        combined_fields.push_back(f);
     }
     
-    // Create pairIndices variable
+    matvar_t* combined_struct = createStructVariable(struct_name, combined_fields);
+    if (!combined_struct) {
+        std::cerr << "Failed to create " << struct_name << " struct" << std::endl;
+        return nullptr;
+    }
+    
+    // pairIndices
     if (!combined.pairIndices.empty()) {
         std::vector<size_t> dims = {combined.pairIndices.size(), 1};
         matvar_t* pair_ind_var = Mat_VarCreate("pairIndices", MAT_C_INT32, MAT_T_INT32,
@@ -1304,381 +1304,309 @@ bool MatWriter::write3DCombinedResults(const std::string& filename,
         Mat_VarSetStructFieldByName(combined_struct, "pairIndices", 0, pair_ind_var);
     }
     
-    // Write Points3D as cell array
+    // Points3D cell array
     size_t n_frames = combined.Points3D.size();
-    std::vector<size_t> cell_dims = {1, n_frames};
-    matvar_t* points3d_cell = Mat_VarCreate("Points3D", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
-    
-    for (size_t i = 0; i < n_frames; ++i) {
-        const auto& pts = combined.Points3D[i];
-        std::vector<std::string> pt_fields = {"x", "y", "z"};
-        matvar_t* pt_struct = createStructVariable("point3d", pt_fields);
-        
-        // Write x, y, z arrays if they contain data
-        size_t n_points = pts.x.size();
-        if (n_points > 0) {
-            std::vector<size_t> dims = {n_points, 1};
-            
-            // Create x array
-            matvar_t* x_var = Mat_VarCreate("x", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
-                                            (void*)pts.x.data(), 0);
-            Mat_VarSetStructFieldByName(pt_struct, "x", 0, x_var);
-            
-            // Create y array
-            matvar_t* y_var = Mat_VarCreate("y", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
-                                            (void*)pts.y.data(), 0);
-            Mat_VarSetStructFieldByName(pt_struct, "y", 0, y_var);
-            
-            // Create z array
-            matvar_t* z_var = Mat_VarCreate("z", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
-                                            (void*)pts.z.data(), 0);
-            Mat_VarSetStructFieldByName(pt_struct, "z", 0, z_var);
+    {
+        std::vector<size_t> cell_dims = {1, n_frames};
+        matvar_t* points3d_cell = Mat_VarCreate("Points3D", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
+        for (size_t i = 0; i < n_frames; ++i) {
+            const auto& pts = combined.Points3D[i];
+            std::vector<std::string> pt_fields = {"x", "y", "z"};
+            matvar_t* pt_struct = createStructVariable("point3d", pt_fields);
+            size_t n_points = pts.x.size();
+            if (n_points > 0) {
+                std::vector<size_t> dims = {n_points, 1};
+                Mat_VarSetStructFieldByName(pt_struct, "x", 0,
+                    Mat_VarCreate("x", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), (void*)pts.x.data(), 0));
+                Mat_VarSetStructFieldByName(pt_struct, "y", 0,
+                    Mat_VarCreate("y", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), (void*)pts.y.data(), 0));
+                Mat_VarSetStructFieldByName(pt_struct, "z", 0,
+                    Mat_VarCreate("z", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), (void*)pts.z.data(), 0));
+            }
+            Mat_VarSetCell(points3d_cell, i, pt_struct);
         }
-        
-        Mat_VarSetCell(points3d_cell, i, pt_struct);
+        Mat_VarSetStructFieldByName(combined_struct, "Points3D", 0, points3d_cell);
     }
     
-    Mat_VarSetStructFieldByName(combined_struct, "Points3D", 0, points3d_cell);
-    
-    // Create Faces variable (convert 0-indexed C++ to 1-indexed MATLAB)
+    // Faces (convert 0-indexed C++ to 1-indexed MATLAB)
     if (!combined.Faces.empty()) {
         size_t n_faces = combined.Faces.size() / 3;
         std::vector<size_t> dims = {n_faces, 3};
         std::vector<int> faces_1indexed(combined.Faces.size());
-        for (size_t i = 0; i < combined.Faces.size(); ++i) {
+        for (size_t i = 0; i < combined.Faces.size(); ++i)
             faces_1indexed[i] = combined.Faces[i] + 1;
-        }
-        matvar_t* faces_var = Mat_VarCreate("Faces", MAT_C_INT32, MAT_T_INT32,
-                                           2, dims.data(), (void*)faces_1indexed.data(), 0);
-        Mat_VarSetStructFieldByName(combined_struct, "Faces", 0, faces_var);
+        Mat_VarSetStructFieldByName(combined_struct, "Faces", 0,
+            Mat_VarCreate("Faces", MAT_C_INT32, MAT_T_INT32, 2, dims.data(), (void*)faces_1indexed.data(), 0));
     }
     
-    // Create FaceColors variable
+    // FaceColors
     if (!combined.FaceColors.empty()) {
         std::vector<size_t> dims = {combined.FaceColors.size(), 1};
-        matvar_t* fc_var = Mat_VarCreate("FaceColors", MAT_C_DOUBLE, MAT_T_DOUBLE,
-                                        2, dims.data(), (void*)combined.FaceColors.data(), 0);
-        Mat_VarSetStructFieldByName(combined_struct, "FaceColors", 0, fc_var);
+        Mat_VarSetStructFieldByName(combined_struct, "FaceColors", 0,
+            Mat_VarCreate("FaceColors", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), (void*)combined.FaceColors.data(), 0));
     }
     
-    // Write corrComb as cell array
+    // corrComb cell array
     if (!combined.corrComb.empty()) {
-        size_t n_frames_corr = combined.corrComb.size();
-        std::vector<size_t> cell_dims = {1, n_frames_corr};
-        matvar_t* corr_cell = Mat_VarCreate("corrComb", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
-        
-        for (size_t i = 0; i < n_frames_corr; ++i) {
-            const auto& corr_frame = combined.corrComb[i];
-            if (!corr_frame.empty()) {
-                std::vector<size_t> dims = {corr_frame.size(), 1};
-                matvar_t* corr_var = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
-                                                  (void*)corr_frame.data(), 0);
-                Mat_VarSetCell(corr_cell, i, corr_var);
+        size_t n = combined.corrComb.size();
+        std::vector<size_t> cd = {1, n};
+        matvar_t* corr_cell = Mat_VarCreate("corrComb", MAT_C_CELL, MAT_T_CELL, 2, cd.data(), nullptr, 0);
+        for (size_t i = 0; i < n; ++i) {
+            const auto& cf = combined.corrComb[i];
+            if (!cf.empty()) {
+                std::vector<size_t> d = {cf.size(), 1};
+                Mat_VarSetCell(corr_cell, i, Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, d.data(), (void*)cf.data(), 0));
             }
         }
         Mat_VarSetStructFieldByName(combined_struct, "corrComb", 0, corr_cell);
     }
     
-    // Write FaceCorrComb as cell array
+    // FaceCorrComb cell array
     if (!combined.FaceCorrComb.empty()) {
-        size_t n_frames_face = combined.FaceCorrComb.size();
-        std::vector<size_t> cell_dims = {1, n_frames_face};
-        matvar_t* face_corr_cell = Mat_VarCreate("FaceCorrComb", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
-        
-        for (size_t i = 0; i < n_frames_face; ++i) {
-            const auto& face_corr = combined.FaceCorrComb[i];
-            if (!face_corr.empty()) {
-                std::vector<size_t> dims = {face_corr.size(), 1};
-                matvar_t* fc_var = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
-                                                (void*)face_corr.data(), 0);
-                Mat_VarSetCell(face_corr_cell, i, fc_var);
+        size_t n = combined.FaceCorrComb.size();
+        std::vector<size_t> cd = {1, n};
+        matvar_t* fcc = Mat_VarCreate("FaceCorrComb", MAT_C_CELL, MAT_T_CELL, 2, cd.data(), nullptr, 0);
+        for (size_t i = 0; i < n; ++i) {
+            const auto& fc = combined.FaceCorrComb[i];
+            if (!fc.empty()) {
+                std::vector<size_t> d = {fc.size(), 1};
+                Mat_VarSetCell(fcc, i, Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, d.data(), (void*)fc.data(), 0));
             }
         }
-        Mat_VarSetStructFieldByName(combined_struct, "FaceCorrComb", 0, face_corr_cell);
+        Mat_VarSetStructFieldByName(combined_struct, "FaceCorrComb", 0, fcc);
     }
     
-    // Write FaceCentroids as cell array
+    // FaceCentroids cell array
     if (!combined.FaceCentroids.empty()) {
-        size_t n_frames_cent = combined.FaceCentroids.size();
-        std::vector<size_t> cell_dims = {1, n_frames_cent};
-        matvar_t* cent_cell = Mat_VarCreate("FaceCentroids", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
-        
-        for (size_t i = 0; i < n_frames_cent; ++i) {
-            const auto& centroids = combined.FaceCentroids[i];
-            if (!centroids.empty()) {
-                std::vector<size_t> dims = {centroids.size(), 1};
-                matvar_t* cent_var = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
-                                                  (void*)centroids.data(), 0);
-                Mat_VarSetCell(cent_cell, i, cent_var);
+        size_t n = combined.FaceCentroids.size();
+        std::vector<size_t> cd = {1, n};
+        matvar_t* cc = Mat_VarCreate("FaceCentroids", MAT_C_CELL, MAT_T_CELL, 2, cd.data(), nullptr, 0);
+        for (size_t i = 0; i < n; ++i) {
+            const auto& c = combined.FaceCentroids[i];
+            if (!c.empty()) {
+                std::vector<size_t> d = {c.size(), 1};
+                Mat_VarSetCell(cc, i, Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, d.data(), (void*)c.data(), 0));
             }
         }
-        Mat_VarSetStructFieldByName(combined_struct, "FaceCentroids", 0, cent_cell);
+        Mat_VarSetStructFieldByName(combined_struct, "FaceCentroids", 0, cc);
     }
     
-    // Write Displacement data
-    std::vector<std::string> disp_fields = {"DispVec", "DispMgn"};
-    matvar_t* disp_struct = createStructVariable("Disp", disp_fields);
-    
-    // Write DispVec if available
-    if (!combined.Disp.DispVec.empty()) {
-        size_t n_disp = combined.Disp.DispVec.size();
-        std::vector<size_t> cell_dims = {1, n_disp};
-        matvar_t* disp_vec_cell = Mat_VarCreate("DispVec", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
-        
-        for (size_t i = 0; i < n_disp; ++i) {
-            const auto& disp_vec = combined.Disp.DispVec[i];
-            if (!disp_vec.empty()) {
-                std::vector<size_t> dims = {disp_vec.size(), 1};
-                matvar_t* dv_var = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
-                                                (void*)disp_vec.data(), 0);
-                Mat_VarSetCell(disp_vec_cell, i, dv_var);
+    // Disp sub-struct
+    {
+        std::vector<std::string> disp_fields = {"DispVec", "DispMgn"};
+        matvar_t* disp_struct = createStructVariable("Disp", disp_fields);
+        if (!combined.Disp.DispVec.empty()) {
+            size_t n = combined.Disp.DispVec.size();
+            std::vector<size_t> cd = {1, n};
+            matvar_t* dvc = Mat_VarCreate("DispVec", MAT_C_CELL, MAT_T_CELL, 2, cd.data(), nullptr, 0);
+            for (size_t i = 0; i < n; ++i) {
+                const auto& dv = combined.Disp.DispVec[i];
+                if (!dv.empty()) {
+                    std::vector<size_t> d = {dv.size(), 1};
+                    Mat_VarSetCell(dvc, i, Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, d.data(), (void*)dv.data(), 0));
+                }
             }
+            Mat_VarSetStructFieldByName(disp_struct, "DispVec", 0, dvc);
         }
-        Mat_VarSetStructFieldByName(disp_struct, "DispVec", 0, disp_vec_cell);
-    }
-    
-    // Write DispMgn if available
-    if (!combined.Disp.DispMgn.empty()) {
-        size_t n_mgn = combined.Disp.DispMgn.size();
-        std::vector<size_t> cell_dims = {1, n_mgn};
-        matvar_t* disp_mgn_cell = Mat_VarCreate("DispMgn", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
-        
-        for (size_t i = 0; i < n_mgn; ++i) {
-            const auto& disp_mgn = combined.Disp.DispMgn[i];
-            if (!disp_mgn.empty()) {
-                std::vector<size_t> dims = {disp_mgn.size(), 1};
-                matvar_t* dm_var = Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), 
-                                                (void*)disp_mgn.data(), 0);
-                Mat_VarSetCell(disp_mgn_cell, i, dm_var);
+        if (!combined.Disp.DispMgn.empty()) {
+            size_t n = combined.Disp.DispMgn.size();
+            std::vector<size_t> cd = {1, n};
+            matvar_t* dmc = Mat_VarCreate("DispMgn", MAT_C_CELL, MAT_T_CELL, 2, cd.data(), nullptr, 0);
+            for (size_t i = 0; i < n; ++i) {
+                const auto& dm = combined.Disp.DispMgn[i];
+                if (!dm.empty()) {
+                    std::vector<size_t> d = {dm.size(), 1};
+                    Mat_VarSetCell(dmc, i, Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, d.data(), (void*)dm.data(), 0));
+                }
             }
+            Mat_VarSetStructFieldByName(disp_struct, "DispMgn", 0, dmc);
         }
-        Mat_VarSetStructFieldByName(disp_struct, "DispMgn", 0, disp_mgn_cell);
+        Mat_VarSetStructFieldByName(combined_struct, "Disp", 0, disp_struct);
     }
     
-    Mat_VarSetStructFieldByName(combined_struct, "Disp", 0, disp_struct);
-    
-    // Create FacePairInds variable
+    // FacePairInds
     if (!combined.FacePairInds.empty()) {
         std::vector<size_t> dims = {combined.FacePairInds.size(), 1};
-        matvar_t* fpi_var = Mat_VarCreate("FacePairInds", MAT_C_INT32, MAT_T_INT32,
-                                         2, dims.data(), (void*)combined.FacePairInds.data(), 0);
-        Mat_VarSetStructFieldByName(combined_struct, "FacePairInds", 0, fpi_var);
+        Mat_VarSetStructFieldByName(combined_struct, "FacePairInds", 0,
+            Mat_VarCreate("FacePairInds", MAT_C_INT32, MAT_T_INT32, 2, dims.data(), (void*)combined.FacePairInds.data(), 0));
     }
     
-    // Create PointPairInds variable
+    // PointPairInds
     if (!combined.PointPairInds.empty()) {
         std::vector<size_t> dims = {combined.PointPairInds.size(), 1};
-        matvar_t* ppi_var = Mat_VarCreate("PointPairInds", MAT_C_INT32, MAT_T_INT32,
-                                         2, dims.data(), (void*)combined.PointPairInds.data(), 0);
-        Mat_VarSetStructFieldByName(combined_struct, "PointPairInds", 0, ppi_var);
+        Mat_VarSetStructFieldByName(combined_struct, "PointPairInds", 0,
+            Mat_VarCreate("PointPairInds", MAT_C_INT32, MAT_T_INT32, 2, dims.data(), (void*)combined.PointPairInds.data(), 0));
     }
     
-    // Write calibration and distortion groups as children of combined_struct
+    // calibration sub-struct
     if (!combined.calibration.DLT_paths.empty()) {
-        // Create calibration struct inline
         std::vector<std::string> calib_fields = {"DLTpath", "DLTparameters"};
         matvar_t* calib_struct = createStructVariable("calibration", calib_fields);
-        
         size_t rows = combined.calibration.DLT_paths.size();
         size_t cols = (rows > 0) ? combined.calibration.DLT_paths[0].size() : 0;
-        
-        matvar_t* dlt_path_cell = createCellArray2DFromStrings("DLTpath", combined.calibration.DLT_paths, rows, cols);
-        matvar_t* dlt_params_cell = createCellArray2DFromVectors("DLTparameters", combined.calibration.DLT_params, rows, cols);
-        
-        Mat_VarSetStructFieldByName(calib_struct, "DLTpath", 0, dlt_path_cell);
-        Mat_VarSetStructFieldByName(calib_struct, "DLTparameters", 0, dlt_params_cell);
+        Mat_VarSetStructFieldByName(calib_struct, "DLTpath", 0,
+            createCellArray2DFromStrings("DLTpath", combined.calibration.DLT_paths, rows, cols));
+        Mat_VarSetStructFieldByName(calib_struct, "DLTparameters", 0,
+            createCellArray2DFromVectors("DLTparameters", combined.calibration.DLT_params, rows, cols));
         Mat_VarSetStructFieldByName(combined_struct, "calibration", 0, calib_struct);
     }
     
+    // distortion sub-struct
     if (!combined.distortion.distortion_models.empty()) {
-        // Create distortion struct inline
         std::vector<std::string> dist_fields = {"distortionModel", "distortionPath"};
         matvar_t* dist_struct = createStructVariable("distortion", dist_fields);
-        
         size_t rows = combined.distortion.distortion_models.size();
         size_t cols = (rows > 0) ? combined.distortion.distortion_models[0].size() : 0;
-        
-        matvar_t* dist_model_cell = createCellArray2DFromStrings("distortionModel", combined.distortion.distortion_models, rows, cols);
-        matvar_t* dist_path_cell = createCellArray2DFromStrings("distortionPath", combined.distortion.distortion_paths, rows, cols);
-        
-        Mat_VarSetStructFieldByName(dist_struct, "distortionModel", 0, dist_model_cell);
-        Mat_VarSetStructFieldByName(dist_struct, "distortionPath", 0, dist_path_cell);
+        Mat_VarSetStructFieldByName(dist_struct, "distortionModel", 0,
+            createCellArray2DFromStrings("distortionModel", combined.distortion.distortion_models, rows, cols));
+        Mat_VarSetStructFieldByName(dist_struct, "distortionPath", 0,
+            createCellArray2DFromStrings("distortionPath", combined.distortion.distortion_paths, rows, cols));
         Mat_VarSetStructFieldByName(combined_struct, "distortion", 0, dist_struct);
     }
     
-    // Write AllPairsResults and DIC2Dinfo as children
+    // AllPairsResults and DIC2Dinfo: write to file first, read back, attach to struct
     writeAllPairsResults(matfp, combined.AllPairsResults);
     writeDIC2Dinfo(matfp, combined.DIC2Dinfo);
-    
-    // Read back the AllPairsResults and DIC2Dinfo that were just written and add to struct
     matvar_t* apr_var = Mat_VarRead(matfp, "AllPairsResults");
-    if (apr_var) {
-        Mat_VarSetStructFieldByName(combined_struct, "AllPairsResults", 0, apr_var);
-    }
-    
+    if (apr_var) Mat_VarSetStructFieldByName(combined_struct, "AllPairsResults", 0, apr_var);
     matvar_t* dic2d_var = Mat_VarRead(matfp, "DIC2Dinfo");
-    if (dic2d_var) {
-        Mat_VarSetStructFieldByName(combined_struct, "DIC2Dinfo", 0, dic2d_var);
+    if (dic2d_var) Mat_VarSetStructFieldByName(combined_struct, "DIC2Dinfo", 0, dic2d_var);
+    
+    return combined_struct;
+}
+
+bool MatWriter::write3DCombinedResults(const std::string& filename,
+                                       const DIC3Dcombined& combined,
+                                       const std::string& struct_name) {
+    mat_t* matfp = createMatFileHDF5(filename);
+    if (!matfp) {
+        std::cerr << "Failed to create file: " << filename << std::endl;
+        return false;
     }
     
-    // Write the complete parent struct
+    matvar_t* combined_struct = buildCombinedStructFields(matfp, combined, struct_name);
+    if (!combined_struct) {
+        Mat_Close(matfp);
+        return false;
+    }
+    
     Mat_VarWrite(matfp, combined_struct, MAT_COMPRESSION_NONE);
     Mat_VarFree(combined_struct);
-    
     Mat_Close(matfp);
-    std::cout << "Wrote DIC3Dcombined: " << filename << std::endl;
+    std::cout << "Wrote " << struct_name << ": " << filename << std::endl;
     return true;
 }
 
 bool MatWriter::write3DPPresults(const std::string& filename,
                                 const DIC3DPPresults& ppresults) {
-    // First write all DIC3Dcombined fields
-    if (!write3DCombinedResults(filename, ppresults)) {
-        return false;
-    }
-    
-    // Reopen to add deformation fields
-    mat_t* matfp = Mat_Open(filename.c_str(), MAT_ACC_RDWR);
+    mat_t* matfp = createMatFileHDF5(filename);
     if (!matfp) {
-        std::cerr << "Failed to reopen file for deformation data: " << filename << std::endl;
+        std::cerr << "Failed to create DIC3DPPresults file: " << filename << std::endl;
         return false;
     }
     
-    // Write full Deformation group with all 39 fields
+    // Build combined struct with extra fields for PP results
+    std::vector<std::string> extra_fields = {"Deform", "FaceIsoInd", "deftype"};
+    matvar_t* pp_struct = buildCombinedStructFields(matfp, ppresults, "DIC3DPPresults", extra_fields);
+    if (!pp_struct) {
+        Mat_Close(matfp);
+        return false;
+    }
+    
+    // Add Deform sub-struct inside the parent struct
     if (!ppresults.deform_full.frames.empty()) {
         std::cout << "Writing full Deform group with " << ppresults.deform_full.n_frames 
                   << " frames and " << ppresults.deform_full.n_faces << " faces..." << std::endl;
-        if (!writeDeformationGroup(matfp, "Deform", ppresults.deform_full)) {
-            std::cerr << "Warning: Failed to write Deform group" << std::endl;
+        matvar_t* deform_struct = buildDeformationStruct("Deform", ppresults.deform_full);
+        if (deform_struct) {
+            Mat_VarSetStructFieldByName(pp_struct, "Deform", 0, deform_struct);
+        } else {
+            std::cerr << "Warning: Failed to build Deform struct" << std::endl;
         }
     } else {
         std::cout << "Warning: No deformation data available, skipping Deform group" << std::endl;
     }
     
-    // Write FaceIsoInd
+    // Add FaceIsoInd as cell array inside the struct
     if (!ppresults.FaceIsoInd.empty()) {
-        std::vector<size_t> dims = {ppresults.FaceIsoInd.size(), 1};
-        writeArrayVariable(matfp, "FaceIsoInd", ppresults.FaceIsoInd.data(), dims, 
-                          MAT_T_DOUBLE, MAT_C_DOUBLE);
+        size_t n_frames_iso = ppresults.FaceIsoInd.size();
+        std::vector<size_t> cell_dims = {1, n_frames_iso};
+        matvar_t* iso_cell = Mat_VarCreate("FaceIsoInd", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
+        for (size_t i = 0; i < n_frames_iso; ++i) {
+            const auto& iso = ppresults.FaceIsoInd[i];
+            if (!iso.empty()) {
+                std::vector<size_t> d = {iso.size(), 1};
+                Mat_VarSetCell(iso_cell, i, Mat_VarCreate("", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, d.data(), (void*)iso.data(), 0));
+            }
+        }
+        Mat_VarSetStructFieldByName(pp_struct, "FaceIsoInd", 0, iso_cell);
     }
     
-    // Write deftype
-    writeStringVariable(matfp, "deftype", ppresults.deftype);
+    // Add deftype string inside the struct
+    if (!ppresults.deftype.empty()) {
+        size_t str_dims[2] = {1, ppresults.deftype.size()};
+        matvar_t* deftype_var = Mat_VarCreate("deftype", MAT_C_CHAR, MAT_T_UTF8,
+                                              2, str_dims, (void*)ppresults.deftype.c_str(), 0);
+        if (deftype_var) {
+            Mat_VarSetStructFieldByName(pp_struct, "deftype", 0, deftype_var);
+        }
+    }
     
+    // Write the complete struct and close
+    Mat_VarWrite(matfp, pp_struct, MAT_COMPRESSION_NONE);
+    Mat_VarFree(pp_struct);
     Mat_Close(matfp);
     std::cout << "Wrote DIC3DPPresults: " << filename << std::endl;
     return true;
 }
 
-bool MatWriter::writeDeformationGroup(mat_t* matfp,
-                                      const std::string& group_name,
-                                      const FrameDeformationResult& deform_data) {
-    if (!matfp) {
-        std::cerr << "Invalid MAT file pointer" << std::endl;
-        return false;
-    }
-    
+matvar_t* MatWriter::buildDeformationStruct(const std::string& group_name,
+                                              const FrameDeformationResult& deform_data) {
     size_t n_frames = deform_data.n_frames;
-    size_t n_faces = deform_data.n_faces;
     
-    std::cout << "Writing deformation group '" << group_name << "' with " 
-              << n_frames << " frames and " << n_faces << " faces" << std::endl;
+    // Prepare data: vector<vector<T>> where outer = frames, inner = faces
+    std::vector<std::vector<double>> Area_data(n_frames), Lamda1_data(n_frames), Lamda2_data(n_frames);
+    std::vector<std::vector<double>> J_data(n_frames), Emgn_data(n_frames), emgn_data(n_frames);
+    std::vector<std::vector<double>> Epc1_data(n_frames), Epc2_data(n_frames);
+    std::vector<std::vector<double>> epc1_data(n_frames), epc2_data(n_frames);
+    std::vector<std::vector<double>> EShearMax_data(n_frames), eShearMax_data(n_frames);
+    std::vector<std::vector<double>> Eeq_data(n_frames), eeq_data(n_frames), Dnorm_data(n_frames);
     
-    // Prepare data in format: vector<vector<T>> where outer = frames, inner = faces
-    // Scalars
-    std::vector<std::vector<double>> Area_data(n_frames);
-    std::vector<std::vector<double>> Lamda1_data(n_frames);
-    std::vector<std::vector<double>> Lamda2_data(n_frames);
-    std::vector<std::vector<double>> J_data(n_frames);
-    std::vector<std::vector<double>> Emgn_data(n_frames);
-    std::vector<std::vector<double>> emgn_data(n_frames);
-    std::vector<std::vector<double>> Epc1_data(n_frames);
-    std::vector<std::vector<double>> Epc2_data(n_frames);
-    std::vector<std::vector<double>> epc1_data(n_frames);
-    std::vector<std::vector<double>> epc2_data(n_frames);
-    std::vector<std::vector<double>> EShearMax_data(n_frames);
-    std::vector<std::vector<double>> eShearMax_data(n_frames);
-    std::vector<std::vector<double>> Eeq_data(n_frames);
-    std::vector<std::vector<double>> eeq_data(n_frames);
-    std::vector<std::vector<double>> Dnorm_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> D1_data(n_frames), D2_data(n_frames), D3_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> d1_data(n_frames), d2_data(n_frames), d3_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> Drec1_data(n_frames), Drec2_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> Epc1vec_data(n_frames), Epc2vec_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> Epc1vecCur_data(n_frames), Epc2vecCur_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> epc1vec_data(n_frames), epc2vec_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> EShearMaxVec1_data(n_frames), EShearMaxVec2_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> EShearMaxVecCur1_data(n_frames), EShearMaxVecCur2_data(n_frames);
+    std::vector<std::vector<Eigen::Vector3d>> eShearMaxVec1_data(n_frames), eShearMaxVec2_data(n_frames);
     
-    // Vectors (3D)
-    std::vector<std::vector<Eigen::Vector3d>> D1_data(n_frames);
-    std::vector<std::vector<Eigen::Vector3d>> D2_data(n_frames);
-    std::vector<std::vector<Eigen::Vector3d>> D3_data(n_frames);
-    std::vector<std::vector<Eigen::Vector3d>> d1_data(n_frames);
-    std::vector<std::vector<Eigen::Vector3d>> d2_data(n_frames);
-    std::vector<std::vector<Eigen::Vector3d>> d3_data(n_frames);
-    std::vector<std::vector<Eigen::Vector3d>> Drec1_data(n_frames);
-    std::vector<std::vector<Eigen::Vector3d>> Drec2_data(n_frames);
-    std::vector<std::vector<Eigen::Vector3d>> Epc1vec_data(n_frames);
-    std::vector<std::vector<Eigen::Vector3d>> Epc2vec_data(n_frames);
-    std::vector<std::vector<Eigen::Vector3d>> Epc1vecCur_data(n_frames);
-    std::vector<std::vector<Eigen::Vector3d>> Epc2vecCur_data(n_frames);
-    std::vector<std::vector<Eigen::Vector3d>> epc1vec_data(n_frames);
-    std::vector<std::vector<Eigen::Vector3d>> epc2vec_data(n_frames);
-    std::vector<std::vector<Eigen::Vector3d>> EShearMaxVec1_data(n_frames);
-    std::vector<std::vector<Eigen::Vector3d>> EShearMaxVec2_data(n_frames);
-    std::vector<std::vector<Eigen::Vector3d>> EShearMaxVecCur1_data(n_frames);
-    std::vector<std::vector<Eigen::Vector3d>> EShearMaxVecCur2_data(n_frames);
-    std::vector<std::vector<Eigen::Vector3d>> eShearMaxVec1_data(n_frames);
-    std::vector<std::vector<Eigen::Vector3d>> eShearMaxVec2_data(n_frames);
+    std::vector<std::vector<Eigen::Matrix3d>> Fmat_data(n_frames), Cmat_data(n_frames);
+    std::vector<std::vector<Eigen::Matrix3d>> Emat_data(n_frames), emat_data(n_frames);
     
-    // Matrices (3x3)
-    std::vector<std::vector<Eigen::Matrix3d>> Fmat_data(n_frames);
-    std::vector<std::vector<Eigen::Matrix3d>> Cmat_data(n_frames);
-    std::vector<std::vector<Eigen::Matrix3d>> Emat_data(n_frames);
-    std::vector<std::vector<Eigen::Matrix3d>> emat_data(n_frames);
-    
-    // Copy data from frames
     for (size_t i = 0; i < n_frames && i < deform_data.frames.size(); ++i) {
         const auto& frame = deform_data.frames[i];
-        
-        Area_data[i] = frame.Area;
-        Lamda1_data[i] = frame.Lamda1;
-        Lamda2_data[i] = frame.Lamda2;
-        J_data[i] = frame.J;
-        Emgn_data[i] = frame.Emgn;
-        emgn_data[i] = frame.emgn;
-        Epc1_data[i] = frame.Epc1;
-        Epc2_data[i] = frame.Epc2;
-        epc1_data[i] = frame.epc1;
-        epc2_data[i] = frame.epc2;
-        EShearMax_data[i] = frame.EShearMax;
-        eShearMax_data[i] = frame.eShearMax;
-        Eeq_data[i] = frame.Eeq;
-        eeq_data[i] = frame.eeq;
-        Dnorm_data[i] = frame.Dnorm;
-        
-        D1_data[i] = frame.D1;
-        D2_data[i] = frame.D2;
-        D3_data[i] = frame.D3;
-        d1_data[i] = frame.d1;
-        d2_data[i] = frame.d2;
-        d3_data[i] = frame.d3;
-        Drec1_data[i] = frame.Drec1;
-        Drec2_data[i] = frame.Drec2;
-        Epc1vec_data[i] = frame.Epc1vec;
-        Epc2vec_data[i] = frame.Epc2vec;
-        Epc1vecCur_data[i] = frame.Epc1vecCur;
-        Epc2vecCur_data[i] = frame.Epc2vecCur;
-        epc1vec_data[i] = frame.epc1vec;
-        epc2vec_data[i] = frame.epc2vec;
-        EShearMaxVec1_data[i] = frame.EShearMaxVec1;
-        EShearMaxVec2_data[i] = frame.EShearMaxVec2;
-        EShearMaxVecCur1_data[i] = frame.EShearMaxVecCur1;
-        EShearMaxVecCur2_data[i] = frame.EShearMaxVecCur2;
-        eShearMaxVec1_data[i] = frame.eShearMaxVec1;
-        eShearMaxVec2_data[i] = frame.eShearMaxVec2;
-        
-        Fmat_data[i] = frame.Fmat;
-        Cmat_data[i] = frame.Cmat;
-        Emat_data[i] = frame.Emat;
-        emat_data[i] = frame.emat;
+        Area_data[i] = frame.Area; Lamda1_data[i] = frame.Lamda1; Lamda2_data[i] = frame.Lamda2;
+        J_data[i] = frame.J; Emgn_data[i] = frame.Emgn; emgn_data[i] = frame.emgn;
+        Epc1_data[i] = frame.Epc1; Epc2_data[i] = frame.Epc2;
+        epc1_data[i] = frame.epc1; epc2_data[i] = frame.epc2;
+        EShearMax_data[i] = frame.EShearMax; eShearMax_data[i] = frame.eShearMax;
+        Eeq_data[i] = frame.Eeq; eeq_data[i] = frame.eeq; Dnorm_data[i] = frame.Dnorm;
+        D1_data[i] = frame.D1; D2_data[i] = frame.D2; D3_data[i] = frame.D3;
+        d1_data[i] = frame.d1; d2_data[i] = frame.d2; d3_data[i] = frame.d3;
+        Drec1_data[i] = frame.Drec1; Drec2_data[i] = frame.Drec2;
+        Epc1vec_data[i] = frame.Epc1vec; Epc2vec_data[i] = frame.Epc2vec;
+        Epc1vecCur_data[i] = frame.Epc1vecCur; Epc2vecCur_data[i] = frame.Epc2vecCur;
+        epc1vec_data[i] = frame.epc1vec; epc2vec_data[i] = frame.epc2vec;
+        EShearMaxVec1_data[i] = frame.EShearMaxVec1; EShearMaxVec2_data[i] = frame.EShearMaxVec2;
+        EShearMaxVecCur1_data[i] = frame.EShearMaxVecCur1; EShearMaxVecCur2_data[i] = frame.EShearMaxVecCur2;
+        eShearMaxVec1_data[i] = frame.eShearMaxVec1; eShearMaxVec2_data[i] = frame.eShearMaxVec2;
+        Fmat_data[i] = frame.Fmat; Cmat_data[i] = frame.Cmat;
+        Emat_data[i] = frame.Emat; emat_data[i] = frame.emat;
     }
     
-    // Create and write cell arrays for all 36 fields
-    // Scalars (15 fields)
+    // Create cell arrays for all fields
     matvar_t* Area_cell = createCellArrayFromScalars("Area", Area_data, n_frames);
     matvar_t* Lamda1_cell = createCellArrayFromScalars("Lamda1", Lamda1_data, n_frames);
     matvar_t* Lamda2_cell = createCellArrayFromScalars("Lamda2", Lamda2_data, n_frames);
@@ -1695,7 +1623,6 @@ bool MatWriter::writeDeformationGroup(mat_t* matfp,
     matvar_t* eeq_cell = createCellArrayFromScalars("eeq", eeq_data, n_frames);
     matvar_t* Dnorm_cell = createCellArrayFromScalars("Dnorm", Dnorm_data, n_frames);
     
-    // Vectors (20 fields)
     matvar_t* D1_cell = createCellArrayFromVectors("D1", D1_data, n_frames);
     matvar_t* D2_cell = createCellArrayFromVectors("D2", D2_data, n_frames);
     matvar_t* D3_cell = createCellArrayFromVectors("D3", D3_data, n_frames);
@@ -1717,13 +1644,12 @@ bool MatWriter::writeDeformationGroup(mat_t* matfp,
     matvar_t* eShearMaxVec1_cell = createCellArrayFromVectors("eShearMaxVec1", eShearMaxVec1_data, n_frames);
     matvar_t* eShearMaxVec2_cell = createCellArrayFromVectors("eShearMaxVec2", eShearMaxVec2_data, n_frames);
     
-    // Matrices (4 fields)
     matvar_t* Fmat_cell = createCellArrayFromMatrices("Fmat", Fmat_data, n_frames);
     matvar_t* Cmat_cell = createCellArrayFromMatrices("Cmat", Cmat_data, n_frames);
     matvar_t* Emat_cell = createCellArrayFromMatrices("Emat", Emat_data, n_frames);
     matvar_t* emat_cell = createCellArrayFromMatrices("emat", emat_data, n_frames);
     
-    // Create parent Deform struct/group to wrap all fields
+    // Create parent struct
     std::vector<std::string> deform_fields = {
         "Area", "Lamda1", "Lamda2", "J", "Emgn", "emgn",
         "Epc1", "Epc2", "epc1", "epc2", "EShearMax", "eShearMax",
@@ -1735,7 +1661,6 @@ bool MatWriter::writeDeformationGroup(mat_t* matfp,
     };
     matvar_t* deform_struct = createStructVariable(group_name, deform_fields);
     
-    // Add all cell arrays to parent struct (don't write directly)
     Mat_VarSetStructFieldByName(deform_struct, "Area", 0, Area_cell);
     Mat_VarSetStructFieldByName(deform_struct, "Lamda1", 0, Lamda1_cell);
     Mat_VarSetStructFieldByName(deform_struct, "Lamda2", 0, Lamda2_cell);
@@ -1751,7 +1676,6 @@ bool MatWriter::writeDeformationGroup(mat_t* matfp,
     Mat_VarSetStructFieldByName(deform_struct, "Eeq", 0, Eeq_cell);
     Mat_VarSetStructFieldByName(deform_struct, "eeq", 0, eeq_cell);
     Mat_VarSetStructFieldByName(deform_struct, "Dnorm", 0, Dnorm_cell);
-    
     Mat_VarSetStructFieldByName(deform_struct, "D1", 0, D1_cell);
     Mat_VarSetStructFieldByName(deform_struct, "D2", 0, D2_cell);
     Mat_VarSetStructFieldByName(deform_struct, "D3", 0, D3_cell);
@@ -1772,65 +1696,34 @@ bool MatWriter::writeDeformationGroup(mat_t* matfp,
     Mat_VarSetStructFieldByName(deform_struct, "EShearMaxVecCur2", 0, EShearMaxVecCur2_cell);
     Mat_VarSetStructFieldByName(deform_struct, "eShearMaxVec1", 0, eShearMaxVec1_cell);
     Mat_VarSetStructFieldByName(deform_struct, "eShearMaxVec2", 0, eShearMaxVec2_cell);
-    
     Mat_VarSetStructFieldByName(deform_struct, "Fmat", 0, Fmat_cell);
     Mat_VarSetStructFieldByName(deform_struct, "Cmat", 0, Cmat_cell);
     Mat_VarSetStructFieldByName(deform_struct, "Emat", 0, Emat_cell);
     Mat_VarSetStructFieldByName(deform_struct, "emat", 0, emat_cell);
     
-    // Write parent struct (writes all 39 fields as children)
-    Mat_VarWrite(matfp, deform_struct, MAT_COMPRESSION_NONE);
+    std::cout << "Built deformation struct '" << group_name << "' with " 
+              << n_frames << " frames and " << deform_data.n_faces << " faces" << std::endl;
+    return deform_struct;
+}
+
+bool MatWriter::writeDeformationGroup(mat_t* matfp,
+                                      const std::string& group_name,
+                                      const FrameDeformationResult& deform_data) {
+    if (!matfp) {
+        std::cerr << "Invalid MAT file pointer" << std::endl;
+        return false;
+    }
     
-    // Free parent struct (frees all children)
+    matvar_t* deform_struct = buildDeformationStruct(group_name, deform_data);
+    if (!deform_struct) {
+        std::cerr << "Failed to build deformation struct" << std::endl;
+        return false;
+    }
+    
+    Mat_VarWrite(matfp, deform_struct, MAT_COMPRESSION_NONE);
     Mat_VarFree(deform_struct);
     
-    // Note: Individual cell arrays are freed when parent struct is freed
-    // No need to free them individually
-    /*
-    Mat_VarFree(Area_cell);
-    Mat_VarFree(Lamda1_cell);
-    Mat_VarFree(Lamda2_cell);
-    Mat_VarFree(J_cell);
-    Mat_VarFree(Emgn_cell);
-    Mat_VarFree(emgn_cell);
-    Mat_VarFree(Epc1_cell);
-    Mat_VarFree(Epc2_cell);
-    Mat_VarFree(epc1_cell);
-    Mat_VarFree(epc2_cell);
-    Mat_VarFree(EShearMax_cell);
-    Mat_VarFree(eShearMax_cell);
-    Mat_VarFree(Eeq_cell);
-    Mat_VarFree(eeq_cell);
-    Mat_VarFree(Dnorm_cell);
-    
-    Mat_VarFree(D1_cell);
-    Mat_VarFree(D2_cell);
-    Mat_VarFree(D3_cell);
-    Mat_VarFree(d1_cell);
-    Mat_VarFree(d2_cell);
-    Mat_VarFree(d3_cell);
-    Mat_VarFree(Drec1_cell);
-    Mat_VarFree(Drec2_cell);
-    Mat_VarFree(Epc1vec_cell);
-    Mat_VarFree(Epc2vec_cell);
-    Mat_VarFree(Epc1vecCur_cell);
-    Mat_VarFree(Epc2vecCur_cell);
-    Mat_VarFree(epc1vec_cell);
-    Mat_VarFree(epc2vec_cell);
-    Mat_VarFree(EShearMaxVec1_cell);
-    Mat_VarFree(EShearMaxVec2_cell);
-    Mat_VarFree(EShearMaxVecCur1_cell);
-    Mat_VarFree(EShearMaxVecCur2_cell);
-    Mat_VarFree(eShearMaxVec1_cell);
-    Mat_VarFree(eShearMaxVec2_cell);
-    
-    Mat_VarFree(Fmat_cell);
-    Mat_VarFree(Cmat_cell);
-    Mat_VarFree(Emat_cell);
-    Mat_VarFree(emat_cell);
-    */
-    
-    std::cout << "Successfully wrote all 39 deformation fields to '" << group_name << "' group" << std::endl;
+    std::cout << "Successfully wrote all deformation fields to '" << group_name << "' group" << std::endl;
     return true;
 }
 

@@ -9,6 +9,7 @@
 
 #include "dic_structures.h"
 #include "config.h"
+#include <opencv2/opencv.hpp>
 #include <string>
 #include <vector>
 #include <map>
@@ -110,6 +111,18 @@ public:
                         int frame_idx);
 
     /**
+     * Generate video from visualization data
+     * Renders each frame as a 2D projection of the colored mesh and stitches into video
+     * Equivalent to MATLAB's saveAnimationFunc
+     * @param vis_data Visualization data
+     * @param output_path Output video file path (e.g., .avi)
+     * @param field_name Scalar field to colormap (e.g., "Epc1")
+     */
+    void generateVideo(const VisData& vis_data,
+                       const std::string& output_path,
+                       const std::string& field_name = "");
+
+    /**
      * Generate summary statistics file
      * @param results DIC results
      * @param output_path Output file path
@@ -174,6 +187,21 @@ private:
         const std::vector<std::vector<double>>& data,
         double cutoff_freq,
         double sample_freq);
+
+    /**
+     * Render a single frame of the 3D mesh to a cv::Mat image
+     * Uses orthographic projection with colormapped face scalars
+     */
+    cv::Mat renderFrame(const VisData& vis_data, int frame_idx,
+                        const std::string& field_name,
+                        double data_min, double data_max,
+                        int width, int height);
+
+    /**
+     * Apply jet-like colormap to a normalized value [0,1]
+     * Returns BGR color
+     */
+    static cv::Vec3b applyJetColormap(double val);
 };
 
 } // namespace cppxdic
