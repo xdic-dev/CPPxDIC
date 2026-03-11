@@ -778,7 +778,7 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     }
                 }
             }
-            bool use_distortion_removal = (distortion_all_cams.size() == unique_cams.size());
+            bool use_distortion_removal = config_.step_e_distortion_removal;
             if (use_distortion_removal) {
                 std::cout << "Distortion removal enabled for all " << unique_cams.size() << " cameras" << std::endl;
                 
@@ -930,11 +930,51 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 std::vector<int> faces; std::vector<int> indexLUT; int W=0,H=0;
                 build_faces_from_roi(dic1.disps.front().get_roi(), faces, indexLUT, W, H);
 
+                // Compute FaceColors from reference image pixel intensities at ROI grid points
+                // MATLAB: IMrefSmall = IMref(1:Factor:end, 1:Factor:end); ColorRef = IMrefSmall(ROI_mask)
+                // Then: FaceColors = mean(ColorRef(F), 2)
+                std::vector<double> faceColors;
+                {
+                    int sf = dic1.disps.front().get_scalefactor();
+                    size_t num_pts = std::count_if(indexLUT.begin(), indexLUT.end(), [](int v){return v>=0;});
+                    std::vector<double> ColorRef(num_pts, 128.0);  // default gray if image unavailable
+                    
+                    // Try to load reference image for actual pixel colors
+                    std::vector<std::string> cam1_frames_fc, cam2_frames_fc;
+                    if (Utils::importVid(config_, trial, pair, cam1_frames_fc, cam2_frames_fc) && !cam1_frames_fc.empty()) {
+                        cv::Mat ref_img = cv::imread(cam1_frames_fc[0], cv::IMREAD_GRAYSCALE);
+                        if (!ref_img.empty()) {
+                            for (int y = 0; y < H; ++y) {
+                                for (int x = 0; x < W; ++x) {
+                                    int idx = indexLUT[y * W + x];
+                                    if (idx < 0) continue;
+                                    int py = y * sf;
+                                    int px = x * sf;
+                                    if (py < ref_img.rows && px < ref_img.cols) {
+                                        ColorRef[idx] = static_cast<double>(ref_img.at<uchar>(py, px));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Compute face colors as average of 3 vertex colors (MATLAB: CF = mean(ColorRef(F), 2))
+                    size_t nFaces_fc = faces.size() / 3;
+                    faceColors.resize(nFaces_fc, 128.0);
+                    for (size_t i = 0; i < nFaces_fc; ++i) {
+                        int v0 = faces[i*3], v1 = faces[i*3+1], v2 = faces[i*3+2];
+                        if (v0 >= 0 && v0 < (int)num_pts && v1 >= 0 && v1 < (int)num_pts && v2 >= 0 && v2 < (int)num_pts) {
+                            faceColors[i] = (ColorRef[v0] + ColorRef[v1] + ColorRef[v2]) / 3.0;
+                        }
+                    }
+                }
+
                 // Create individual pair result structure
                 DIC3DpairResults pair_result;
                 pair_result.cameraPairInd = {cam_1, cam_2};  // Camera pair indices
                 pair_result.DLTpath = {dlt_cam1.filePath, dlt_cam2.filePath};
                 pair_result.DLTparameters = {L1, L2};
+                pair_result.FaceColors = std::move(faceColors);
                 
                 std::vector<double> P3D_ref; // frame 1 reference
                 
