@@ -286,6 +286,27 @@ bool Config::loadFromDicParamsFile(const std::string& filepath) {
         } else if (!(value = parseConfigValue(line, "step_f_initial_seed")).empty()) {
             step_f.initial_seed = parseIntList(value);
         }
+        // Step E specific parameters (3D reconstruction)
+        else if (!(value = parseConfigValue(line, "step_e_distortion_removal")).empty()) {
+            step_e_distortion_removal = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "step_d_replacebadcorr")).empty()) {
+            step_d_replacebadcorr = parseBool(value);
+        }
+        // Camera pairs mapping (format: "1,2;4,3" for pair1=(1,2), pair2=(4,3))
+        else if (!(value = parseConfigValue(line, "camera_pairs")).empty()) {
+            camera_pairs.clear();
+            // Parse semicolon-separated pairs, each pair is "cam1,cam2"
+            std::istringstream pairs_stream(value);
+            std::string pair_str;
+            while (std::getline(pairs_stream, pair_str, ';')) {
+                auto comma_pos = pair_str.find(',');
+                if (comma_pos != std::string::npos) {
+                    int c1 = std::stoi(pair_str.substr(0, comma_pos));
+                    int c2 = std::stoi(pair_str.substr(comma_pos + 1));
+                    camera_pairs.push_back({c1, c2});
+                }
+            }
+        }
         // Step F specific parameters (deformation analysis)
         else if (!(value = parseConfigValue(line, "step_f_temporal_filtering")).empty()) {
             step_f_temporal_filtering = parseBool(value);
