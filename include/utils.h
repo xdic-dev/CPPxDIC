@@ -143,6 +143,16 @@ public:
      * @param cam_second Output: second camera number
      */
     static void getCamerasForPair(int stereopair, int& cam_first, int& cam_second);
+    
+    /**
+     * Get camera numbers for a given stereopair using config camera_pairs mapping
+     * @param stereopair The stereopair number (1-indexed)
+     * @param camera_pairs Vector of (cam_first, cam_second) pairs from config
+     * @param cam_first Output: first camera number
+     * @param cam_second Output: second camera number
+     */
+    static void getCamerasForPair(int stereopair, const std::vector<std::pair<int,int>>& camera_pairs,
+                                  int& cam_first, int& cam_second);
 
      /**
      * Build base data path

@@ -222,6 +222,21 @@ void Utils::getCamerasForPair(int stereopair, int& cam_first, int& cam_second) {
     cam_second = (stereopair - 1) * 2 + 2;
 }
 
+void Utils::getCamerasForPair(int stereopair, const std::vector<std::pair<int,int>>& camera_pairs,
+                              int& cam_first, int& cam_second) {
+    if (stereopair < 1) {
+        throw std::runtime_error("Invalid stereopair value: must be >= 1");
+    }
+    int idx = stereopair - 1;  // 0-indexed
+    if (idx < static_cast<int>(camera_pairs.size())) {
+        cam_first = camera_pairs[idx].first;
+        cam_second = camera_pairs[idx].second;
+    } else {
+        // Fall back to default mapping
+        getCamerasForPair(stereopair, cam_first, cam_second);
+    }
+}
+
 static bool ensure_dir(const std::string& path) {
     try {
         if (!std::filesystem::exists(path)) {
