@@ -32,6 +32,9 @@ public:
     // Global parameters (from global_param.m)
     std::vector<std::string> frictional_conditions = {"glass", "coating", "coating_oil"};
     int num_pair = 2;                    // Number of stereopairs
+    // Camera pairs: per-pair (cam_first, cam_second) mapping
+    // Default matches MATLAB import_raw_vid: pair1=(1,2), pair2=(4,3)
+    std::vector<std::pair<int,int>> camera_pairs = {{1,2}, {4,3}};
     double robot_sample_freq = 1000.0;   // robot sampling frequency (Hz)
     double vid_sample_freq = 50.0;       // image sampling frequency (Hz)
     
@@ -114,6 +117,10 @@ public:
     StepConfig step_d;                   // Step D: initial tracking
     StepConfig step_e;                   // Step E: matching
     StepConfig step_f;                   // Step F: combined/final
+    
+    // Step E specific parameters (3D reconstruction)
+    bool step_e_distortion_removal = false;  // Remove distortion from 2D points (MATLAB default: false)
+    bool step_d_replacebadcorr = false;      // Replace bad correlation subsets (MATLAB step2_dic_finish: active, but slow)
     
     // Step F specific parameters (deformation analysis)
     bool step_f_temporal_filtering = true;   // Enable temporal filtering of displacements

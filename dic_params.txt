@@ -204,6 +204,45 @@ step_f_step_ref_change = 10
 step_f_initial_seed = 
 
 # ============================================================================
+# CAMERA PAIRS MAPPING
+# ============================================================================
+
+# Camera pairs: semicolon-separated pairs, each pair is "cam_first,cam_second"
+# Matches MATLAB import_raw_vid.m: pair1=(1,2), pair2=(4,3)
+camera_pairs = 1,2;4,3
+
+# ============================================================================
+# STEP E: 3D RECONSTRUCTION OPTIONS
+# ============================================================================
+
+# Enable distortion removal for 3D reconstruction
+# MATLAB step3_dic_rewrited.m has distortionRemovalLogic = 0 (disabled)
+step_e_distortion_removal = false
+
+# ============================================================================
+# STEP D: 2D DIC POST-PROCESSING OPTIONS
+# ============================================================================
+
+# Replace bad correlation subsets with filtered data
+# MATLAB step2_dic_finish.m: replacebadcorr is active but slow
+# Set to true to match MATLAB behavior
+step_d_replacebadcorr = false
+
+# ============================================================================
+# STEP F: DEFORMATION ANALYSIS OPTIONS
+# ============================================================================
+
+# Enable temporal filtering of displacements before deformation computation
+step_f_temporal_filtering = true
+
+# Low-pass cutoff frequency (Hz) for temporal filter
+step_f_freq_filt = 10.0
+
+# Compute rigid body motion (RBM) and ARBM deformation
+# MATLAB step4_dic_rewrited.m: RBM computation is commented out
+step_f_compute_rbm = false
+
+# ============================================================================
 # UNITS AND CALIBRATION
 # ============================================================================
 
