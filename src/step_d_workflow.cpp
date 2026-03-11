@@ -1098,10 +1098,13 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     
     // Save ncorr output directly as binary (ncorr's native format)
     // output_path already has .bin extension
-    save(dic_lagrangian, output_path);
+    // IMPORTANT: Save raw pixel displacements, NOT mm-scaled.
+    // dic3DReconstruction and formatOutput need pixel-coordinate displacements
+    // because they combine (x*scalefactor + displacement) for DLT reconstruction.
+    save(dic_output_raw, output_path);
     std::cout << "DIC analysis saved: " << output_path << std::endl;
     
-    return dic_lagrangian;
+    return dic_output_raw;
 }
 
 } // namespace cppxdic
