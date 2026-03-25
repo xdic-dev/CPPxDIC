@@ -199,8 +199,54 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/Tools/CppNCorr/test/examples/ohtcfrp/images)
          DESTINATION ${CMAKE_BINARY_DIR})
 endif()
 
+# generate_ncorr_bin tool: converts MATLAB ncorr .mat → ncorr native .bin
+add_executable(generate_ncorr_bin
+    src/generate_ncorr_bin.cpp
+    src/mat_reader.cpp
+    src/dic_structures.cpp
+)
+target_include_directories(generate_ncorr_bin PRIVATE include Tools/CppNCorr/include)
+target_link_libraries(generate_ncorr_bin
+    ${NCORR_LIBRARY}
+    ${OpenCV_LIBS}
+    ${OPENCV_LIBRARY1} ${OPENCV_LIBRARY2} ${OPENCV_LIBRARY3} ${OPENCV_LIBRARY4} ${OPENCV_LIBRARY5}
+    ${FFTW_LIBRARY}
+    ${MATIO_LIBRARY}
+    ${SUITESPARSE_LIBRARY1} ${SUITESPARSE_LIBRARY2} ${SUITESPARSE_LIBRARY3}
+    ${SUITESPARSE_LIBRARY4} ${SUITESPARSE_LIBRARY5}
+    ${LAPACK_LIBRARY} ${BLAS_LIBRARY}
+    ${CMAKE_THREAD_LIBS_INIT}
+)
+if(MATIO_INCLUDE_DIR)
+    target_include_directories(generate_ncorr_bin PRIVATE ${MATIO_INCLUDE_DIR})
+endif()
+if(HDF5_FOUND)
+    target_include_directories(generate_ncorr_bin PRIVATE ${HDF5_INCLUDE_DIRS})
+    target_link_libraries(generate_ncorr_bin ${HDF5_C_LIBRARIES})
+endif()
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(generate_ncorr_bin OpenMP::OpenMP_CXX)
+endif()
+if(Eigen3_FOUND)
+    if(TARGET Eigen3::Eigen)
+        target_link_libraries(generate_ncorr_bin Eigen3::Eigen)
+    endif()
+    if(DEFINED EIGEN3_INCLUDE_DIRS)
+        target_include_directories(generate_ncorr_bin PRIVATE ${EIGEN3_INCLUDE_DIRS})
+    elseif(DEFINED EIGEN3_INCLUDE_DIR)
+        target_include_directories(generate_ncorr_bin PRIVATE ${EIGEN3_INCLUDE_DIR})
+    endif()
+endif()
+if(CGAL_FOUND)
+    target_link_libraries(generate_ncorr_bin CGAL::CGAL)
+endif()
+if(FFTW_INCLUDE_DIR)
+    target_include_directories(generate_ncorr_bin PRIVATE ${FFTW_INCLUDE_DIR})
+endif()
+target_compile_options(generate_ncorr_bin PRIVATE -Wall -Wextra -O2)
+
 # Installation
-install(TARGETS cppxdic DESTINATION bin)
+install(TARGETS cppxdic generate_ncorr_bin DESTINATION bin)
 
 # Print configuration info
 message(STATUS "Building cppxdic - C++ equivalent of Matlab xDIC")

@@ -233,8 +233,13 @@ private:
      * 
      * @param trial Trial ID
      * @param stereopair Stereo pair number
+     * @param pairOrder Trial-level stitch order metadata
+     * @param pairForced Trial-level forced-stitch metadata
      */
-    void formatOutput(const std::string& trial, int stereopair);
+    void formatOutput(const std::string& trial,
+                      int stereopair,
+                      const std::vector<int>& pairOrder,
+                      bool pairForced);
     
     /**
      * Run NCorr DIC analysis

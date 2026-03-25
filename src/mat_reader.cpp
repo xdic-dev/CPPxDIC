@@ -627,7 +627,9 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
         }
     }
 
-    // Points3D (cell array: each cell is a 1x1 struct with fields x, y, z)
+    // Points3D (cell array: each cell is either
+    //   - C++ format: 1x1 struct with fields x, y, z (each Nx1 double)
+    //   - MATLAB format: Nx3 double matrix (column-major: col0=x, col1=y, col2=z)
     if (matvar_t* points3d_var = getStructField(dic3d_var.get(), "Points3D", 0)) {
         if (points3d_var->class_type == MAT_C_CELL) {
             const size_t nFrames = getCellArraySize(points3d_var);
@@ -635,26 +637,55 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
 
             for (size_t frame = 0; frame < nFrames; ++frame) {
                 matvar_t* frame_var = Mat_VarGetCell(points3d_var, frame);
-                if (!frame_var || frame_var->class_type != MAT_C_STRUCT) {
+                if (!frame_var) continue;
+
+                if (frame_var->class_type == MAT_C_STRUCT) {
+                    // C++ format: struct with x, y, z fields
+                    matvar_t* x_var = getStructField(frame_var, "x", 0);
+                    matvar_t* y_var = getStructField(frame_var, "y", 0);
+                    matvar_t* z_var = getStructField(frame_var, "z", 0);
+
+                    if (!x_var || !y_var || !z_var ||
+                        x_var->class_type != MAT_C_DOUBLE || !x_var->data ||
+                        y_var->class_type != MAT_C_DOUBLE || !y_var->data ||
+                        z_var->class_type != MAT_C_DOUBLE || !z_var->data) {
+                        continue;
+                    }
+
+                    combined.Points3D[frame].x = readDoubleArray(x_var);
+                    combined.Points3D[frame].y = readDoubleArray(y_var);
+                    combined.Points3D[frame].z = readDoubleArray(z_var);
+                } else if (frame_var->class_type == MAT_C_DOUBLE && frame_var->data && frame_var->rank >= 2) {
+                    const size_t dim0 = frame_var->dims[0];
+                    const size_t dim1 = frame_var->dims[1];
+                    const double* d = static_cast<const double*>(frame_var->data);
+                    if (dim1 == 3) {
+                        // {nPts, 3} column-major: col0=x[0..nPts-1], col1=y, col2=z
+                        const size_t nPts = dim0;
+                        combined.Points3D[frame].x.assign(d, d + nPts);
+                        combined.Points3D[frame].y.assign(d + nPts, d + 2 * nPts);
+                        combined.Points3D[frame].z.assign(d + 2 * nPts, d + 3 * nPts);
+                    } else if (dim0 == 3) {
+                        // {3, nPts} column-major: interleaved [x0,y0,z0,x1,y1,z1,...]
+                        const size_t nPts = dim1;
+                        combined.Points3D[frame].x.resize(nPts);
+                        combined.Points3D[frame].y.resize(nPts);
+                        combined.Points3D[frame].z.resize(nPts);
+                        for (size_t p = 0; p < nPts; ++p) {
+                            combined.Points3D[frame].x[p] = d[p * 3 + 0];
+                            combined.Points3D[frame].y[p] = d[p * 3 + 1];
+                            combined.Points3D[frame].z[p] = d[p * 3 + 2];
+                        }
+                    } else {
+                        std::cerr << "Warning: Points3D frame " << frame << " has dims "
+                                  << dim0 << "x" << dim1 << " (expected Nx3 or 3xN) in " << mat_path << '\n';
+                        continue;
+                    }
+                } else {
                     continue;
                 }
 
-                matvar_t* x_var = getStructField(frame_var, "x", 0);
-                matvar_t* y_var = getStructField(frame_var, "y", 0);
-                matvar_t* z_var = getStructField(frame_var, "z", 0);
-
-                if (!x_var || !y_var || !z_var ||
-                    x_var->class_type != MAT_C_DOUBLE || !x_var->data ||
-                    y_var->class_type != MAT_C_DOUBLE || !y_var->data ||
-                    z_var->class_type != MAT_C_DOUBLE || !z_var->data) {
-                    continue;
-                }
-
-                combined.Points3D[frame].x = readDoubleArray(x_var);
-                combined.Points3D[frame].y = readDoubleArray(y_var);
-                combined.Points3D[frame].z = readDoubleArray(z_var);
-
-                // Optional consistency check
+                // Consistency check
                 if (combined.Points3D[frame].x.size() != combined.Points3D[frame].y.size() ||
                     combined.Points3D[frame].x.size() != combined.Points3D[frame].z.size()) {
                     std::cerr << "Warning: inconsistent x/y/z sizes in Points3D frame "
@@ -664,6 +695,10 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
                     combined.Points3D[frame].y.clear();
                     combined.Points3D[frame].z.clear();
                 }
+            }
+            if (!combined.Points3D.empty() && !combined.Points3D[0].x.empty()) {
+                std::cout << "Loaded Points3D: " << nFrames << " frames, "
+                          << combined.Points3D[0].x.size() << " points per frame" << std::endl;
             }
         }
     }
@@ -696,7 +731,8 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
         }
     }
 
-    // FaceCentroids (cell array: each cell is Mx3 double matrix, stored flat as Mx3)
+    // FaceCentroids (cell array: each cell is Mx3 or 3xM double)
+    // Internal format: interleaved [x0,y0,z0, x1,y1,z1, ...]
     if (matvar_t* fc_var = getStructField(dic3d_var.get(), "FaceCentroids", 0)) {
         if (fc_var->class_type == MAT_C_CELL) {
             const size_t nFrames = getCellArraySize(fc_var);
@@ -704,15 +740,23 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
             for (size_t frame = 0; frame < nFrames; ++frame) {
                 matvar_t* cell = Mat_VarGetCell(fc_var, frame);
                 if (cell && cell->class_type == MAT_C_DOUBLE && cell->data && cell->rank >= 2) {
-                    // Mx3 matrix stored column-major in MATLAB, read as flat row-major
-                    size_t nRows = cell->dims[0];
-                    size_t nCols = cell->dims[1];
+                    size_t dim0 = cell->dims[0];
+                    size_t dim1 = cell->dims[1];
                     const double* d = static_cast<const double*>(cell->data);
-                    combined.FaceCentroids[frame].resize(nRows * nCols);
-                    for (size_t r = 0; r < nRows; ++r) {
-                        for (size_t c = 0; c < nCols; ++c) {
-                            combined.FaceCentroids[frame][r * nCols + c] = d[c * nRows + r];
+                    if (dim0 == 3) {
+                        // {3, nFaces} column-major: already interleaved
+                        combined.FaceCentroids[frame].assign(d, d + dim0 * dim1);
+                    } else if (dim1 == 3) {
+                        // {nFaces, 3} column-major: transpose to interleaved
+                        size_t nFaces = dim0;
+                        combined.FaceCentroids[frame].resize(nFaces * 3);
+                        for (size_t f = 0; f < nFaces; ++f) {
+                            combined.FaceCentroids[frame][f*3+0] = d[f];
+                            combined.FaceCentroids[frame][f*3+1] = d[f + nFaces];
+                            combined.FaceCentroids[frame][f*3+2] = d[f + 2*nFaces];
                         }
+                    } else {
+                        combined.FaceCentroids[frame].assign(d, d + dim0 * dim1);
                     }
                 }
             }
@@ -722,7 +766,8 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
     // Disp (struct with DispVec and DispMgn cell arrays)
     if (matvar_t* disp_var = getStructField(dic3d_var.get(), "Disp", 0)) {
         if (disp_var->class_type == MAT_C_STRUCT) {
-            // DispVec: cell array, each cell is Nx3 double matrix
+            // DispVec: cell array, each cell is Nx3 or 3xN double
+            // Internal format: interleaved [dx0,dy0,dz0, dx1,dy1,dz1, ...]
             if (matvar_t* dv_var = getStructField(disp_var, "DispVec", 0)) {
                 if (dv_var->class_type == MAT_C_CELL) {
                     const size_t nFrames = getCellArraySize(dv_var);
@@ -730,14 +775,23 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
                     for (size_t frame = 0; frame < nFrames; ++frame) {
                         matvar_t* cell = Mat_VarGetCell(dv_var, frame);
                         if (cell && cell->class_type == MAT_C_DOUBLE && cell->data && cell->rank >= 2) {
-                            size_t nRows = cell->dims[0];
-                            size_t nCols = cell->dims[1];
+                            size_t dim0 = cell->dims[0];
+                            size_t dim1 = cell->dims[1];
                             const double* d = static_cast<const double*>(cell->data);
-                            combined.Disp.DispVec[frame].resize(nRows * nCols);
-                            for (size_t r = 0; r < nRows; ++r) {
-                                for (size_t c = 0; c < nCols; ++c) {
-                                    combined.Disp.DispVec[frame][r * nCols + c] = d[c * nRows + r];
+                            if (dim0 == 3) {
+                                // {3, nPts} column-major: already interleaved
+                                combined.Disp.DispVec[frame].assign(d, d + dim0 * dim1);
+                            } else if (dim1 == 3) {
+                                // {nPts, 3} column-major: transpose to interleaved
+                                size_t nPts = dim0;
+                                combined.Disp.DispVec[frame].resize(nPts * 3);
+                                for (size_t p = 0; p < nPts; ++p) {
+                                    combined.Disp.DispVec[frame][p*3+0] = d[p];
+                                    combined.Disp.DispVec[frame][p*3+1] = d[p + nPts];
+                                    combined.Disp.DispVec[frame][p*3+2] = d[p + 2*nPts];
                                 }
+                            } else {
+                                combined.Disp.DispVec[frame].assign(d, d + dim0 * dim1);
                             }
                         }
                     }
@@ -759,20 +813,26 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
         }
     }
 
-    // FacePairInds / PointPairInds
+    // FacePairInds / PointPairInds (handles INT32 or DOUBLE, any dim order)
     if (matvar_t* facepair_var = getStructField(dic3d_var.get(), "FacePairInds", 0)) {
-        if (facepair_var->data) {
-            const size_t n = facepair_var->dims[0];
-            const int* data = static_cast<const int*>(facepair_var->data);
-            combined.FacePairInds.assign(data, data + n);
-        }
+        combined.FacePairInds = readIntArray(facepair_var);
     }
 
     if (matvar_t* pointpair_var = getStructField(dic3d_var.get(), "PointPairInds", 0)) {
-        if (pointpair_var->data) {
-            const size_t n = pointpair_var->dims[0];
-            const int* data = static_cast<const int*>(pointpair_var->data);
-            combined.PointPairInds.assign(data, data + n);
+        combined.PointPairInds = readIntArray(pointpair_var);
+    }
+
+    if (matvar_t* dic2d_info_var = getStructField(dic3d_var.get(), "DIC2Dinfo", 0)) {
+        if (dic2d_info_var->class_type == MAT_C_CELL) {
+            const size_t nEntries = getCellArraySize(dic2d_info_var);
+            combined.DIC2Dinfo.clear();
+            combined.DIC2Dinfo.resize(nEntries);
+            for (size_t i = 0; i < nEntries; ++i) {
+                matvar_t* cell = Mat_VarGetCell(dic2d_info_var, i);
+                if (cell && cell->class_type == MAT_C_STRUCT) {
+                    readDIC2DPairResultsFromStruct(cell, combined.DIC2Dinfo[i]);
+                }
+            }
         }
     }
 
@@ -824,6 +884,148 @@ std::vector<int> MatReader::readIntArray(matvar_t* var) {
 // Updated DIC2DPairResults (top-level fields, RAII, no leaks)
 // ============================================================================
 
+bool MatReader::readDIC2DPairResultsFromStruct(matvar_t* dic2d_root, DIC2DPairResults& result) {
+    if (!dic2d_root || dic2d_root->class_type != MAT_C_STRUCT) {
+        return false;
+    }
+
+    result = DIC2DPairResults{};
+
+    readStructInt(dic2d_root, "nCamRef", result.nCamRef);
+    readStructInt(dic2d_root, "nCamDef", result.nCamDef);
+    readStructInt(dic2d_root, "nImages", result.nImages);
+    if (matvar_t* pair_order_var = getStructField(dic2d_root, "pairOrder", 0)) {
+        result.pairOrder = readIntArray(pair_order_var);
+    } else {
+        result.pairOrder.clear();
+    }
+    readStructBool(dic2d_root, "pairForced", result.pairForced);
+
+    if (matvar_t* roi_var = getStructField(dic2d_root, "ROImask", 0)) {
+        result.ROImask = readImage(roi_var);
+    }
+
+    if (matvar_t* faces_var = getStructField(dic2d_root, "Faces", 0)) {
+        if (faces_var->data && faces_var->rank >= 2) {
+            const size_t rows = faces_var->dims[0];
+            const size_t cols = faces_var->dims[1];
+            const size_t nFaces = (cols == 3) ? rows : ((rows == 3) ? cols : 0);
+
+            result.Faces.clear();
+            if (nFaces > 0) {
+                result.Faces.reserve(nFaces * 3);
+
+                auto pushFaces = [&](auto* dataPtr) {
+                    if (cols == 3) {
+                        for (size_t f = 0; f < nFaces; ++f) {
+                            result.Faces.push_back(static_cast<int>(dataPtr[f]) - 1);
+                            result.Faces.push_back(static_cast<int>(dataPtr[f + nFaces]) - 1);
+                            result.Faces.push_back(static_cast<int>(dataPtr[f + 2 * nFaces]) - 1);
+                        }
+                    } else {
+                        for (size_t f = 0; f < nFaces; ++f) {
+                            result.Faces.push_back(static_cast<int>(dataPtr[f * 3 + 0]) - 1);
+                            result.Faces.push_back(static_cast<int>(dataPtr[f * 3 + 1]) - 1);
+                            result.Faces.push_back(static_cast<int>(dataPtr[f * 3 + 2]) - 1);
+                        }
+                    }
+                };
+
+                if (faces_var->class_type == MAT_C_DOUBLE) {
+                    pushFaces(static_cast<const double*>(faces_var->data));
+                } else if (faces_var->class_type == MAT_C_UINT16) {
+                    pushFaces(static_cast<const uint16_t*>(faces_var->data));
+                } else if (faces_var->class_type == MAT_C_UINT32) {
+                    pushFaces(static_cast<const uint32_t*>(faces_var->data));
+                } else if (faces_var->class_type == MAT_C_INT32) {
+                    pushFaces(static_cast<const int32_t*>(faces_var->data));
+                }
+            }
+        }
+    }
+
+    if (matvar_t* facecolors_var = getStructField(dic2d_root, "FaceColors", 0)) {
+        result.FaceColors = readDoubleArray(facecolors_var);
+    }
+
+    if (matvar_t* points_var = getStructField(dic2d_root, "Points", 0)) {
+        if (points_var->class_type == MAT_C_CELL) {
+            const size_t nFrames = getCellArraySize(points_var);
+            result.Points.resize(nFrames);
+            for (size_t frame = 0; frame < nFrames; ++frame) {
+                matvar_t* frame_var = Mat_VarGetCell(points_var, frame);
+                if (!frame_var || frame_var->class_type != MAT_C_DOUBLE || !frame_var->data || frame_var->rank < 2) {
+                    continue;
+                }
+
+                const size_t dim0 = frame_var->dims[0];
+                const size_t dim1 = frame_var->dims[1];
+                const double* pts_data = static_cast<const double*>(frame_var->data);
+
+                if (dim1 == 2) {
+                    const size_t nPoints = dim0;
+                    result.Points[frame].x.resize(nPoints);
+                    result.Points[frame].y.resize(nPoints);
+                    for (size_t i = 0; i < nPoints; ++i) {
+                        result.Points[frame].x[i] = pts_data[i];
+                        result.Points[frame].y[i] = pts_data[i + nPoints];
+                    }
+                } else if (dim0 == 2) {
+                    const size_t nPoints = dim1;
+                    result.Points[frame].x.resize(nPoints);
+                    result.Points[frame].y.resize(nPoints);
+                    for (size_t i = 0; i < nPoints; ++i) {
+                        result.Points[frame].x[i] = pts_data[i * 2 + 0];
+                        result.Points[frame].y[i] = pts_data[i * 2 + 1];
+                    }
+                }
+            }
+        }
+    }
+
+    if (matvar_t* corr_var = getStructField(dic2d_root, "CorCoeffVec", 0)) {
+        if (corr_var->class_type == MAT_C_CELL) {
+            const size_t nFrames = getCellArraySize(corr_var);
+            result.CorCoeffVec.resize(nFrames);
+            for (size_t frame = 0; frame < nFrames; ++frame) {
+                matvar_t* frame_var = Mat_VarGetCell(corr_var, frame);
+                if (frame_var && frame_var->class_type == MAT_C_DOUBLE && frame_var->data) {
+                    result.CorCoeffVec[frame] = readDoubleArray(frame_var);
+                }
+            }
+        }
+    }
+
+    if (matvar_t* ncorr_var = getStructField(dic2d_root, "ncorrInfo", 0)) {
+        if (ncorr_var->class_type == MAT_C_STRUCT) {
+            if (matvar_t* cutoff_cc = getStructField(ncorr_var, "cutoff_corrcoef", 0)) {
+                result.ncorrInfo.cutoff_corrcoef = readDoubleArray(cutoff_cc);
+            }
+
+            readStructDouble(ncorr_var, "cutoff_diffnorm", result.ncorrInfo.cutoff_diffnorm);
+            readStructInt(ncorr_var, "cutoff_iteration", result.ncorrInfo.cutoff_iteration);
+            readStructInt(ncorr_var, "radius", result.ncorrInfo.radius);
+            readStructInt(ncorr_var, "spacing", result.ncorrInfo.spacing);
+            readStructDouble(ncorr_var, "pixtounits", result.ncorrInfo.pixtounits);
+            readStructInt(ncorr_var, "lenscoef", result.ncorrInfo.lenscoef);
+            readStructBool(ncorr_var, "subsettrunc", result.ncorrInfo.subsettrunc);
+            readStructInt(ncorr_var, "total_threads", result.ncorrInfo.total_threads);
+            readStructString(ncorr_var, "type", result.ncorrInfo.type);
+            readStructString(ncorr_var, "units", result.ncorrInfo.units);
+
+            matvar_t* step_var = getStructField(ncorr_var, "stepanalysis", 0);
+            if (step_var && step_var->class_type == MAT_C_STRUCT) {
+                readStructBool(step_var, "enabled", result.ncorrInfo.stepanalysis.enabled);
+                readStructString(step_var, "type", result.ncorrInfo.stepanalysis.type);
+                readStructBool(step_var, "auto", result.ncorrInfo.stepanalysis.auto_update);
+                readStructInt(step_var, "step", result.ncorrInfo.stepanalysis.step);
+            }
+        }
+    }
+
+    return true;
+}
+
 bool MatReader::readDIC2DPairResults(const std::string& mat_path, DIC2DPairResults& result) {
     auto matfp = openMat(mat_path);
     if (!matfp) {
@@ -831,18 +1033,67 @@ bool MatReader::readDIC2DPairResults(const std::string& mat_path, DIC2DPairResul
         return false;
     }
 
-    // Top-level scalars
-    readTopInt(matfp.get(), "nCamRef", result.nCamRef);
-    readTopInt(matfp.get(), "nCamDef", result.nCamDef);
-    readTopInt(matfp.get(), "nImages", result.nImages);
+    result = DIC2DPairResults{};
 
-    // ROImask
-    if (auto roi_var = readVar(matfp.get(), "ROImask")) {
-        result.ROImask = readImage(roi_var.get());
+    auto first_var = readVar(matfp.get(), "DIC2DpairResults");
+    matvar_t* dic2d_root = nullptr;
+    if (first_var && first_var->name && std::strcmp(first_var->name, "DIC2DpairResults") == 0 &&
+        first_var->class_type == MAT_C_STRUCT) {
+        dic2d_root = first_var.get();
     }
 
-    // Faces (Nx3 or 3xN)
-    if (auto faces_var = readVar(matfp.get(), "Faces")) {
+    if (dic2d_root) {
+        if (!readDIC2DPairResultsFromStruct(dic2d_root, result)) {
+            return false;
+        }
+        std::cout << "Loaded DIC2DPairResults: "
+                  << "nCamRef=" << result.nCamRef
+                  << ", nCamDef=" << result.nCamDef
+                  << ", nImages=" << result.nImages
+                  << ", pairOrder=" << result.pairOrder.size()
+                  << ", " << result.Points.size() << " frames"
+                  << ", " << result.Faces.size() / 3 << " faces\n";
+        return true;
+    }
+
+    std::vector<MatVarPtr> owned_vars;
+    owned_vars.reserve(10);
+
+    auto readAnyVar = [&](const char* name) -> matvar_t* {
+        if (dic2d_root) {
+            return getStructField(dic2d_root, name, 0);
+        }
+        owned_vars.push_back(readVar(matfp.get(), name));
+        return owned_vars.back().get();
+    };
+
+    auto readAnyInt = [&](const char* name, int& out) {
+        if (dic2d_root) {
+            readStructInt(dic2d_root, name, out);
+        } else {
+            readTopInt(matfp.get(), name, out);
+        }
+    };
+
+    readAnyInt("nCamRef", result.nCamRef);
+    readAnyInt("nCamDef", result.nCamDef);
+    readAnyInt("nImages", result.nImages);
+    if (matvar_t* pair_order_var = readAnyVar("pairOrder")) {
+        result.pairOrder = readIntArray(pair_order_var);
+    } else {
+        result.pairOrder.clear();
+    }
+    if (matvar_t* pair_forced_var = readAnyVar("pairForced")) {
+        result.pairForced = (readScalar(pair_forced_var) != 0.0);
+    } else {
+        result.pairForced = false;
+    }
+
+    if (matvar_t* roi_var = readAnyVar("ROImask")) {
+        result.ROImask = readImage(roi_var);
+    }
+
+    if (matvar_t* faces_var = readAnyVar("Faces")) {
         if (faces_var->data && faces_var->rank >= 2) {
             const size_t rows = faces_var->dims[0];
             const size_t cols = faces_var->dims[1];
@@ -857,8 +1108,20 @@ bool MatReader::readDIC2DPairResults(const std::string& mat_path, DIC2DPairResul
                 result.Faces.reserve(nFaces * 3);
 
                 auto pushFaces = [&](auto* dataPtr) {
-                    for (size_t i = 0; i < nFaces * 3; ++i) {
-                        result.Faces.push_back(static_cast<int>(dataPtr[i]) - 1);
+                    if (cols == 3) {
+                        // MATLAB Nx3 faces are stored column-major: [all v0, all v1, all v2].
+                        for (size_t f = 0; f < nFaces; ++f) {
+                            result.Faces.push_back(static_cast<int>(dataPtr[f]) - 1);
+                            result.Faces.push_back(static_cast<int>(dataPtr[f + nFaces]) - 1);
+                            result.Faces.push_back(static_cast<int>(dataPtr[f + 2 * nFaces]) - 1);
+                        }
+                    } else {
+                        // C++ writer uses 3xN, which is already interleaved face-by-face in MAT storage.
+                        for (size_t f = 0; f < nFaces; ++f) {
+                            result.Faces.push_back(static_cast<int>(dataPtr[f * 3 + 0]) - 1);
+                            result.Faces.push_back(static_cast<int>(dataPtr[f * 3 + 1]) - 1);
+                            result.Faces.push_back(static_cast<int>(dataPtr[f * 3 + 2]) - 1);
+                        }
                     }
                 };
 
@@ -878,47 +1141,54 @@ bool MatReader::readDIC2DPairResults(const std::string& mat_path, DIC2DPairResul
         }
     }
 
-    // FaceColors
-    if (auto facecolors_var = readVar(matfp.get(), "FaceColors")) {
-        result.FaceColors = readDoubleArray(facecolors_var.get());
+    if (matvar_t* facecolors_var = readAnyVar("FaceColors")) {
+        result.FaceColors = readDoubleArray(facecolors_var);
     }
 
-    // Points (cell array)
-    if (auto points_var = readVar(matfp.get(), "Points")) {
+    if (matvar_t* points_var = readAnyVar("Points")) {
         if (points_var->class_type == MAT_C_CELL) {
-            const size_t nFrames = getCellArraySize(points_var.get());
+            const size_t nFrames = getCellArraySize(points_var);
             result.Points.resize(nFrames);
 
             for (size_t frame = 0; frame < nFrames; ++frame) {
-                matvar_t* frame_var = Mat_VarGetCell(points_var.get(), frame);
+                matvar_t* frame_var = Mat_VarGetCell(points_var, frame);
                 if (!frame_var || frame_var->class_type != MAT_C_DOUBLE || !frame_var->data || frame_var->rank < 2)
                     continue;
 
-                const size_t nPoints = frame_var->dims[0];
-                const size_t nCols = frame_var->dims[1];
-                if (nCols < 2) continue;
-
+                const size_t dim0 = frame_var->dims[0];
+                const size_t dim1 = frame_var->dims[1];
                 const double* pts_data = static_cast<const double*>(frame_var->data);
 
-                result.Points[frame].x.resize(nPoints);
-                result.Points[frame].y.resize(nPoints);
-
-                for (size_t i = 0; i < nPoints; ++i) {
-                    result.Points[frame].x[i] = pts_data[i];
-                    result.Points[frame].y[i] = pts_data[i + nPoints];
+                if (dim1 == 2) {
+                    // {nPoints, 2} column-major: x=col0, y=col1
+                    const size_t nPoints = dim0;
+                    result.Points[frame].x.resize(nPoints);
+                    result.Points[frame].y.resize(nPoints);
+                    for (size_t i = 0; i < nPoints; ++i) {
+                        result.Points[frame].x[i] = pts_data[i];
+                        result.Points[frame].y[i] = pts_data[i + nPoints];
+                    }
+                } else if (dim0 == 2) {
+                    // {2, nPoints} column-major: interleaved [x0,y0,x1,y1,...]
+                    const size_t nPoints = dim1;
+                    result.Points[frame].x.resize(nPoints);
+                    result.Points[frame].y.resize(nPoints);
+                    for (size_t i = 0; i < nPoints; ++i) {
+                        result.Points[frame].x[i] = pts_data[i * 2 + 0];
+                        result.Points[frame].y[i] = pts_data[i * 2 + 1];
+                    }
                 }
             }
         }
     }
 
-    // CorCoeffVec (cell array)
-    if (auto corr_var = readVar(matfp.get(), "CorCoeffVec")) {
+    if (matvar_t* corr_var = readAnyVar("CorCoeffVec")) {
         if (corr_var->class_type == MAT_C_CELL) {
-            const size_t nFrames = getCellArraySize(corr_var.get());
+            const size_t nFrames = getCellArraySize(corr_var);
             result.CorCoeffVec.resize(nFrames);
 
             for (size_t frame = 0; frame < nFrames; ++frame) {
-                matvar_t* frame_var = Mat_VarGetCell(corr_var.get(), frame);
+                matvar_t* frame_var = Mat_VarGetCell(corr_var, frame);
                 if (frame_var && frame_var->class_type == MAT_C_DOUBLE && frame_var->data) {
                     result.CorCoeffVec[frame] = readDoubleArray(frame_var);
                 }
@@ -926,26 +1196,24 @@ bool MatReader::readDIC2DPairResults(const std::string& mat_path, DIC2DPairResul
         }
     }
 
-    // ncorrInfo (struct)
-    if (auto ncorr_var = readVar(matfp.get(), "ncorrInfo")) {
+    if (matvar_t* ncorr_var = readAnyVar("ncorrInfo")) {
         if (ncorr_var->class_type == MAT_C_STRUCT) {
-            if (matvar_t* cutoff_cc = getStructField(ncorr_var.get(), "cutoff_corrcoef", 0)) {
+            if (matvar_t* cutoff_cc = getStructField(ncorr_var, "cutoff_corrcoef", 0)) {
                 result.ncorrInfo.cutoff_corrcoef = readDoubleArray(cutoff_cc);
             }
 
-            readStructDouble(ncorr_var.get(), "cutoff_diffnorm", result.ncorrInfo.cutoff_diffnorm);
-            readStructInt(ncorr_var.get(), "cutoff_iteration", result.ncorrInfo.cutoff_iteration);
-            readStructInt(ncorr_var.get(), "radius", result.ncorrInfo.radius);
-            readStructInt(ncorr_var.get(), "spacing", result.ncorrInfo.spacing);
-            readStructDouble(ncorr_var.get(), "pixtounits", result.ncorrInfo.pixtounits);
-            readStructInt(ncorr_var.get(), "lenscoef", result.ncorrInfo.lenscoef);
-            readStructBool(ncorr_var.get(), "subsettrunc", result.ncorrInfo.subsettrunc);
-            readStructInt(ncorr_var.get(), "total_threads", result.ncorrInfo.total_threads);
-            readStructString(ncorr_var.get(), "type", result.ncorrInfo.type);
-            readStructString(ncorr_var.get(), "units", result.ncorrInfo.units);
+            readStructDouble(ncorr_var, "cutoff_diffnorm", result.ncorrInfo.cutoff_diffnorm);
+            readStructInt(ncorr_var, "cutoff_iteration", result.ncorrInfo.cutoff_iteration);
+            readStructInt(ncorr_var, "radius", result.ncorrInfo.radius);
+            readStructInt(ncorr_var, "spacing", result.ncorrInfo.spacing);
+            readStructDouble(ncorr_var, "pixtounits", result.ncorrInfo.pixtounits);
+            readStructInt(ncorr_var, "lenscoef", result.ncorrInfo.lenscoef);
+            readStructBool(ncorr_var, "subsettrunc", result.ncorrInfo.subsettrunc);
+            readStructInt(ncorr_var, "total_threads", result.ncorrInfo.total_threads);
+            readStructString(ncorr_var, "type", result.ncorrInfo.type);
+            readStructString(ncorr_var, "units", result.ncorrInfo.units);
 
-            // stepanalysis nested struct
-            matvar_t* step_var = getStructField(ncorr_var.get(), "stepanalysis", 0);
+            matvar_t* step_var = getStructField(ncorr_var, "stepanalysis", 0);
             if (step_var && step_var->class_type == MAT_C_STRUCT) {
                 readStructBool(step_var, "enabled", result.ncorrInfo.stepanalysis.enabled);
                 readStructString(step_var, "type", result.ncorrInfo.stepanalysis.type);
@@ -959,6 +1227,7 @@ bool MatReader::readDIC2DPairResults(const std::string& mat_path, DIC2DPairResul
               << "nCamRef=" << result.nCamRef
               << ", nCamDef=" << result.nCamDef
               << ", nImages=" << result.nImages
+              << ", pairOrder=" << result.pairOrder.size()
               << ", " << result.Points.size() << " frames"
               << ", " << result.Faces.size() / 3 << " faces\n";
 

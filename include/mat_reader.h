@@ -213,6 +213,8 @@ public:
 private:
     // Internal helpers to reduce repetition across all readers
     static matvar_t* getStructField(matvar_t* s, const char* field, size_t index = 0) noexcept;
+    static bool readDIC2DPairResultsFromStruct(matvar_t* dic2d_root,
+                                               struct DIC2DPairResults& result);
 
     static bool readTopInt(mat_t* matfp, const char* name, int& out) noexcept;
     static bool readTopDouble(mat_t* matfp, const char* name, double& out) noexcept;

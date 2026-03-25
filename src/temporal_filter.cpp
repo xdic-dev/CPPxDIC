@@ -50,8 +50,9 @@ std::vector<std::vector<double>> filterTime(
         }
         
         if (has_nan) {
-            // Keep NaN values as is
-            filtered[ipt] = data[ipt];
+            // MATLAB: points with any NaN → all frames NaN in output
+            // (data_out initialized to NaN, only mask==true points get filtered values)
+            // filtered[ipt] is already initialized to NaN
             continue;
         }
         

@@ -213,13 +213,19 @@ std::vector<std::string> Utils::split(const std::string& str, char delimiter) {
 void Utils::getCamerasForPair(int stereopair, int& cam_first, int& cam_second) {
     // Standard mapping: pair N -> cameras (2N-1, 2N)
     // Pair 1 -> cameras 1, 2
-    // Pair 2 -> cameras 3, 4
-    // Pair 3 -> cameras 5, 6, etc.
-    if (stereopair < 1) {
-        throw std::runtime_error("Invalid stereopair value: must be >= 1");
+    // Pair 2 -> cameras 4, 3
+    // error.
+    if (stereopair < 1 && stereopair != 2) {
+        throw std::runtime_error("Invalid stereopair value: must be >= 1 or equal to 2");
     }
-    cam_first = (stereopair - 1) * 2 + 1;
-    cam_second = (stereopair - 1) * 2 + 2;
+
+    if (stereopair == 2) {
+        cam_first = 4;
+        cam_second = 3;
+    } else {
+        cam_first = 1;
+        cam_second = 2;
+    }
 }
 
 void Utils::getCamerasForPair(int stereopair, const std::vector<std::pair<int,int>>& camera_pairs,

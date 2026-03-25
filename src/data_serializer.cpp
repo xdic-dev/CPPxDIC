@@ -100,7 +100,7 @@ bool BinarySerializer::saveDIC2DPairResults(const std::string& path, const DIC2D
         
         // Magic + version
         uint32_t magic = 0x44324450;  // "D2DP"
-        uint32_t version = 1;
+        uint32_t version = 2;
         ofs.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
         ofs.write(reinterpret_cast<const char*>(&version), sizeof(version));
         
@@ -108,6 +108,14 @@ bool BinarySerializer::saveDIC2DPairResults(const std::string& path, const DIC2D
         ofs.write(reinterpret_cast<const char*>(&data.nCamRef), sizeof(data.nCamRef));
         ofs.write(reinterpret_cast<const char*>(&data.nCamDef), sizeof(data.nCamDef));
         ofs.write(reinterpret_cast<const char*>(&data.nImages), sizeof(data.nImages));
+        size_t npo = data.pairOrder.size();
+        ofs.write(reinterpret_cast<const char*>(&npo), sizeof(npo));
+        if (npo > 0) {
+            ofs.write(reinterpret_cast<const char*>(data.pairOrder.data()),
+                      static_cast<std::streamsize>(npo * sizeof(int)));
+        }
+        uint8_t pair_forced = data.pairForced ? 1 : 0;
+        ofs.write(reinterpret_cast<const char*>(&pair_forced), sizeof(pair_forced));
         
         // Faces
         size_t nf = data.Faces.size();
@@ -157,11 +165,25 @@ bool BinarySerializer::loadDIC2DPairResults(const std::string& path, DIC2DPairRe
         uint32_t magic, version;
         ifs.read(reinterpret_cast<char*>(&magic), sizeof(magic));
         ifs.read(reinterpret_cast<char*>(&version), sizeof(version));
-        if (magic != 0x44324450 || version != 1) return false;
+        if (magic != 0x44324450 || (version != 1 && version != 2)) return false;
         
         ifs.read(reinterpret_cast<char*>(&data.nCamRef), sizeof(data.nCamRef));
         ifs.read(reinterpret_cast<char*>(&data.nCamDef), sizeof(data.nCamDef));
         ifs.read(reinterpret_cast<char*>(&data.nImages), sizeof(data.nImages));
+        data.pairOrder.clear();
+        data.pairForced = false;
+        if (version >= 2) {
+            size_t npo = 0;
+            ifs.read(reinterpret_cast<char*>(&npo), sizeof(npo));
+            data.pairOrder.resize(npo);
+            if (npo > 0) {
+                ifs.read(reinterpret_cast<char*>(data.pairOrder.data()),
+                         static_cast<std::streamsize>(npo * sizeof(int)));
+            }
+            uint8_t pair_forced = 0;
+            ifs.read(reinterpret_cast<char*>(&pair_forced), sizeof(pair_forced));
+            data.pairForced = (pair_forced != 0);
+        }
         
         size_t nf;
         ifs.read(reinterpret_cast<char*>(&nf), sizeof(nf));
@@ -419,10 +441,12 @@ bool JsonSerializer::saveDIC2DPairResults(const std::string& path, const DIC2DPa
     try {
         nlohmann::json j;
         j["format"] = "DIC2DPairResults";
-        j["version"] = 1;
+        j["version"] = 2;
         j["nCamRef"] = data.nCamRef;
         j["nCamDef"] = data.nCamDef;
         j["nImages"] = data.nImages;
+        j["pairOrder"] = data.pairOrder;
+        j["pairForced"] = data.pairForced;
         j["Faces"] = data.Faces;
         j["FaceColors"] = data.FaceColors;
         
@@ -457,6 +481,8 @@ bool JsonSerializer::loadDIC2DPairResults(const std::string& path, DIC2DPairResu
         data.nCamRef = j.value("nCamRef", 0);
         data.nCamDef = j.value("nCamDef", 0);
         data.nImages = j.value("nImages", 0);
+        data.pairOrder = j.value("pairOrder", std::vector<int>{});
+        data.pairForced = j.value("pairForced", false);
         data.Faces = j.value("Faces", std::vector<int>{});
         data.FaceColors = j.value("FaceColors", std::vector<double>{});
         

@@ -153,11 +153,6 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
         return {"", {}, false};
     }
     
-    // Post-preps. Format output
-    formatOutput(trial, stereopair);
-    
-    std::cout << "--> STEP: Ncorr analysis completed" << std::endl;
-    
     // Determine pair order
     std::vector<int> pairOrder;
     bool pairForced;
@@ -168,6 +163,11 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
         pairOrder = {1, 2};
         pairForced = false;
     }
+
+    // Post-preps. Format output
+    formatOutput(trial, stereopair, pairOrder, pairForced);
+    
+    std::cout << "--> STEP: Ncorr analysis completed" << std::endl;
     
     return {base_params_.outputPath, pairOrder, pairForced};
 }
@@ -672,7 +672,7 @@ bool StepDWorkflow::performTracking(const int tracking_number,
     
     auto dic_output = runNcorrAnalysis(cam_frames[0], cam_frames, refmask,
                                       initial_seed_point, step_params_,
-                                      output_path, config_.parallel_processing);
+                                      output_path, config_.parallel_processing, true);
     
     std::cout << "--> STEP: Ncorr " << cam_number << " done and saved to " << output_path << std::endl;
     return true;
@@ -681,12 +681,14 @@ bool StepDWorkflow::performTracking(const int tracking_number,
 bool StepDWorkflow::performTracking1(const std::vector<cv::Mat>& cam_first,
                                     const cv::Mat& refmask_trial,
                                     const SeedPoint& initial_seed_point_set1) {
+    std::cout << "Performing tracking camera 1..." << initial_seed_point_set1.pw[0] << "," << initial_seed_point_set1.pw[1] << std::endl;
     return performTracking(1, cam_first, refmask_trial, initial_seed_point_set1);
 }
 
 bool StepDWorkflow::performTracking2(const std::vector<cv::Mat>& cam_second,
                                     const cv::Mat& refmask_trial_matched,
                                     const SeedPoint& initial_seed_point_set2) {
+    std::cout << "Performing tracking camera 2..." << initial_seed_point_set2.pw[0] << "," << initial_seed_point_set2.pw[1] << std::endl;
     return performTracking(2, cam_second, refmask_trial_matched, initial_seed_point_set2);
 }
 
@@ -725,7 +727,10 @@ void StepDWorkflow::saveTrialInfo(const std::string& trial, int stereopair, int 
     MatWriter::writeTrialInfoFile(filename, actual_fps, idxframe);
 }
 
-void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
+void StepDWorkflow::formatOutput(const std::string& trial,
+                                int stereopair,
+                                const std::vector<int>& pairOrder,
+                                bool pairForced) {
     std::cout << "Formatting output files (step2_dic_finish equivalent)..." << std::endl;
     
     int cam_1, cam_2;
@@ -767,13 +772,15 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
     // get_scalefactor() returns spacing+1 (same as MATLAB Factor = spacing+1)
     int Factor = dic1.disps[0].get_scalefactor();
     std::cout << "  Processing " << n_frames << " frames, Factor=" << Factor << std::endl;
-    std::cout << "  Total frames: " << (n_frames * 2 + 1) << " (cam1: " << n_frames 
-              << " + matching: 1 + cam2: " << n_frames << ")" << std::endl;
+    std::cout << "  Total frames: " << (n_frames * 2) << " (cam1: " << n_frames 
+              << " + cam2: " << n_frames << ")" << std::endl;
     
     DIC2DPairResults results;
     results.nCamRef = cam_1;
     results.nCamDef = cam_2;
     results.nImages = n_frames;
+    results.pairOrder = pairOrder;
+    results.pairForced = pairForced;
     
     const auto& roi1 = dic1.disps[0].get_roi();
     const auto& roi_mask = roi1.get_mask();
@@ -794,9 +801,9 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
     }
     std::cout << "  Reference points: " << Pref.size() << std::endl;
     
-    // Resize for cam1 frames + matching frame + cam2 frames
-    results.Points.resize(n_frames * 2 + 1);
-    results.CorCoeffVec.resize(n_frames * 2 + 1);
+    // Resize for cam1 frames + cam2 frames (MATLAB layout: Points{1..nImages} = cam1, Points{nImages+1..2*nImages} = cam2)
+    results.Points.resize(n_frames * 2);
+    results.CorCoeffVec.resize(n_frames * 2);
     
     std::cout << "  Processing cam1 frames..." << std::endl;
     for (int ii = 0; ii < n_frames; ++ii) {
@@ -837,46 +844,6 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
         results.Points[ii] = std::move(pts2d);
         // Store correlation coefficients as vector per frame
         results.CorCoeffVec[ii] = corrcoef;
-    }
-    
-    std::cout << "  Processing matching frame (ncorr12)..." << std::endl;
-    // Matching frame goes at index n_frames (between cam1 and cam2)
-    {
-        const auto& disp12 = dic12.disps[0];  // Matching has only 1 frame
-        const auto& u12_array = disp12.get_u().get_array();
-        const auto& v12_array = disp12.get_v().get_array();
-        
-        std::vector<cv::Point2f> points;
-        std::vector<double> corrcoef;
-        points.reserve(Pref.size());
-        corrcoef.reserve(Pref.size());
-        
-        int idx = 0;
-        for (int y = 0; y < roi_mask.height(); ++y) {
-            for (int x = 0; x < roi_mask.width(); ++x) {
-                if (roi_mask(y, x)) {
-                    double u = u12_array(y, x);
-                    double v = v12_array(y, x);
-                    if (u == 0.0 && v == 0.0) {
-                        points.push_back(cv::Point2f(NAN, NAN));
-                        corrcoef.push_back(NAN);
-                    } else {
-                        points.push_back(cv::Point2f(Pref[idx].x + u, Pref[idx].y + v));
-                        corrcoef.push_back(0.95);
-                    }
-                    idx++;
-                }
-            }
-        }
-        Points2D pts2d12;
-        pts2d12.x.reserve(points.size());
-        pts2d12.y.reserve(points.size());
-        for (const auto& p : points) {
-            pts2d12.x.push_back(static_cast<double>(p.x));
-            pts2d12.y.push_back(static_cast<double>(p.y));
-        }
-        results.Points[n_frames] = std::move(pts2d12);
-        results.CorCoeffVec[n_frames] = corrcoef;
     }
     
     // Pre-compute matching displacement mapping (MATLAB step2_dic_finish lines 166-200)
@@ -955,10 +922,10 @@ void StepDWorkflow::formatOutput(const std::string& trial, int stereopair) {
             pts2d2.x.push_back(static_cast<double>(p.x));
             pts2d2.y.push_back(static_cast<double>(p.y));
         }
-        // Cam2 frames start at index n_frames + 1 (after matching frame)
-        results.Points[n_frames + 1 + ii] = std::move(pts2d2);
+        // Cam2 frames start at index n_frames (MATLAB: Points{nImages+ii})
+        results.Points[n_frames + ii] = std::move(pts2d2);
         // Store correlation coefficients as vector per frame
-        results.CorCoeffVec[n_frames + 1 + ii] = corrcoef;
+        results.CorCoeffVec[n_frames + ii] = corrcoef;
     }
     
     std::cout << "  Creating Delaunay triangulation..." << std::endl;

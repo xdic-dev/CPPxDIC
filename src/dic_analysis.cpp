@@ -76,6 +76,33 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
             std::cout << "  Disp.DispVec: " << dic3d.Disp.DispVec.size() << " frames" << std::endl;
             std::cout << "  Disp.DispMgn: " << dic3d.Disp.DispMgn.size() << " frames" << std::endl;
             
+            // Diagnostic: check for NaN/Inf in Points3D and face validity
+            {
+                size_t inf_pts_total = 0;
+                size_t bad_face_total = 0;
+                size_t nP = dic3d.Points3D.empty() ? 0 : dic3d.Points3D[0].x.size();
+                for (size_t f = 0; f < std::min(dic3d.Points3D.size(), size_t(3)); ++f) {
+                    size_t nan_pts = 0;
+                    for (size_t i = 0; i < nP; ++i) {
+                        if (std::isnan(dic3d.Points3D[f].x[i]) || std::isnan(dic3d.Points3D[f].y[i]) || std::isnan(dic3d.Points3D[f].z[i]))
+                            nan_pts++;
+                        if (std::isinf(dic3d.Points3D[f].x[i]) || std::isinf(dic3d.Points3D[f].y[i]) || std::isinf(dic3d.Points3D[f].z[i]))
+                            inf_pts_total++;
+                    }
+                    std::cout << "  [diag] Frame " << f << ": " << nan_pts << "/" << nP << " NaN points" << std::endl;
+                }
+                size_t nF = dic3d.Faces.size() / 3;
+                for (size_t i = 0; i < nF; ++i) {
+                    int v0 = dic3d.Faces[i*3], v1 = dic3d.Faces[i*3+1], v2 = dic3d.Faces[i*3+2];
+                    if (v0 < 0 || v1 < 0 || v2 < 0 || (size_t)v0 >= nP || (size_t)v1 >= nP || (size_t)v2 >= nP)
+                        bad_face_total++;
+                }
+                if (bad_face_total > 0)
+                    std::cerr << "  [diag] WARNING: " << bad_face_total << "/" << nF << " faces have out-of-bounds vertex indices!" << std::endl;
+                if (inf_pts_total > 0)
+                    std::cerr << "  [diag] WARNING: " << inf_pts_total << " Inf values in Points3D!" << std::endl;
+            }
+            
             // Convert Points3D to Eigen::Vector3d format for deformation computation
             std::cout << "\nConverting data to Eigen format..." << std::endl;
             
@@ -139,6 +166,12 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                         vertices_all_frames[iframe][ipt].y() = vertices_ref[ipt].y() + filt_y[ipt][iframe];
                         vertices_all_frames[iframe][ipt].z() = vertices_ref[ipt].z() + filt_z[ipt][iframe];
                     }
+                }
+                
+                // Update vertices_ref from filtered frame 0 (MATLAB step4 line 115-117:
+                // DIC3D.Points3D{1} is the filtered first frame used as Vref)
+                for (size_t ipt = 0; ipt < nPoints; ++ipt) {
+                    vertices_ref[ipt] = vertices_all_frames[0][ipt];
                 }
                 
                 std::cout << "  ✓ Temporal filtering applied (freqFilt=" << freq_filt 
@@ -314,6 +347,26 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
             );
             
             std::cout << "  ✓ Deformation computation complete" << std::endl;
+            
+            // Diagnostic: report deformation result quality for first few frames
+            {
+                for (size_t iframe = 0; iframe < std::min(deform_result.n_frames, size_t(3)); ++iframe) {
+                    const auto& fr = deform_result.frames[iframe];
+                    size_t nan_F = 0, nan_E = 0, nan_J = 0, inf_count = 0, large_count = 0;
+                    for (size_t i = 0; i < fr.Fmat.size(); ++i) {
+                        if (fr.Fmat[i].array().isNaN().any()) nan_F++;
+                        if (fr.Emat.size() > i && fr.Emat[i].array().isNaN().any()) nan_E++;
+                        if (fr.J.size() > i && std::isnan(fr.J[i])) nan_J++;
+                        if (fr.J.size() > i && std::isinf(fr.J[i])) inf_count++;
+                        if (fr.Emgn.size() > i && std::isfinite(fr.Emgn[i]) && std::abs(fr.Emgn[i]) > 1.0)
+                            large_count++;
+                    }
+                    std::cout << "  [diag] Deform frame " << iframe << ": "
+                              << "NaN_F=" << nan_F << " NaN_E=" << nan_E << " NaN_J=" << nan_J
+                              << " Inf=" << inf_count << " |Emgn|>1=" << large_count
+                              << " / " << fr.Fmat.size() << " faces" << std::endl;
+                }
+            }
             
             FrameDeformationResult deform_result_ARBM;
             if (config_.step_f_compute_rbm) {
@@ -607,88 +660,32 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
     std::cout << "Starting 3D Reconstruction (Step E)..." << std::endl;
     try {
 
-        auto build_faces_from_roi = [](const ncorr::ROI2D& roi, std::vector<int>& faces, std::vector<int>& indexLUT, int& W, int& H){
-            const auto& mask = roi.get_mask();
-            H = static_cast<int>(mask.height());
-            W = static_cast<int>(mask.width());
-            indexLUT.assign(H*W, -1);
-            int idx=0;
-            for (int y=0;y<H;++y){
-                for (int x=0;x<W;++x){
-                    if (mask(y,x)) indexLUT[y*W+x]=idx++;
-                }
-            }
-            for (int y=0;y<H-1;++y){
-                for (int x=0;x<W-1;++x){
-                    int a=indexLUT[y*W+x];
-                    int b=indexLUT[y*W+(x+1)];
-                    int c=indexLUT[(y+1)*W+x];
-                    int d=indexLUT[(y+1)*W+(x+1)];
-                    if (a>=0 && b>=0 && c>=0) { faces.push_back(a); faces.push_back(b); faces.push_back(c); }
-                    if (b>=0 && c>=0 && d>=0) { faces.push_back(b); faces.push_back(d); faces.push_back(c); }
-                }
-            }
-        };
-
-        auto extract_points2D = [](const ncorr::Disp2D& disp, std::vector<double>& pts_xy, std::vector<int>& indexLUT, int W, int H){
-            const auto& Au = disp.get_u().get_array();
-            const auto& Av = disp.get_v().get_array();
-            // get_scalefactor() returns spacing+1 (the stride between subset centers)
-            int sf = disp.get_scalefactor();
-            pts_xy.clear(); pts_xy.reserve(std::count_if(indexLUT.begin(), indexLUT.end(), [](int v){return v>=0;})*2);
-            // Build in index order
-            // x,y are reduced coords; u,v are full-resolution displacements
-            // Convert to full-resolution pixel coords: px = x*sf + u
-            for (int y=0;y<H;++y){
-                for (int x=0;x<W;++x){
-                    int idx = indexLUT[y*W+x];
-                    if (idx<0) continue;
-                    double u = Au(y,x);
-                    double v = Av(y,x);
-                    double px = static_cast<double>(x) * sf + u;
-                    double py = static_cast<double>(y) * sf + v;
-                    pts_xy.resize(std::max((size_t)((idx+1)*2), pts_xy.size()));
-                    pts_xy[idx*2+0] = px;
-                    pts_xy[idx*2+1] = py;
-                }
-            }
-        };
-
-        //
-
         auto solve_3d = [](const std::vector<double>& L1, const std::vector<double>& L2, double x1, double y1, double x2, double y2){
-            // Build A X = b, A is 4x3, b is 4
-            auto rows = [&](const std::vector<double>& L, double x, double y){
-                double l1=L[0],l2=L[1],l3=L[2],l4=L[3],l5=L[4],l6=L[5],l7=L[6],l8=L[7],l9=L[8],l10=L[9],l11=L[10];
-                std::array<double,3> r1{l1 - x*l9, l2 - x*l10, l3 - x*l11};
-                std::array<double,3> r2{l5 - y*l9, l6 - y*l10, l7 - y*l11};
-                double b1 = x - l4;
-                double b2 = y - l8;
-                return std::tuple(r1,r2,b1,b2);
-            };
-            auto [r11,r12,b11,b12] = rows(L1,x1,y1);
-            auto [r21,r22,b21,b22] = rows(L2,x2,y2);
-            // Normal equations A^T A X = A^T b
-            double ATA[3][3] = {{0}}; double ATb[3]={0};
-            auto accum = [&](const std::array<double,3>& r, double b){
-                for(int i=0;i<3;++i){ ATb[i]+=r[i]*b; for(int j=0;j<3;++j) ATA[i][j]+=r[i]*r[j]; }
-            };
-            accum(r11,b11); accum(r12,b12); accum(r21,b21); accum(r22,b22);
-            // Solve 3x3 via Cramer's or Gaussian elimination
-            // Gaussian elimination
-            double A_[3][4] = {
-                {ATA[0][0], ATA[0][1], ATA[0][2], ATb[0]},
-                {ATA[1][0], ATA[1][1], ATA[1][2], ATb[1]},
-                {ATA[2][0], ATA[2][1], ATA[2][2], ATb[2]}
-            };
-            for(int i=0;i<3;++i){
-                // pivot
-                int piv=i; for(int r=i+1;r<3;++r) if (std::fabs(A_[r][i])>std::fabs(A_[piv][i])) piv=r;
-                if (piv!=i) for(int c=0;c<4;++c) std::swap(A_[i][c],A_[piv][c]);
-                double diag = A_[i][i]; if (std::fabs(diag)<1e-12) continue; for(int c=i;c<4;++c) A_[i][c]/=diag;
-                for(int r=0;r<3;++r){ if (r==i) continue; double f=A_[r][i]; for(int c=i;c<4;++c) A_[r][c]-=f*A_[i][c]; }
+            Eigen::Matrix<double, 4, 3> M;
+            Eigen::Matrix<double, 4, 1> V;
+
+            // Match MATLAB DLT11Reconstruction exactly:
+            //   P3D(ii,:) = M \ V
+            M <<
+                x1 * L1[8]  - L1[0],  x1 * L1[9]  - L1[1],  x1 * L1[10] - L1[2],
+                y1 * L1[8]  - L1[4],  y1 * L1[9]  - L1[5],  y1 * L1[10] - L1[6],
+                x2 * L2[8]  - L2[0],  x2 * L2[9]  - L2[1],  x2 * L2[10] - L2[2],
+                y2 * L2[8]  - L2[4],  y2 * L2[9]  - L2[5],  y2 * L2[10] - L2[6];
+
+            V <<
+                L1[3] - x1,
+                L1[7] - y1,
+                L2[3] - x2,
+                L2[7] - y2;
+
+            Eigen::ColPivHouseholderQR<Eigen::Matrix<double, 4, 3>> qr(M);
+            if (qr.rank() < 3) {
+                double nan = std::numeric_limits<double>::quiet_NaN();
+                return std::array<double, 3>{nan, nan, nan};
             }
-            return std::array<double,3>{A_[0][3],A_[1][3],A_[2][3]};
+
+            Eigen::Matrix<double, 3, 1> X = qr.solve(V);
+            return std::array<double, 3>{X[0], X[1], X[2]};
         };
 
         for (int trial : trial_target) {
@@ -734,7 +731,7 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 }
                 
                 if (dlt_path.empty()) {
-                    std::cerr << "DLT calibration file not found for camera " << cam_id
+                    std::cerr << "ERROR - DLT calibration file not found for camera " << cam_id
                               << " in " << calib_dir << std::endl;
                     continue;
                 }
@@ -743,15 +740,15 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 if (cppxdic::MatReader::loadDLTCalibration(dlt_path, calib)) {
                     dlt_all_cams[cam_id] = std::move(calib);
                 } else {
-                    std::cerr << "Failed to load DLT calibration for camera " << cam_id << std::endl;
+                    std::cerr << "ERROR - Failed to load DLT calibration for camera " << cam_id << std::endl;
                 }
             }
             
             if (dlt_all_cams.empty()) {
-                std::cerr << "No DLT calibrations loaded. Cannot proceed with 3D reconstruction." << std::endl;
+                std::cerr << "ERROR - No DLT calibrations loaded. Cannot proceed with 3D reconstruction." << std::endl;
                 continue;
             }
-            std::cout << "Loaded DLT calibrations for " << dlt_all_cams.size() << " cameras" << std::endl;
+            std::cout << "INFO - Loaded DLT calibrations for " << dlt_all_cams.size() << " cameras" << std::endl;
             
             // ------------------------------------------------------------------
             // Load distortion parameters for all cameras (if available)
@@ -780,7 +777,7 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
             }
             bool use_distortion_removal = config_.step_e_distortion_removal;
             if (use_distortion_removal) {
-                std::cout << "Distortion removal enabled for all " << unique_cams.size() << " cameras" << std::endl;
+                std::cout << "INFO - Distortion removal enabled for all " << unique_cams.size() << " cameras" << std::endl;
                 
                 // ------------------------------------------------------------------
                 // Recalculate DLT parameters from undistorted calibration centroids
@@ -796,7 +793,7 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     const auto& dist = distortion_all_cams[cam_id];
                     
                     if (dlt.imageCentroids.empty() || dlt.C3Dtrue.empty() || dlt.columns.empty()) {
-                        std::cout << "  Camera " << cam_id << ": missing calibration data for DLT recalculation, "
+                        std::cout << "ERROR - Camera " << cam_id << ": missing calibration data for DLT recalculation, "
                                   << "using original DLT params with per-point undistortion fallback" << std::endl;
                         continue;
                     }
@@ -837,7 +834,7 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     
                     size_t nPoints = d0 * nCols;
                     if (nPoints != nCentroids) {
-                        std::cerr << "  Camera " << cam_id << ": centroid count (" << nCentroids
+                        std::cerr << "ERROR - Camera " << cam_id << ": centroid count (" << nCentroids
                                   << ") != C3D point count (" << nPoints << "), skipping DLT recalculation" << std::endl;
                         continue;
                     }
@@ -846,10 +843,10 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     std::vector<double> L_new;
                     if (Utils::DLT11Calibration(P2D.data(), P3D.data(), nPoints, L_new)) {
                         dlt.DLTparams = L_new;
-                        std::cout << "  Camera " << cam_id << ": DLT params recalculated from " 
+                        std::cout << "INFO - Camera " << cam_id << ": DLT params recalculated from " 
                                   << nPoints << " undistorted calibration points" << std::endl;
                     } else {
-                        std::cerr << "  Camera " << cam_id << ": DLT11Calibration failed" << std::endl;
+                        std::cerr << "ERROR - Camera " << cam_id << ": DLT11Calibration failed" << std::endl;
                     }
                 }
             } else if (!distortion_all_cams.empty()) {
@@ -880,302 +877,51 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 const std::vector<double>& L1 = dlt_cam1.DLTparams;
                 const std::vector<double>& L2 = dlt_cam2.DLTparams;
                 
-                // Load ncorr DIC outputs from output directory (ncorr native .bin format)
+                // ---------------------------------------------------------------
+                // Load DIC2DpairResults (MATLAB step3 lines 39-47)
+                // All 2D point extraction, matching, faces, colors, and correlation
+                // are already computed by formatOutput (step2_dic_finish equivalent).
+                // ---------------------------------------------------------------
+                auto d_serializer = cppxdic::DataSerializer::create(config_.data_format);
                 std::string output_dir = Utils::buildOutputUntilPhaseDir(config_, trial);
-                std::string cam1_bin = Utils::buildNcorrFilePath(output_dir, cam_1, -1, ".bin");
-                std::string cam2_bin = Utils::buildNcorrFilePath(output_dir, cam_2, -1, ".bin");
-                std::string matching_bin = Utils::buildNcorrFilePath(output_dir, cam_1, cam_2, ".bin");
+                std::string dic2d_file = Utils::buildDic2DPairResultsFilePath(output_dir, cam_1, cam_2, d_serializer->extension());
                 
-                if (!std::filesystem::exists(cam1_bin) || !std::filesystem::exists(cam2_bin)) {
-                    std::cerr << "Missing cached 2D outputs for trial " << trial << ", pair " << pair << ". Skipping." << std::endl;
-                    std::cerr << "  Expected: " << cam1_bin << std::endl;
-                    std::cerr << "  Expected: " << cam2_bin << std::endl;
+                if (!std::filesystem::exists(dic2d_file)) {
+                    std::cerr << "ERROR - Missing DIC2DPairResults for trial " << trial << ", pair " << pair << ". Skipping." << std::endl;
+                    std::cerr << "  Expected: " << dic2d_file << std::endl;
+                    continue;
+                }
+                
+                DIC2DPairResults DIC2D;
+                if (!d_serializer->loadDIC2DPairResults(dic2d_file, DIC2D)) {
+                    std::cerr << "ERROR - Failed to load DIC2DPairResults: " << dic2d_file << ". Skipping." << std::endl;
                     continue;
                 }
                 
                 if (config_.debug_mode) {
-                    std::cout << "[DEBUG] Loading 2D DIC data from:" << std::endl;
-                    std::cout << "[DEBUG]   Cam" << cam_1 << ": " << cam1_bin << std::endl;
-                    std::cout << "[DEBUG]   Cam" << cam_2 << ": " << cam2_bin << std::endl;
+                    std::cout << "[DEBUG] Loaded DIC2DPairResults from: " << dic2d_file << std::endl;
+                    std::cout << "[DEBUG]   nImages=" << DIC2D.nImages << ", Points=" << DIC2D.Points.size()
+                              << ", Faces=" << DIC2D.Faces.size()/3 << std::endl;
                     std::cout << "[DEBUG]   DLT cam" << cam_1 << ": " << dlt_cam1.filePath << std::endl;
                     std::cout << "[DEBUG]   DLT cam" << cam_2 << ": " << dlt_cam2.filePath << std::endl;
                 }
 
-                // Load DIC outputs
-                auto dic1 = DIC_analysis_output::load(cam1_bin);
-                auto dic2 = DIC_analysis_output::load(cam2_bin);
-                if (dic1.disps.size() != dic2.disps.size()) {
-                    std::cerr << "Cam1/Cam2 frame count mismatch for trial " << trial << " pair " << pair << std::endl;
-                    continue;
-                }
-                
-                // Load matching displacement (cam1_ref -> cam2_ref) for point correspondence
-                // Without this, cam1 grid position (y,x) would be incorrectly paired with
-                // cam2 grid position (y,x), but they represent different physical points.
-                bool has_matching = false;
-                ncorr::DIC_analysis_output dic12;
-                if (std::filesystem::exists(matching_bin)) {
-                    dic12 = DIC_analysis_output::load(matching_bin);
-                    if (!dic12.disps.empty()) {
-                        has_matching = true;
-                        std::cout << "  ✓ Loaded matching displacement for cam" << cam_1 << "→cam" << cam_2 << " correspondence" << std::endl;
-                    }
-                }
-                if (!has_matching) {
-                    std::cerr << "  WARNING: No matching displacement found (" << matching_bin << ")." << std::endl;
-                    std::cerr << "           cam2 points will use direct grid mapping (may be inaccurate for large parallax)." << std::endl;
-                }
+                // Extract information from 2D-DIC results (MATLAB step3 lines 130-134)
+                int nImages = DIC2D.nImages;
+                const auto& CorCoeff = DIC2D.CorCoeffVec;
+                const auto& F = DIC2D.Faces;
+                const auto& FC = DIC2D.FaceColors;
+                const auto& Points = DIC2D.Points;
 
-                // Build faces and index LUT from reference ROI (use frame 0 from cam1)
-                std::vector<int> faces; std::vector<int> indexLUT; int W=0,H=0;
-                build_faces_from_roi(dic1.disps.front().get_roi(), faces, indexLUT, W, H);
-
-                // Compute FaceColors from reference image pixel intensities at ROI grid points
-                // MATLAB: IMrefSmall = IMref(1:Factor:end, 1:Factor:end); ColorRef = IMrefSmall(ROI_mask)
-                // Then: FaceColors = mean(ColorRef(F), 2)
-                std::vector<double> faceColors;
-                {
-                    int sf = dic1.disps.front().get_scalefactor();
-                    size_t num_pts = std::count_if(indexLUT.begin(), indexLUT.end(), [](int v){return v>=0;});
-                    std::vector<double> ColorRef(num_pts, 128.0);  // default gray if image unavailable
-                    
-                    // Try to load reference image for actual pixel colors
-                    std::vector<std::string> cam1_frames_fc, cam2_frames_fc;
-                    if (Utils::importVid(config_, trial, pair, cam1_frames_fc, cam2_frames_fc) && !cam1_frames_fc.empty()) {
-                        cv::Mat ref_img = cv::imread(cam1_frames_fc[0], cv::IMREAD_GRAYSCALE);
-                        if (!ref_img.empty()) {
-                            for (int y = 0; y < H; ++y) {
-                                for (int x = 0; x < W; ++x) {
-                                    int idx = indexLUT[y * W + x];
-                                    if (idx < 0) continue;
-                                    int py = y * sf;
-                                    int px = x * sf;
-                                    if (py < ref_img.rows && px < ref_img.cols) {
-                                        ColorRef[idx] = static_cast<double>(ref_img.at<uchar>(py, px));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Compute face colors as average of 3 vertex colors (MATLAB: CF = mean(ColorRef(F), 2))
-                    size_t nFaces_fc = faces.size() / 3;
-                    faceColors.resize(nFaces_fc, 128.0);
-                    for (size_t i = 0; i < nFaces_fc; ++i) {
-                        int v0 = faces[i*3], v1 = faces[i*3+1], v2 = faces[i*3+2];
-                        if (v0 >= 0 && v0 < (int)num_pts && v1 >= 0 && v1 < (int)num_pts && v2 >= 0 && v2 < (int)num_pts) {
-                            faceColors[i] = (ColorRef[v0] + ColorRef[v1] + ColorRef[v2]) / 3.0;
-                        }
-                    }
-                }
-
-                // Create individual pair result structure
+                // Create individual pair result structure (MATLAB step3 lines 110-136)
                 DIC3DpairResults pair_result;
-                pair_result.cameraPairInd = {cam_1, cam_2};  // Camera pair indices
+                pair_result.cameraPairInd = {cam_1, cam_2};
                 pair_result.DLTpath = {dlt_cam1.filePath, dlt_cam2.filePath};
                 pair_result.DLTparameters = {L1, L2};
-                pair_result.FaceColors = std::move(faceColors);
+                pair_result.Faces = F;
+                pair_result.FaceColors = FC;
                 
-                std::vector<double> P3D_ref; // frame 1 reference
-                
-                // Extract correlation coefficients from both cameras (for combined corr)
-                std::vector<std::vector<double>> corrCam1, corrCam2;
-                
-                // Lambda to extract correlation data using indexLUT
-                auto extract_correlation = [](const ncorr::Disp2D& disp, std::vector<double>& corr_out, 
-                                            const std::vector<int>& indexLUT, int W, int H) {
-                    const auto& cc_array = disp.get_cc().get_array();
-                    const auto& roi_mask = disp.get_roi().get_mask();
-                    size_t num_points = std::count_if(indexLUT.begin(), indexLUT.end(), [](int v){return v>=0;});
-                    corr_out.clear();
-                    corr_out.resize(num_points, 0.0);
-                    for (int y=0; y<H; ++y) {
-                        for (int x=0; x<W; ++x) {
-                            int idx = indexLUT[y*W+x];
-                            if (idx < 0) continue;
-                            double cc = (roi_mask(y, x)) ? cc_array(y, x) : 0.0;
-                            corr_out[idx] = cc;
-                        }
-                    }
-                };
-                
-                // Extract real correlation data for each frame
-                for (size_t fi=0; fi<dic1.disps.size(); ++fi) {
-                    std::vector<double> corr1, corr2;
-                    extract_correlation(dic1.disps[fi], corr1, indexLUT, W, H);
-                    extract_correlation(dic2.disps[fi], corr2, indexLUT, W, H);
-                    corrCam1.push_back(corr1);
-                    corrCam2.push_back(corr2);
-                    if (fi == 0 && !corr1.empty()) {
-                        double avg1 = std::accumulate(corr1.begin(), corr1.end(), 0.0) / corr1.size();
-                        double avg2 = std::accumulate(corr2.begin(), corr2.end(), 0.0) / corr2.size();
-                        std::cout << "  Using real correlation data - Frame 1: Cam1 avg=" 
-                                  << std::fixed << std::setprecision(3) << avg1 
-                                  << ", Cam2 avg=" << avg2 << std::endl;
-                    }
-                }
-
-                // Lambda to extract cam2 points mapped through matching displacement
-                // MATLAB step2_dic_finish equivalent: bilinear interpolation of cam2 displacements
-                // at positions offset by matching displacement, then add matching displacement
-                auto extract_points2D_cam2_mapped = [](const ncorr::Disp2D& disp_cam2,
-                                                       const ncorr::Disp2D& disp_matching,
-                                                       std::vector<double>& pts_xy,
-                                                       std::vector<int>& indexLUT, int W, int H) {
-                    const auto& Au2 = disp_cam2.get_u().get_array();
-                    const auto& Av2 = disp_cam2.get_v().get_array();
-                    const auto& Au12 = disp_matching.get_u().get_array();
-                    const auto& Av12 = disp_matching.get_v().get_array();
-                    int sf = disp_cam2.get_scalefactor();
-                    int H2 = Au2.height(), W2 = Au2.width();
-                    
-                    pts_xy.clear();
-                    pts_xy.reserve(std::count_if(indexLUT.begin(), indexLUT.end(), [](int v){return v>=0;}) * 2);
-                    
-                    for (int y = 0; y < H; ++y) {
-                        for (int x = 0; x < W; ++x) {
-                            int idx = indexLUT[y * W + x];
-                            if (idx < 0) continue;
-                            
-                            // Matching displacement at cam1 grid position (y,x)
-                            double u12 = Au12(y, x);  // x-displacement cam1→cam2 (full-res pixels)
-                            double v12 = Av12(y, x);  // y-displacement cam1→cam2 (full-res pixels)
-                            
-                            // Mapped position in cam2's reduced grid
-                            double cam2_rx = static_cast<double>(x) + u12 / sf;
-                            double cam2_ry = static_cast<double>(y) + v12 / sf;
-                            
-                            // Bilinear interpolation of cam2 displacement at mapped position
-                            int x0 = static_cast<int>(std::floor(cam2_rx));
-                            int y0 = static_cast<int>(std::floor(cam2_ry));
-                            int x1 = x0 + 1;
-                            int y1 = y0 + 1;
-                            double fx = cam2_rx - x0;
-                            double fy = cam2_ry - y0;
-                            
-                            double u2_mapped = 0.0, v2_mapped = 0.0;
-                            if (x0 >= 0 && y0 >= 0 && x1 < W2 && y1 < H2) {
-                                // Standard bilinear interpolation
-                                u2_mapped = (1-fx)*(1-fy)*Au2(y0,x0) + fx*(1-fy)*Au2(y0,x1)
-                                          + (1-fx)*fy*Au2(y1,x0) + fx*fy*Au2(y1,x1);
-                                v2_mapped = (1-fx)*(1-fy)*Av2(y0,x0) + fx*(1-fy)*Av2(y0,x1)
-                                          + (1-fx)*fy*Av2(y1,x0) + fx*fy*Av2(y1,x1);
-                            } else if (x0 >= 0 && y0 >= 0 && x0 < W2 && y0 < H2) {
-                                // Edge case: nearest neighbor
-                                int cx = std::min(std::max(static_cast<int>(std::round(cam2_rx)), 0), W2-1);
-                                int cy = std::min(std::max(static_cast<int>(std::round(cam2_ry)), 0), H2-1);
-                                u2_mapped = Au2(cy, cx);
-                                v2_mapped = Av2(cy, cx);
-                            }
-                            // else: out of bounds, u2/v2 remain 0
-                            
-                            // Final cam2 pixel position = cam2_ref_pixel + cam2_displacement
-                            // cam2_ref_pixel = cam1_pixel + matching_displacement
-                            double px = static_cast<double>(x) * sf + u12 + u2_mapped;
-                            double py = static_cast<double>(y) * sf + v12 + v2_mapped;
-                            
-                            pts_xy.resize(std::max((size_t)((idx+1)*2), pts_xy.size()));
-                            pts_xy[idx*2+0] = px;
-                            pts_xy[idx*2+1] = py;
-                        }
-                    }
-                };
-                
-                for (size_t fi=0; fi<dic1.disps.size(); ++fi) {
-                    const auto& d1 = dic1.disps[fi];
-                    const auto& d2 = dic2.disps[fi];
-                    std::vector<double> pts1, pts2;
-                    extract_points2D(d1, pts1, indexLUT, W, H);
-                    if (has_matching) {
-                        extract_points2D_cam2_mapped(d2, dic12.disps[0], pts2, indexLUT, W, H);
-                    } else {
-                        extract_points2D(d2, pts2, indexLUT, W, H);
-                    }
-                    
-                    // Note: distortion is handled by recalculating DLT params from undistorted
-                    // calibration centroids (MATLAB step3 approach), not by per-point undistortion.
-                    size_t N = pts1.size()/2;
-                    std::vector<double> pts3d; pts3d.resize(N*3, std::numeric_limits<double>::quiet_NaN());
-                    for (size_t k=0; k<N; ++k){
-                        double x1 = pts1[k*2+0], y1 = pts1[k*2+1];
-                        double x2 = pts2[k*2+0], y2 = pts2[k*2+1];
-                        if (L1.size()>=11 && L2.size()>=11) {
-                            auto X = solve_3d(L1,L2,x1,y1,x2,y2);
-                            pts3d[k*3+0]=X[0]; pts3d[k*3+1]=X[1]; pts3d[k*3+2]=X[2];
-                        }
-                    }
-                    // Accumulate points3d for this frame
-                    Points3D frame_pts;
-                    for (size_t k=0; k<N; ++k) {
-                        frame_pts.x.push_back(pts3d[k*3+0]);
-                        frame_pts.y.push_back(pts3d[k*3+1]);
-                        frame_pts.z.push_back(pts3d[k*3+2]);
-                    }
-                    pair_result.Points3D.push_back(frame_pts);
-
-                    // Compute combined correlation (max of cam1 and cam2 - worst case)
-                    std::vector<double> corr_comb;
-                    for (size_t k=0; k<N; ++k) {
-                        corr_comb.push_back(std::max(corrCam1[fi][k], corrCam2[fi][k]));
-                    }
-                    pair_result.corrComb.push_back(corr_comb);
-                    
-                    // Compute face-based correlation (max of 3 vertices)
-                    size_t nFaces = faces.size() / 3;
-                    std::vector<double> face_corr;
-                    for (size_t iface=0; iface<nFaces; ++iface) {
-                        int v0 = faces[iface*3];
-                        int v1 = faces[iface*3+1];
-                        int v2 = faces[iface*3+2];
-                        if (v0 < N && v1 < N && v2 < N) {
-                            double max_corr = std::max({corr_comb[v0], corr_comb[v1], corr_comb[v2]});
-                            face_corr.push_back(max_corr);
-                        } else {
-                            face_corr.push_back(std::numeric_limits<double>::quiet_NaN());
-                        }
-                    }
-                    pair_result.FaceCorrComb.push_back(face_corr);
-                    
-                    // Compute face centroids
-                    std::vector<double> face_centroids;
-                    for (size_t iface=0; iface<nFaces; ++iface) {
-                        int v0 = faces[iface*3];
-                        int v1 = faces[iface*3+1];
-                        int v2 = faces[iface*3+2];
-                        if (v0 < N && v1 < N && v2 < N) {
-                            double cx = (pts3d[v0*3+0] + pts3d[v1*3+0] + pts3d[v2*3+0]) / 3.0;
-                            double cy = (pts3d[v0*3+1] + pts3d[v1*3+1] + pts3d[v2*3+1]) / 3.0;
-                            double cz = (pts3d[v0*3+2] + pts3d[v1*3+2] + pts3d[v2*3+2]) / 3.0;
-                            face_centroids.push_back(cx);
-                            face_centroids.push_back(cy);
-                            face_centroids.push_back(cz);
-                        } else {
-                            face_centroids.push_back(std::numeric_limits<double>::quiet_NaN());
-                            face_centroids.push_back(std::numeric_limits<double>::quiet_NaN());
-                            face_centroids.push_back(std::numeric_limits<double>::quiet_NaN());
-                        }
-                    }
-                    pair_result.FaceCentroids.push_back(face_centroids);
-
-                    // Compute displacement from frame 1
-                    if (fi==0) P3D_ref = pts3d;
-                    std::vector<double> dispvec; dispvec.resize(N*3, std::numeric_limits<double>::quiet_NaN());
-                    std::vector<double> dispmgn; dispmgn.resize(N, std::numeric_limits<double>::quiet_NaN());
-                    for (size_t k=0;k<N;++k){
-                        double dx = pts3d[k*3+0]-P3D_ref[k*3+0];
-                        double dy = pts3d[k*3+1]-P3D_ref[k*3+1];
-                        double dz = pts3d[k*3+2]-P3D_ref[k*3+2];
-                        dispvec[k*3+0]=dx; dispvec[k*3+1]=dy; dispvec[k*3+2]=dz;
-                        dispmgn[k]=std::sqrt(dx*dx+dy*dy+dz*dz);
-                    }
-                    // Accumulate displacement data
-                    pair_result.Disp.DispVec.push_back(dispvec);
-                    pair_result.Disp.DispMgn.push_back(dispmgn);
-                }
-
-                // Finalize pair result structure
-                pair_result.Faces = faces;
-                // Set distortion info (if available)
+                // Set distortion info (MATLAB step3 lines 138-186)
                 if (use_distortion_removal) {
                     pair_result.distortionModel = {"distortion", "distortion"};
                     pair_result.distortionPath = {distortion_paths[cam_1], distortion_paths[cam_2]};
@@ -1183,60 +929,195 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     pair_result.distortionModel = {"none", "none"};
                     pair_result.distortionPath = {"none", "none"};
                 }
-                
-                // Store this pair's result
+
+                size_t nFaces = F.size() / 3;
+                std::vector<double> P3D_ref; // frame 1 reference for displacement
+
+                // Loop over images/frames (MATLAB step3 lines 196-221)
+                for (int ii = 0; ii < nImages; ++ii) {
+                    // Correlated points from 2 cameras (MATLAB: P1=Points{ii}, P2=Points{ii+nImages})
+                    const auto& P1 = Points[ii];
+                    const auto& P2 = Points[ii + nImages];
+                    size_t N = P1.x.size();
+
+                    // Solve the DLT system (MATLAB: P3D = DLT11Reconstruction(P1, P2, L1, L2))
+                    std::vector<double> pts3d(N * 3, std::numeric_limits<double>::quiet_NaN());
+                    Points3D frame_pts;
+                    frame_pts.x.resize(N); frame_pts.y.resize(N); frame_pts.z.resize(N);
+                    for (size_t k = 0; k < N; ++k) {
+                        double x1 = P1.x[k], y1 = P1.y[k];
+                        double x2 = P2.x[k], y2 = P2.y[k];
+                        if (!std::isnan(x1) && !std::isnan(y1) && !std::isnan(x2) && !std::isnan(y2)) {
+                            auto X = solve_3d(L1, L2, x1, y1, x2, y2);
+                            pts3d[k*3+0] = X[0]; pts3d[k*3+1] = X[1]; pts3d[k*3+2] = X[2];
+                            frame_pts.x[k] = X[0]; frame_pts.y[k] = X[1]; frame_pts.z[k] = X[2];
+                        } else {
+                            frame_pts.x[k] = std::numeric_limits<double>::quiet_NaN();
+                            frame_pts.y[k] = std::numeric_limits<double>::quiet_NaN();
+                            frame_pts.z[k] = std::numeric_limits<double>::quiet_NaN();
+                        }
+                    }
+                    pair_result.Points3D.push_back(frame_pts);
+
+                    // Combined correlation coefficients (MATLAB: corrComb = max([CorCoeff{ii} CorCoeff{ii+nImages}], [], 2))
+                    std::vector<double> corr_comb(N, 0.0);
+                    if (ii < (int)CorCoeff.size() && (ii + nImages) < (int)CorCoeff.size()) {
+                        for (size_t k = 0; k < N; ++k) {
+                            double cc1 = (k < CorCoeff[ii].size()) ? CorCoeff[ii][k] : 0.0;
+                            double cc2 = (k < CorCoeff[ii + nImages].size()) ? CorCoeff[ii + nImages][k] : 0.0;
+                            corr_comb[k] = std::max(cc1, cc2);
+                        }
+                    }
+                    pair_result.corrComb.push_back(corr_comb);
+
+                    // Face correlation coefficient (MATLAB: FaceCorrComb = max(corrComb(F), [], 2))
+                    std::vector<double> face_corr(nFaces, std::numeric_limits<double>::quiet_NaN());
+                    for (size_t iface = 0; iface < nFaces; ++iface) {
+                        int v0 = F[iface*3], v1 = F[iface*3+1], v2 = F[iface*3+2];
+                        if (v0 >= 0 && v0 < (int)N && v1 >= 0 && v1 < (int)N && v2 >= 0 && v2 < (int)N) {
+                            face_corr[iface] = std::max({corr_comb[v0], corr_comb[v1], corr_comb[v2]});
+                        }
+                    }
+                    pair_result.FaceCorrComb.push_back(face_corr);
+
+                    // Compute face centroids (MATLAB: FaceCentroids(iface,:) = mean(P3D(F(iface,:),:)))
+                    std::vector<double> face_centroids(nFaces * 3, std::numeric_limits<double>::quiet_NaN());
+                    for (size_t iface = 0; iface < nFaces; ++iface) {
+                        int v0 = F[iface*3], v1 = F[iface*3+1], v2 = F[iface*3+2];
+                        if (v0 >= 0 && v0 < (int)N && v1 >= 0 && v1 < (int)N && v2 >= 0 && v2 < (int)N) {
+                            face_centroids[iface*3+0] = (pts3d[v0*3+0] + pts3d[v1*3+0] + pts3d[v2*3+0]) / 3.0;
+                            face_centroids[iface*3+1] = (pts3d[v0*3+1] + pts3d[v1*3+1] + pts3d[v2*3+1]) / 3.0;
+                            face_centroids[iface*3+2] = (pts3d[v0*3+2] + pts3d[v1*3+2] + pts3d[v2*3+2]) / 3.0;
+                        }
+                    }
+                    pair_result.FaceCentroids.push_back(face_centroids);
+
+                    // Compute displacements between frames (MATLAB: DispVec = Points3D{ii} - Points3D{1})
+                    if (ii == 0) P3D_ref = pts3d;
+                    std::vector<double> dispvec(N * 3, std::numeric_limits<double>::quiet_NaN());
+                    std::vector<double> dispmgn(N, std::numeric_limits<double>::quiet_NaN());
+                    for (size_t k = 0; k < N; ++k) {
+                        double dx = pts3d[k*3+0] - P3D_ref[k*3+0];
+                        double dy = pts3d[k*3+1] - P3D_ref[k*3+1];
+                        double dz = pts3d[k*3+2] - P3D_ref[k*3+2];
+                        dispvec[k*3+0] = dx; dispvec[k*3+1] = dy; dispvec[k*3+2] = dz;
+                        dispmgn[k] = std::sqrt(dx*dx + dy*dy + dz*dz);
+                    }
+                    pair_result.Disp.DispVec.push_back(dispvec);
+                    pair_result.Disp.DispMgn.push_back(dispmgn);
+                }
+
+                // Store this pair's result and DIC2D data
                 all_pairs.push_back(pair_result);
+                dic2d_info.push_back(std::move(DIC2D));
                 
                 std::cout << "✓ Pair " << pair << " complete: " 
                           << pair_result.Points3D[0].x.size() << " points, "
-                          << faces.size() / 3 << " faces" << std::endl;
+                          << nFaces << " faces" << std::endl;
             }
             
             // Stitch all pairs together
             std::cout << "\n=== Stitching " << all_pairs.size() << " pairs ===" << std::endl;
             DIC3Dcombined stitched;
             if (all_pairs.empty()) {
-                std::cerr << "No pairs successfully reconstructed for trial " << trial << std::endl;
+                std::cerr << "ERROR - No pairs successfully reconstructed for trial " << trial << std::endl;
                 continue;
             } else {
-                stitched = stitchPairsSimple(all_pairs);
+                std::vector<int> stitch_pair_order;
+                bool stitch_pair_forced = false;
+                bool have_stitch_metadata = false;
+                bool stitch_metadata_mismatch = false;
+
+                for (const auto& dic2d : dic2d_info) {
+                    if (dic2d.pairOrder.empty()) {
+                        std::cerr << "ERROR - Empty pairOrder in DIC2D for trial " << trial << std::endl;
+                        continue;
+                    }
+                    if (!have_stitch_metadata) {
+                        std::cout << "WARNING - Using first pair's stitch metadata for trial " << trial << std::endl;
+                        stitch_pair_order = dic2d.pairOrder;
+                        stitch_pair_forced = dic2d.pairForced;
+                        have_stitch_metadata = true;
+                    } else if (dic2d.pairOrder != stitch_pair_order ||
+                               dic2d.pairForced != stitch_pair_forced) {
+                        std::cerr << "ERROR - Inconsistent DIC2D stitch metadata across pairs for trial "
+                                  << trial << ". Skipping trial." << std::endl;
+                        stitch_metadata_mismatch = true;
+                        break;
+                    }
+                }
+
+                if (stitch_metadata_mismatch) {
+                    std::cerr << "WARNING - Skipping trial " << trial << " due to stitch metadata mismatch" << std::endl;
+                    continue;
+                }
+
+                if (all_pairs.size() > 1 && all_pairs.size() == static_cast<size_t>(config_.num_pair)) {
+                    if (!have_stitch_metadata) {
+                        bool protocol_loaded = false;
+                        bool protocol_available = false;
+                        cppxdic::ProtocolFileData protocol_data;
+                        stitch_pair_order.reserve(config_.num_pair);
+                        for (int pair = 1; pair <= config_.num_pair; ++pair) {
+                            stitch_pair_order.push_back(pair);
+                        }
+
+                        try {
+                            std::string protocol_dir = Utils::buildProtocolDir(config_, true, true, true, true);
+                            auto protocol_files = Utils::findFiles(protocol_dir, "*.mat");
+                            if (!protocol_files.empty()) {
+                                protocol_loaded = true;
+                                protocol_available = MatReader::loadProtocol(protocol_files.front(), protocol_data);
+                            }
+                        } catch (...) {
+                            protocol_available = false;
+                        }
+
+                        if (protocol_loaded && protocol_available &&
+                            trial > 0 && static_cast<size_t>(trial) <= protocol_data.trials.size()) {
+                            const std::string& direction = protocol_data.trials[trial - 1].direction;
+                            if (direction == "Ubnf") {
+                                stitch_pair_order = {2, 1};
+                                stitch_pair_forced = true;
+                            } else if (direction == "Rbnf") {
+                                stitch_pair_order = {1, 2};
+                                stitch_pair_forced = true;
+                            } else {
+                                stitch_pair_forced = false;
+                            }
+                            for (int pair = 1; pair <= config_.num_pair; ++pair) {
+                                if (std::find(stitch_pair_order.begin(), stitch_pair_order.end(), pair) == stitch_pair_order.end()) {
+                                    stitch_pair_order.push_back(pair);
+                                }
+                            }
+                        }
+                        std::cout << "  Stitch metadata missing from DIC2D results; using legacy fallback"
+                                  << std::endl;
+                    }
+
+                    std::cout << "  Stitch order: ";
+                    for (size_t i = 0; i < stitch_pair_order.size(); ++i) {
+                        if (i > 0) std::cout << ", ";
+                        std::cout << stitch_pair_order[i];
+                    }
+                    std::cout << std::endl;
+                    std::cout << "  Pair forced metadata: " << (stitch_pair_forced ? "true" : "false")
+                              << std::endl;
+                    stitched = stitchPairsGeometric(all_pairs, stitch_pair_order);
+                    std::cout << "INFO - Geometric Stitching done!" << std::endl;
+                } else {
+                    if (all_pairs.size() > 1) {
+                        std::cout << "  Falling back to simple append stitching because only "
+                                  << all_pairs.size() << "/" << config_.num_pair
+                                  << " pairs were reconstructed" << std::endl;
+                    }
+                    stitched = stitchPairsSimple(all_pairs);
+                }
                 
                 // Store individual pair results in stitched structure
                 stitched.AllPairsResults = all_pairs;
                 
-                // Load DIC2D pair results from Step D output files
-                std::cout << "\n=== Loading DIC2D pair results ===" << std::endl;
-                auto d_serializer = cppxdic::DataSerializer::create(config_.data_format);
-                std::string output_dir = Utils::buildOutputUntilPhaseDir(config_, trial);
-                for (int pair = 1; pair <= config_.num_pair; ++pair) {
-                    int cam_1, cam_2;
-                    Utils::getCamerasForPair(pair, cam_1, cam_2);
-                    
-                    std::string dic2d_file = Utils::buildDic2DPairResultsFilePath(output_dir, cam_1, cam_2, d_serializer->extension());
-                    
-                    if (std::filesystem::exists(dic2d_file)) {
-                        DIC2DPairResults dic2d_result;
-                        if (d_serializer->loadDIC2DPairResults(dic2d_file, dic2d_result)) {
-                            dic2d_info.push_back(dic2d_result);
-                            std::cout << "  ✓ Loaded DIC2D data for pair " << pair << std::endl;
-                        } else {
-                            std::cerr << "  ! Failed to load DIC2D file, using placeholder: " << dic2d_file << std::endl;
-                            dic2d_result.nCamRef = cam_1;
-                            dic2d_result.nCamDef = cam_2;
-                            dic2d_result.nImages = all_pairs[pair-1].Points3D.size();
-                            dic2d_info.push_back(dic2d_result);
-                        }
-                    } else {
-                        std::cout << "  ! DIC2D file not found (creating placeholder): " << dic2d_file << std::endl;
-                        DIC2DPairResults dic2d_result;
-                        dic2d_result.nCamRef = cam_1;
-                        dic2d_result.nCamDef = cam_2;
-                        dic2d_result.nImages = all_pairs[pair-1].Points3D.size();
-                        dic2d_info.push_back(dic2d_result);
-                    }
-                }
-                
-                // Store DIC2D info in stitched structure
+                // DIC2D pair results already collected during per-pair processing (MATLAB step3 line 268)
                 stitched.DIC2Dinfo = dic2d_info;
                 std::cout << "  Stored " << stitched.DIC2Dinfo.size() << " DIC2D pair results" << std::endl;
             }

@@ -1256,7 +1256,7 @@ void Visualization::generateVideo(const VisData& vis_data,
         if (it != vis_data.FaceScalars.end()) {
             for (const auto& frame_data : it->second) {
                 for (double v : frame_data) {
-                    if (!std::isnan(v)) {
+                    if (std::isfinite(v)) {
                         data_min = std::min(data_min, v);
                         data_max = std::max(data_max, v);
                     }

@@ -90,6 +90,8 @@ struct DIC2DPairResults {
     int nCamRef;        // Reference camera number
     int nCamDef;        // Deformed camera number
     int nImages;        // Number of images
+    std::vector<int> pairOrder;  // Trial-level stitch order metadata
+    bool pairForced = false;     // Trial-level forced-stitch metadata
     cv::Mat ROImask;    // ROI mask
     DICInfo ncorrInfo;  // DIC parameters
     std::vector<Points2D> Points;  // Points per frame (cell array in MATLAB: each cell is Nx2 array)
