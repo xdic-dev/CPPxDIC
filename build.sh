@@ -12,22 +12,22 @@ echo "======================================================"
 NCORR_LIB="Tools/CppNCorr/lib/libncorr.a"
 NCORR_INCLUDE="Tools/CppNCorr/include"
 
-if [ ! -f "$NCORR_LIB" ]; then
-    echo "Error: ncorr library not found at $NCORR_LIB"
-    echo "Please build the ncorr library first:"
-    echo "  cd ../ncorr_2D_cpp-master"
-    echo "  mkdir -p build && cd build"
-    echo "  cmake .."
-    echo "  make"
-    exit 1
-fi
+# if [ ! -f "$NCORR_LIB" ]; then
+#     echo "Error: ncorr library not found at $NCORR_LIB"
+#     echo "Please build the ncorr library first:"
+#     echo "  cd ../ncorr_2D_cpp-master"
+#     echo "  mkdir -p build && cd build"
+#     echo "  cmake .."
+#     echo "  make"
+#     exit 1
+# fi
 
-if [ ! -d "$NCORR_INCLUDE" ]; then
-    echo "Error: ncorr include directory not found at $NCORR_INCLUDE"
-    exit 1
-fi
+# if [ ! -d "$NCORR_INCLUDE" ]; then
+#     echo "Error: ncorr include directory not found at $NCORR_INCLUDE"
+#     exit 1
+# fi
 
-echo "✓ ncorr library found"
+# echo "✓ ncorr library found"
 
 # Check for OpenCV
 if ! pkg-config --exists opencv4; then

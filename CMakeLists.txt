@@ -12,6 +12,9 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -isystem /opt/homebrew/include")
 include_directories(include)
 include_directories(Tools/CppNCorr/include)
 
+# Build NCorr from source so local workflow changes are linked into cppxdic
+add_subdirectory(Tools/CppNCorr)
+
 # Add executable with new source files
 add_executable(cppxdic
     src/main.cpp
@@ -39,8 +42,7 @@ include_directories(${OpenCV_INCLUDE_DIRS})
 target_link_libraries(cppxdic ${OpenCV_LIBS})
 
 # Add ncorr library
-find_library(NCORR_LIBRARY NAMES ncorr PATHS Tools/CppNCorr/lib)
-target_link_libraries(cppxdic ${NCORR_LIBRARY})
+target_link_libraries(cppxdic ncorr)
 
 # Add OpenCV libraries explicitly (following ncorr pattern)
 find_library(OPENCV_LIBRARY1 NAMES opencv_core)
@@ -207,7 +209,7 @@ add_executable(generate_ncorr_bin
 )
 target_include_directories(generate_ncorr_bin PRIVATE include Tools/CppNCorr/include)
 target_link_libraries(generate_ncorr_bin
-    ${NCORR_LIBRARY}
+    ncorr
     ${OpenCV_LIBS}
     ${OPENCV_LIBRARY1} ${OPENCV_LIBRARY2} ${OPENCV_LIBRARY3} ${OPENCV_LIBRARY4} ${OPENCV_LIBRARY5}
     ${FFTW_LIBRARY}
@@ -268,4 +270,3 @@ else()
     message(FATAL_ERROR "nlohmann/json library not found. Please install it using your package manager.")
   endif()
 endif()
-

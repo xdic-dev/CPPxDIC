@@ -46,7 +46,7 @@ public:
     // Processing flags
     bool im_filter_mode = false;
     bool automatic_process = true;       // automatic processing flag
-    bool parallel_processing = false;     // parallel processing flag
+    bool parallel_processing = true;     // parallel processing flag
     
     // DIC parameters (from dic_param.m)
     std::string subject_id = "S09";      // Subject identifier

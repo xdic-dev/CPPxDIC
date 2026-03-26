@@ -240,6 +240,37 @@ private:
                       int stereopair,
                       const std::vector<int>& pairOrder,
                       bool pairForced);
+
+    /**
+     * Map an ROI mask and seed point through the first displacement field.
+     */
+    bool updateMaskAndSeedFromOutput(const cv::Mat& input_mask,
+                                     const SeedPoint& input_seed,
+                                     const ncorr::DIC_analysis_output& dic_output,
+                                     cv::Mat& output_mask,
+                                     SeedPoint& output_seed) const;
+
+    /**
+     * Persist a MATLAB-compatible ncorr sidecar alongside the native .bin cache.
+     */
+    void writeNcorrMatSidecar(const std::string& output_path,
+                              const cv::Mat& ref_img,
+                              const std::vector<cv::Mat>& cur_imgs,
+                              const cv::Mat& roi_mask,
+                              const StepParameters& step_params,
+                              const ncorr::DIC_analysis_output& dic_output) const;
+
+    /**
+     * Write a compact debug panel for matching stages.
+     */
+    void writeMatchingDebugPanel(const std::string& stage_name,
+                                 const cv::Mat& ref_img,
+                                 const cv::Mat& cur_img,
+                                 const cv::Mat& mask_before,
+                                 const cv::Mat& mask_after,
+                                 const SeedPoint& seed_before,
+                                 const SeedPoint& seed_after,
+                                 const ncorr::DIC_analysis_output& dic_output) const;
     
     /**
      * Run NCorr DIC analysis

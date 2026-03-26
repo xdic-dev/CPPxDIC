@@ -190,6 +190,32 @@ bool MatWriter::writeMultiFrameNcorrFile(const std::string& filename,
     
     size_t n_frames = cur_imgs.size();
     std::cout << "Writing multi-frame ncorr file with " << n_frames << " frames..." << std::endl;
+
+    ncorr::DIC_analysis_output aggregated_output;
+    bool have_aggregated_output = false;
+    if (dic_outputs.size() == 1 && dic_outputs[0].disps.size() == n_frames) {
+        aggregated_output = dic_outputs[0];
+        have_aggregated_output = true;
+    } else if (dic_outputs.size() == n_frames) {
+        std::vector<ncorr::Disp2D> aggregated_disps;
+        aggregated_disps.reserve(n_frames);
+        bool all_frames_present = true;
+        for (const auto& output : dic_outputs) {
+            if (output.disps.empty()) {
+                all_frames_present = false;
+                break;
+            }
+            aggregated_disps.push_back(output.disps.front());
+        }
+        if (all_frames_present) {
+            aggregated_output = ncorr::DIC_analysis_output(
+                aggregated_disps,
+                dic_outputs.front().perspective_type,
+                dic_outputs.front().units,
+                dic_outputs.front().units_per_pixel);
+            have_aggregated_output = true;
+        }
+    }
     
     // Create MAT file (v7.3 HDF5 format)
     mat_t* matfp = createMatFileHDF5(filename);
@@ -240,12 +266,19 @@ bool MatWriter::writeMultiFrameNcorrFile(const std::string& filename,
         cv::Mat cur_roi_to_use = (i < cur_rois.size()) ? cur_rois[i] : ref_roi.clone();
         
         // Update ROI with displacement if available
-        if (i < dic_outputs.size() && !dic_outputs[i].disps.empty()) {
+        const ncorr::Disp2D* roi_disp = nullptr;
+        if (have_aggregated_output && i < aggregated_output.disps.size()) {
+            roi_disp = &aggregated_output.disps[i];
+        } else if (i < dic_outputs.size() && !dic_outputs[i].disps.empty()) {
+            roi_disp = &dic_outputs[i].disps.front();
+        }
+
+        if (roi_disp) {
             try {
                 ncorr::ROI2D roi_current = convertMatToROI2D(cur_roi_to_use);
                 ncorr::ROI2D roi_updated = ncorr::update(
                     roi_current, 
-                    dic_outputs[i].disps[0],
+                    *roi_disp,
                     ncorr::INTERP::CUBIC_KEYS
                 );
                 cur_roi_to_use = convertROI2DToMat(roi_updated);
@@ -314,10 +347,8 @@ bool MatWriter::writeMultiFrameNcorrFile(const std::string& filename,
     
     // Format displacements (multi-frame)
     matvar_t* displacements_var = nullptr;
-    if (!dic_outputs.empty() && dic_outputs.size() == n_frames) {
-        // Use the first DIC output to format displacements
-        // In multi-frame tracking, all frames typically use the same reference
-        displacements_var = formatDisplacements(dic_outputs[0]);
+    if (have_aggregated_output) {
+        displacements_var = formatDisplacements(aggregated_output);
     }
     
     std::vector<std::string> data_fields = {"dispinfo", "displacements", "straininfo", "strains"};
