@@ -711,7 +711,7 @@ bool MatWriter::addFieldToStruct(matvar_t* struct_var,
     }
     
     if (!field_var) {
-        std::cerr << "Error: Null field variable" << std::endl;
+        std::cerr << "Error: Null field variable adding: " << field_name << std::endl;
         return false;
     }
     
