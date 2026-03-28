@@ -98,7 +98,7 @@ struct StepParameters {
         spacing(10),
         cutoff_diffnorm(1e-5),
         cutoff_iteration(100),
-        total_threads(1) {}
+        total_threads(4) {}
 };
 
 /**

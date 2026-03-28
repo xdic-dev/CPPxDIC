@@ -179,7 +179,7 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     // III. Matching inside a Trial between cameras (cam1 -> cam2 at frame 1)
     cv::Mat refmask_trial_matched;
     SeedPoint initial_seed_point_set2;
-    std::cout << "Performing camera matching..." << std::endl;
+    std::cout << "\nPerforming camera matching..." << std::endl;
     if (!performMatching(cam_first_satur, cam_second_satur, refmask_trial,
                         initial_seed_point_set1, refmask_trial_matched,
                         initial_seed_point_set2)) {
@@ -191,14 +191,14 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     saveTrialInfo(trial, stereopair, cam_first.size());
     
     // V. Tracking camera 1
-    std::cout << "Performing tracking camera 1..." << std::endl;
+    std::cout << "\nPerforming tracking camera 1..." << std::endl;
     if (!performTracking1(cam_first, refmask_trial, initial_seed_point_set1)) {
         std::cerr << "Failed tracking1 step" << std::endl;
         return {"", {}, false};
     }
     
     // VI. Tracking camera 2
-    std::cout << "Performing tracking camera 2..." << std::endl;
+    std::cout << "\nPerforming tracking camera 2..." << std::endl;
     if (!performTracking2(cam_second, refmask_trial_matched, initial_seed_point_set2)) {
         std::cerr << "Failed tracking2 step" << std::endl;
         return {"", {}, false};
@@ -656,7 +656,7 @@ bool StepDWorkflow::performTracking(const int tracking_number,
 
     auto cam_number = tracking_number == 1 ? cam_1 : cam_2;
 
-    std::cout << "TRACKING STEP " << tracking_number << std::endl;
+    std::cout << "\nTRACKING STEP " << tracking_number << std::endl;
     
     std::string output_path = base_params_.outputPath + "/ncorr" + std::to_string(cam_number) + ".bin";
     
