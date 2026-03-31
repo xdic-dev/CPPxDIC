@@ -263,25 +263,27 @@ void StepDWorkflow::setupBaseParameters(const std::string& trial,
 }
 
 void StepDWorkflow::setupStepParameters() {
-    // Setup tracking parameters (camera 1)
-    step1_params_.type = "regular";
-    step1_params_.radius = DICConstants::SUBSET_RADIUS_TRACKING;
-    step1_params_.spacing = DICConstants::SUBSET_SPACING;
-    step1_params_.cutoff_diffnorm = DICConstants::CUTOFF_TRACKING;
-    step1_params_.cutoff_iteration = DICConstants::NUMBER_ITERATION_SOLVER;
-    step1_params_.total_threads = DICConstants::NUMBER_THREADS;
-    step1_params_.stepanalysis_params.enabled = true;
-    step1_params_.stepanalysis_params.type = "seed";
-    step1_params_.stepanalysis_params.auto_update = true;
-    step1_params_.stepanalysis_params.step = 10;
+    // Setup tracking parameters (camera 1) — defaults from DICConstants,
+    // then override with config values from dic_params.txt (step_d_* keys)
+    step1_params_.type = config_.step_d.analysis_type;
+    step1_params_.radius = config_.step_d.radius;
+    step1_params_.spacing = config_.step_d.spacing;
+    step1_params_.cutoff_diffnorm = config_.step_d.cutoff_diffnorm;
+    step1_params_.cutoff_iteration = config_.step_d.cutoff_iteration;
+    step1_params_.total_threads = config_.step_d.total_threads;
+    step1_params_.stepanalysis_params.enabled = config_.step_d.high_strain_enabled;
+    step1_params_.stepanalysis_params.type = config_.step_d.seed_type;
+    step1_params_.stepanalysis_params.auto_update = config_.step_d.auto_update;
+    step1_params_.stepanalysis_params.step = config_.step_d.step_ref_change;
     
     // Setup tracking parameters (camera 2) - same as camera 1
     step2_params_ = step1_params_;
     
     // Setup matching parameters (camera 1 -> camera 2)
+    // Uses step_e config if available, with larger default radius
     step1_2_params_ = step1_params_;
-    step1_2_params_.radius = DICConstants::SUBSET_RADIUS_MATCHING;  // Larger radius for matching
-    step1_2_params_.cutoff_diffnorm = DICConstants::CUTOFF_MATCHING;
+    step1_2_params_.radius = config_.step_e.radius;
+    step1_2_params_.cutoff_diffnorm = config_.step_e.cutoff_diffnorm;
 }
 
 bool StepDWorkflow::loadProtocol() {
@@ -1031,7 +1033,7 @@ bool StepDWorkflow::updateMaskAndSeedFromOutput(const cv::Mat& input_mask,
     output_mask = input_mask.clone();
     try {
         ncorr::ROI2D roi_current = ROIManager::matToNcorrROI(input_mask);
-        ncorr::ROI2D roi_updated = ncorr::update(roi_current, disp, ncorr::INTERP::CUBIC_KEYS);
+        ncorr::ROI2D roi_updated = ncorr::update(roi_current, disp, ncorr::INTERP::CUBIC_KEYS, ncorr::ROI_UPDATE_MODE::SKIP_INVALID);
         output_mask = ROIManager::ncorrROIToMat(roi_updated);
     } catch (const std::exception& e) {
         std::cerr << "  Warning: failed to update ROI through displacement field: "

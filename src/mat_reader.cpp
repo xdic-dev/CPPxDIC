@@ -574,6 +574,18 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
         return false;
     }
 
+    auto ensure_loaded = [&](matvar_t* var, const char* label) {
+        if (!var) {
+            return false;
+        }
+        if (Mat_VarReadDataAll(matfp.get(), var) != 0) {
+            if (!var->data && var->class_type != MAT_C_STRUCT && var->class_type != MAT_C_CELL) {
+                std::cerr << "Warning: failed to fully load '" << label << "' from " << mat_path << '\n';
+            }
+        }
+        return true;
+    };
+
     // Faces (Nx3) — handles both INT32 (C++-written) and DOUBLE (MATLAB-written)
     if (matvar_t* faces_var = getStructField(dic3d_var.get(), "Faces", 0)) {
         if (faces_var->data && faces_var->rank >= 2) {
@@ -631,6 +643,7 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
     //   - C++ format: 1x1 struct with fields x, y, z (each Nx1 double)
     //   - MATLAB format: Nx3 double matrix (column-major: col0=x, col1=y, col2=z)
     if (matvar_t* points3d_var = getStructField(dic3d_var.get(), "Points3D", 0)) {
+        ensure_loaded(points3d_var, "Points3D");
         if (points3d_var->class_type == MAT_C_CELL) {
             const size_t nFrames = getCellArraySize(points3d_var);
             combined.Points3D.resize(nFrames);
@@ -638,12 +651,16 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
             for (size_t frame = 0; frame < nFrames; ++frame) {
                 matvar_t* frame_var = Mat_VarGetCell(points3d_var, frame);
                 if (!frame_var) continue;
+                ensure_loaded(frame_var, "Points3D cell");
 
                 if (frame_var->class_type == MAT_C_STRUCT) {
                     // C++ format: struct with x, y, z fields
                     matvar_t* x_var = getStructField(frame_var, "x", 0);
                     matvar_t* y_var = getStructField(frame_var, "y", 0);
                     matvar_t* z_var = getStructField(frame_var, "z", 0);
+                    ensure_loaded(x_var, "Points3D.x");
+                    ensure_loaded(y_var, "Points3D.y");
+                    ensure_loaded(z_var, "Points3D.z");
 
                     if (!x_var || !y_var || !z_var ||
                         x_var->class_type != MAT_C_DOUBLE || !x_var->data ||
@@ -705,11 +722,13 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
 
     // corrComb (cell array: each cell is Nx1 double vector, one per frame)
     if (matvar_t* corr_var = getStructField(dic3d_var.get(), "corrComb", 0)) {
+        ensure_loaded(corr_var, "corrComb");
         if (corr_var->class_type == MAT_C_CELL) {
             const size_t nFrames = getCellArraySize(corr_var);
             combined.corrComb.resize(nFrames);
             for (size_t frame = 0; frame < nFrames; ++frame) {
                 matvar_t* cell = Mat_VarGetCell(corr_var, frame);
+                ensure_loaded(cell, "corrComb cell");
                 if (cell && cell->class_type == MAT_C_DOUBLE && cell->data) {
                     combined.corrComb[frame] = readDoubleArray(cell);
                 }

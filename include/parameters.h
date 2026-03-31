@@ -155,7 +155,7 @@ struct DICConstants {
     static constexpr double CUTOFF_TRACKING = 1e-5;
     static constexpr double CUTOFF_MATCHING = 1e-5;
     static constexpr int NUMBER_ITERATION_SOLVER = 100;
-    static constexpr int NUMBER_THREADS = 4;
+    static constexpr int NUMBER_THREADS = 1;
 };
 
 } // namespace cppxdic

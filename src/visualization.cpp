@@ -420,11 +420,10 @@ void Visualization::applyGapFilter(
     
     std::cout << "Applying gap filter (suppressing stitched boundaries)" << std::endl;
     
-    // Identify faces at boundaries between pairs and set to NaN
-    // This requires analyzing FacePairInds to find transitions
-    for (size_t i = 0; i + 1 < FacePairInds.size(); ++i) {
-        if (FacePairInds[i] != FacePairInds[i + 1]) {
-            // This face is at a boundary
+    // MATLAB anim8_rewrited.m line 336: FCnow(data.FacePairInds==3)=NaN
+    // FacePairInds==3 identifies faces at the stitched boundary between pairs
+    for (size_t i = 0; i < FacePairInds.size(); ++i) {
+        if (FacePairInds[i] == 3) {
             for (size_t frame = 0; frame < face_data.size(); ++frame) {
                 if (i < face_data[frame].size()) {
                     face_data[frame][i] = std::numeric_limits<double>::quiet_NaN();
@@ -1108,11 +1107,19 @@ cv::Mat Visualization::renderFrame(const VisData& vis_data, int frame_idx,
         }
     }
     
-    // Compute bounding box for orthographic projection
-    double xmin = *std::min_element(pts.x.begin(), pts.x.end());
-    double xmax = *std::max_element(pts.x.begin(), pts.x.end());
-    double ymin = *std::min_element(pts.y.begin(), pts.y.end());
-    double ymax = *std::max_element(pts.y.begin(), pts.y.end());
+    // Compute bounding box for orthographic projection (skip NaN/Inf)
+    double xmin = std::numeric_limits<double>::infinity();
+    double xmax = -std::numeric_limits<double>::infinity();
+    double ymin = std::numeric_limits<double>::infinity();
+    double ymax = -std::numeric_limits<double>::infinity();
+    for (size_t i = 0; i < n_points; ++i) {
+        if (std::isfinite(pts.x[i]) && std::isfinite(pts.y[i])) {
+            xmin = std::min(xmin, pts.x[i]);
+            xmax = std::max(xmax, pts.x[i]);
+            ymin = std::min(ymin, pts.y[i]);
+            ymax = std::max(ymax, pts.y[i]);
+        }
+    }
     
     double range_x = xmax - xmin;
     double range_y = ymax - ymin;
@@ -1134,19 +1141,24 @@ cv::Mat Visualization::renderFrame(const VisData& vis_data, int frame_idx,
         return cv::Point(px, py);
     };
     
+    // Helper: check if a vertex has valid (finite) coordinates
+    auto vertex_valid = [&](int v) -> bool {
+        return v >= 0 && v < static_cast<int>(n_points) &&
+               std::isfinite(pts.x[v]) && std::isfinite(pts.y[v]) && std::isfinite(pts.z[v]);
+    };
+    
     // Sort faces by average Z (painter's algorithm: draw far faces first)
+    // Skip faces with any invalid vertex (NaN/Inf/out-of-bounds)
     struct FaceZ { size_t idx; double z; };
-    std::vector<FaceZ> sorted_faces(n_faces);
+    std::vector<FaceZ> sorted_faces;
+    sorted_faces.reserve(n_faces);
     for (size_t i = 0; i < n_faces; ++i) {
         int v0 = vis_data.Faces[i * 3];
         int v1 = vis_data.Faces[i * 3 + 1];
         int v2 = vis_data.Faces[i * 3 + 2];
-        double avg_z = 0;
-        int cnt = 0;
-        if (v0 >= 0 && v0 < static_cast<int>(n_points)) { avg_z += pts.z[v0]; cnt++; }
-        if (v1 >= 0 && v1 < static_cast<int>(n_points)) { avg_z += pts.z[v1]; cnt++; }
-        if (v2 >= 0 && v2 < static_cast<int>(n_points)) { avg_z += pts.z[v2]; cnt++; }
-        sorted_faces[i] = {i, cnt > 0 ? avg_z / cnt : 0.0};
+        if (!vertex_valid(v0) || !vertex_valid(v1) || !vertex_valid(v2)) continue;
+        double avg_z = (pts.z[v0] + pts.z[v1] + pts.z[v2]) / 3.0;
+        sorted_faces.push_back({i, avg_z});
     }
     std::sort(sorted_faces.begin(), sorted_faces.end(),
               [](const FaceZ& a, const FaceZ& b) { return a.z < b.z; });
@@ -1161,11 +1173,17 @@ cv::Mat Visualization::renderFrame(const VisData& vis_data, int frame_idx,
         int v1 = vis_data.Faces[fi * 3 + 1];
         int v2 = vis_data.Faces[fi * 3 + 2];
         
-        if (v0 < 0 || v0 >= static_cast<int>(n_points) ||
-            v1 < 0 || v1 >= static_cast<int>(n_points) ||
-            v2 < 0 || v2 >= static_cast<int>(n_points)) continue;
+        // Vertices are already validated during sorting, so no bounds check needed
+        
+        // Skip faces with NaN scalar data (matching MATLAB's gpatch behavior)
+        if (scalar_data && fi < scalar_data->size() && std::isnan((*scalar_data)[fi])) {
+            continue;
+        }
         
         cv::Point tri[3] = { project(v0), project(v1), project(v2) };
+        
+        // Skip degenerate projected triangles (all vertices same pixel)
+        if (tri[0] == tri[1] && tri[1] == tri[2]) continue;
         
         // Determine face color
         cv::Scalar color(200, 200, 200); // default gray

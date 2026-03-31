@@ -107,7 +107,8 @@ bool MatWriter::writeDicNcorrFile(const std::string& filename,
             ncorr::ROI2D roi_updated = ncorr::update(
                 roi_current, 
                 dic_output.disps[0],           // First displacement field
-                ncorr::INTERP::CUBIC_KEYS      // Cubic interpolation for smooth boundaries
+                ncorr::INTERP::CUBIC_KEYS,     // Cubic interpolation for smooth boundaries
+                ncorr::ROI_UPDATE_MODE::SKIP_INVALID
             );
             
             // Convert back to cv::Mat
@@ -279,7 +280,8 @@ bool MatWriter::writeMultiFrameNcorrFile(const std::string& filename,
                 ncorr::ROI2D roi_updated = ncorr::update(
                     roi_current, 
                     *roi_disp,
-                    ncorr::INTERP::CUBIC_KEYS
+                    ncorr::INTERP::CUBIC_KEYS,
+                    ncorr::ROI_UPDATE_MODE::SKIP_INVALID
                 );
                 cur_roi_to_use = convertROI2DToMat(roi_updated);
             } catch (const std::exception& e) {

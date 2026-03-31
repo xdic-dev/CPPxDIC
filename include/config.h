@@ -115,7 +115,11 @@ public:
     
     // Step-level DIC parameters (loaded from dic_params.txt)
     StepConfig step_d;                   // Step D: initial tracking
-    StepConfig step_e;                   // Step E: matching
+    StepConfig step_e = []{              // Step E: matching (larger radius by default)
+        StepConfig c;
+        c.radius = 60;                  // MATLAB: subset_radius_ncorr_matching = 60
+        return c;
+    }();
     StepConfig step_f;                   // Step F: combined/final
     
     // Step E specific parameters (3D reconstruction)

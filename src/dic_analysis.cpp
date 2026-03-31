@@ -109,6 +109,7 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
             // Reference frame (frame 0)
             std::vector<Eigen::Vector3d> vertices_ref;
             size_t nPoints = dic3d.Points3D[0].x.size();
+            size_t nFaces = dic3d.Faces.size() / 3;
             vertices_ref.reserve(nPoints);
             for (size_t i = 0; i < nPoints; ++i) {
                 vertices_ref.emplace_back(
@@ -136,7 +137,96 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
             
             std::cout << "  Converted " << vertices_all_frames.size() << " frames" << std::endl;
             
+            auto count_nan_points = [](const std::vector<std::vector<Eigen::Vector3d>>& frames) {
+                std::vector<size_t> counts;
+                counts.reserve(frames.size());
+                for (const auto& frame : frames) {
+                    size_t nan_count = 0;
+                    for (const auto& p : frame) {
+                        if (p.hasNaN()) {
+                            nan_count++;
+                        }
+                    }
+                    counts.push_back(nan_count);
+                }
+                return counts;
+            };
+
+            auto count_points_with_any_nan = [](const std::vector<std::vector<Eigen::Vector3d>>& frames) {
+                if (frames.empty()) {
+                    return size_t(0);
+                }
+                size_t n_points_local = frames.front().size();
+                size_t bad_points = 0;
+                for (size_t ipt = 0; ipt < n_points_local; ++ipt) {
+                    bool any_nan = false;
+                    for (const auto& frame : frames) {
+                        if (ipt >= frame.size() || frame[ipt].hasNaN()) {
+                            any_nan = true;
+                            break;
+                        }
+                    }
+                    if (any_nan) {
+                        bad_points++;
+                    }
+                }
+                return bad_points;
+            };
+
+            auto count_valid_faces = [&](const std::vector<Eigen::Vector3d>& verts) {
+                size_t valid_faces = 0;
+                size_t total_faces_local = dic3d.Faces.size() / 3;
+                for (size_t iface = 0; iface < total_faces_local; ++iface) {
+                    int v0 = dic3d.Faces[iface * 3 + 0];
+                    int v1 = dic3d.Faces[iface * 3 + 1];
+                    int v2 = dic3d.Faces[iface * 3 + 2];
+                    if (v0 < 0 || v1 < 0 || v2 < 0) {
+                        continue;
+                    }
+                    if (static_cast<size_t>(v0) >= verts.size() ||
+                        static_cast<size_t>(v1) >= verts.size() ||
+                        static_cast<size_t>(v2) >= verts.size()) {
+                        continue;
+                    }
+                    if (verts[v0].hasNaN() || verts[v1].hasNaN() || verts[v2].hasNaN()) {
+                        continue;
+                    }
+                    valid_faces++;
+                }
+                return valid_faces;
+            };
+
+            auto compute_max_displacement = [](const std::vector<std::vector<Eigen::Vector3d>>& frames,
+                                               const std::vector<Eigen::Vector3d>& ref) {
+                double max_disp = 0.0;
+                for (const auto& frame : frames) {
+                    size_t n_local = std::min(frame.size(), ref.size());
+                    for (size_t ipt = 0; ipt < n_local; ++ipt) {
+                        if (!frame[ipt].allFinite() || !ref[ipt].allFinite()) {
+                            continue;
+                        }
+                        max_disp = std::max(max_disp, (frame[ipt] - ref[ipt]).norm());
+                    }
+                }
+                return max_disp;
+            };
+
+            const size_t raw_any_nan_points = count_points_with_any_nan(vertices_all_frames);
+            const auto raw_nan_counts = count_nan_points(vertices_all_frames);
+            const double raw_max_disp = compute_max_displacement(vertices_all_frames, vertices_ref);
+            std::cout << "  Raw points with any NaN over time: " << raw_any_nan_points
+                      << "/" << nPoints << std::endl;
+            if (!raw_nan_counts.empty()) {
+                std::cout << "  Raw NaN points in frame 0: " << raw_nan_counts[0]
+                          << "/" << nPoints << std::endl;
+            }
+            std::cout << "  Raw valid faces in frame 0: "
+                      << count_valid_faces(vertices_all_frames[0])
+                      << "/" << nFaces << std::endl;
+            std::cout << "  Raw max displacement magnitude: " << raw_max_disp << std::endl;
+
             // Apply temporal filtering to displacement fields
+            bool used_temporal_filtering = false;
             if (config_.step_f_temporal_filtering && vertices_all_frames.size() > 3) {
                 std::cout << "\nApplying temporal filtering..." << std::endl;
                 
@@ -160,22 +250,50 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                 auto [filt_x, filt_y, filt_z] = filterTime3D(disp_x, disp_y, disp_z, freq_filt, freq_acq);
                 
                 // Reconstruct filtered vertex positions
+                auto vertices_filtered = vertices_all_frames;
                 for (size_t iframe = 0; iframe < nFrames; ++iframe) {
                     for (size_t ipt = 0; ipt < nPoints; ++ipt) {
-                        vertices_all_frames[iframe][ipt].x() = vertices_ref[ipt].x() + filt_x[ipt][iframe];
-                        vertices_all_frames[iframe][ipt].y() = vertices_ref[ipt].y() + filt_y[ipt][iframe];
-                        vertices_all_frames[iframe][ipt].z() = vertices_ref[ipt].z() + filt_z[ipt][iframe];
+                        vertices_filtered[iframe][ipt].x() = vertices_ref[ipt].x() + filt_x[ipt][iframe];
+                        vertices_filtered[iframe][ipt].y() = vertices_ref[ipt].y() + filt_y[ipt][iframe];
+                        vertices_filtered[iframe][ipt].z() = vertices_ref[ipt].z() + filt_z[ipt][iframe];
                     }
                 }
-                
-                // Update vertices_ref from filtered frame 0 (MATLAB step4 line 115-117:
-                // DIC3D.Points3D{1} is the filtered first frame used as Vref)
-                for (size_t ipt = 0; ipt < nPoints; ++ipt) {
-                    vertices_ref[ipt] = vertices_all_frames[0][ipt];
+
+                const size_t filtered_any_nan_points = count_points_with_any_nan(vertices_filtered);
+                const auto filtered_nan_counts = count_nan_points(vertices_filtered);
+                const size_t filtered_valid_faces = count_valid_faces(vertices_filtered[0]);
+                const double filtered_max_disp = compute_max_displacement(vertices_filtered, vertices_ref);
+                const bool filtered_exploded =
+                    !std::isfinite(filtered_max_disp) ||
+                    filtered_max_disp > std::max(1.0, raw_max_disp) * 100.0;
+
+                std::cout << "  Filtered points with any NaN over time: " << filtered_any_nan_points
+                          << "/" << nPoints << std::endl;
+                if (!filtered_nan_counts.empty()) {
+                    std::cout << "  Filtered NaN points in frame 0: " << filtered_nan_counts[0]
+                              << "/" << nPoints << std::endl;
                 }
-                
-                std::cout << "  ✓ Temporal filtering applied (freqFilt=" << freq_filt 
-                          << " Hz, freqAcq=" << freq_acq << " Hz)" << std::endl;
+                std::cout << "  Filtered valid faces in frame 0: "
+                          << filtered_valid_faces << "/" << nFaces << std::endl;
+                std::cout << "  Filtered max displacement magnitude: " << filtered_max_disp << std::endl;
+
+                // MATLAB's filter only keeps point tracks that are valid for the whole time series.
+                // On stitched C++ reconstructions this can erase nearly the entire mesh, leaving
+                // TCPE with no valid triangles. The current C++ filter can also become numerically
+                // unstable and amplify otherwise small motions into absurd coordinates. In either
+                // case we keep the raw geometry instead of feeding corrupted data into Step F.
+                if (filtered_valid_faces == 0 || filtered_valid_faces * 20 < nFaces || filtered_exploded) {
+                    std::cout << "  Warning: Temporal filtering produced unusable geometry; "
+                              << "keeping unfiltered geometry for Step F" << std::endl;
+                } else {
+                    vertices_all_frames = std::move(vertices_filtered);
+                    for (size_t ipt = 0; ipt < nPoints; ++ipt) {
+                        vertices_ref[ipt] = vertices_all_frames[0][ipt];
+                    }
+                    used_temporal_filtering = true;
+                    std::cout << "  ✓ Temporal filtering applied (freqFilt=" << freq_filt
+                              << " Hz, freqAcq=" << freq_acq << " Hz)" << std::endl;
+                }
             } else if (config_.step_f_temporal_filtering) {
                 std::cout << "\nSkipping temporal filtering (too few frames: " 
                           << vertices_all_frames.size() << ")" << std::endl;
@@ -198,7 +316,11 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                     frame_pts.z[ipt] = vertices_all_frames[iframe][ipt].z();
                 }
             }
-            std::cout << "  ✓ Points3D updated with filtered data" << std::endl;
+            if (used_temporal_filtering) {
+                std::cout << "  ✓ Points3D updated with filtered data" << std::endl;
+            } else {
+                std::cout << "  ✓ Points3D kept from unfiltered geometry" << std::endl;
+            }
             
             // Recompute displacement based on filtered Points3D (matching MATLAB lines 69-71)
             std::cout << "\nRecomputing displacement after filtering..." << std::endl;
@@ -233,7 +355,6 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
             dic3d.FaceCentroids.clear();
             dic3d.FaceCentroids.resize(vertices_all_frames.size());
             
-            size_t nFaces = dic3d.Faces.size() / 3;
             for (size_t iframe = 0; iframe < vertices_all_frames.size(); ++iframe) {
                 std::vector<double>& centroids = dic3d.FaceCentroids[iframe];
                 centroids.resize(nFaces * 3);

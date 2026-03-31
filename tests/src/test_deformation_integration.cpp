@@ -31,6 +31,7 @@
 #include "config.h"
 #include "mat_reader.h"
 #include "dic_structures.h"
+#include "utils.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -286,6 +287,7 @@ int main(int argc, char** argv) {
         std::cerr << "\nSee PREPARE_TEST_DATA.md for full directory layout." << std::endl;
         return 1;
     }
+    config.updateVariables();
     
     config.data_format = "mat";
     config.mapLogic = false;
@@ -305,9 +307,8 @@ int main(int argc, char** argv) {
     // =====================================================================
     // 2. Ensure DIC3Dcombined .bin exists (Step F reads binary, not .mat)
     // =====================================================================
-    std::string output_dir = config.dic_path + "/" + config.subject_id + "/" + config.material;
-    std::string bin_path = output_dir + "/DIC3Dcombined_" +
-                           std::to_string(config.num_pair) + "Pairs_stitched.bin";
+    std::string output_dir = Utils::buildOutputUntilPhaseDir(config, config.ref_trial_id);
+    std::string bin_path = Utils::buildDic3DCombinedFilePath(output_dir, config.num_pair, ".bin");
     
     std::string matlab_combined = test_root + "/matlab_reference/DIC3Dcombined_matlab.mat";
     
@@ -344,10 +345,8 @@ int main(int argc, char** argv) {
     }
     
     // Remove existing Step F output to force re-computation
-    std::string cpp_pp_mat = output_dir + "/DIC3DPPresults_" +
-                              std::to_string(config.num_pair) + "Pairs_cum_v1.mat";
-    std::string cpp_pp_bin = output_dir + "/DIC3DPPresults_" +
-                              std::to_string(config.num_pair) + "Pairs_cum_" + config.fileversion + ".bin";
+    std::string cpp_pp_mat = Utils::buildDic3DPPresultsFilePath(output_dir, config.num_pair, config.fileversion, ".mat");
+    std::string cpp_pp_bin = Utils::buildDic3DPPresultsFilePath(output_dir, config.num_pair, config.fileversion, ".bin");
     
     if (fs::exists(cpp_pp_mat)) { fs::remove(cpp_pp_mat); std::cout << "  Removed: " << cpp_pp_mat << std::endl; }
     if (fs::exists(cpp_pp_bin)) { fs::remove(cpp_pp_bin); std::cout << "  Removed: " << cpp_pp_bin << std::endl; }
