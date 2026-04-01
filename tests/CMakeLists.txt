@@ -519,6 +519,18 @@ set(PROJECT_SOURCES
     ${CMAKE_SOURCE_DIR}/../src/face_isotropy.cpp
     ${CMAKE_SOURCE_DIR}/../src/visualization.cpp
     ${CMAKE_SOURCE_DIR}/../src/data_serializer.cpp
+    ${CMAKE_SOURCE_DIR}/../src/matlab_functions.cpp
+    ${CMAKE_SOURCE_DIR}/../src/app/cli.cpp
+    ${CMAKE_SOURCE_DIR}/../src/app/app_config.cpp
+    ${CMAKE_SOURCE_DIR}/../src/io/project_paths.cpp
+    ${CMAKE_SOURCE_DIR}/../src/io/mat/matio_helpers.cpp
+    ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_schema.cpp
+    ${CMAKE_SOURCE_DIR}/../src/pipeline/trial_selector.cpp
+    ${CMAKE_SOURCE_DIR}/../src/pipeline/checkpoint_policy.cpp
+    ${CMAKE_SOURCE_DIR}/../src/pipeline/step_d_runner.cpp
+    ${CMAKE_SOURCE_DIR}/../src/pipeline/step_e_runner.cpp
+    ${CMAKE_SOURCE_DIR}/../src/pipeline/step_f_runner.cpp
+    ${CMAKE_SOURCE_DIR}/../src/pipeline/pipeline_runner.cpp
 )
 
 # Helper macro: link all project dependencies to a target
@@ -568,6 +580,13 @@ add_executable(test_deformation_integration
 )
 link_all_project_deps(test_deformation_integration)
 
+# Test 13: test_refactor_guards - coverage for new app/pipeline/io boundaries
+add_executable(test_refactor_guards
+    src/test_refactor_guards.cpp
+    ${PROJECT_SOURCES}
+)
+link_all_project_deps(test_refactor_guards)
+
 # Compiler flags
 target_compile_options(test_ncorr_bin PRIVATE -Wall -Wextra -O2)
 target_compile_options(test_ncorr_to_mat PRIVATE -Wall -Wextra -O2)
@@ -581,6 +600,7 @@ target_compile_options(test_filter_validation PRIVATE -Wall -Wextra -O2)
 target_compile_options(test_unit_stitching PRIVATE -Wall -Wextra -O2)
 target_compile_options(test_reconstruction_integration PRIVATE -Wall -Wextra -O2)
 target_compile_options(test_deformation_integration PRIVATE -Wall -Wextra -O2)
+target_compile_options(test_refactor_guards PRIVATE -Wall -Wextra -O2)
 
 # Print configuration
 message(STATUS "CPPxDIC Tests Configuration:")

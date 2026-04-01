@@ -14,6 +14,86 @@ namespace cppxdic {
 
 using namespace detail;
 
+namespace {
+
+std::vector<double> padAndFilterSeries(
+    const std::vector<double>& values,
+    const std::vector<double>& b,
+    const std::vector<double>& a
+) {
+    const size_t n_frames = values.size();
+    const int npad = 5;
+
+    std::vector<double> padded;
+    padded.reserve(n_frames + 2 * npad);
+    for (int index = 0; index < npad; ++index) {
+        padded.push_back(values.front());
+    }
+    padded.insert(padded.end(), values.begin(), values.end());
+    for (int index = 0; index < npad; ++index) {
+        padded.push_back(values.back());
+    }
+
+    std::vector<double> filtered = filtfilt(b, a, padded);
+    std::vector<double> result(n_frames, std::numeric_limits<double>::quiet_NaN());
+    for (size_t frame = 0; frame < n_frames; ++frame) {
+        result[frame] = filtered[npad + frame];
+    }
+    return result;
+}
+
+void fillMissingLinear(std::vector<double>& data) {
+    const size_t n = data.size();
+    if (n == 0) {
+        return;
+    }
+
+    size_t first_valid = 0;
+    while (first_valid < n && std::isnan(data[first_valid])) {
+        ++first_valid;
+    }
+    if (first_valid == n) {
+        return;
+    }
+
+    for (size_t index = 0; index < first_valid; ++index) {
+        data[index] = data[first_valid];
+    }
+
+    size_t last_valid = n - 1;
+    while (last_valid > 0 && std::isnan(data[last_valid])) {
+        --last_valid;
+    }
+
+    for (size_t index = last_valid + 1; index < n; ++index) {
+        data[index] = data[last_valid];
+    }
+
+    size_t index = first_valid;
+    while (index < last_valid) {
+        if (!std::isnan(data[index])) {
+            ++index;
+            continue;
+        }
+
+        size_t next_valid = index + 1;
+        while (next_valid < n && std::isnan(data[next_valid])) {
+            ++next_valid;
+        }
+
+        const double v0 = data[index - 1];
+        const double v1 = data[next_valid];
+        const double span = static_cast<double>(next_valid - index + 1);
+        for (size_t interp = index; interp < next_valid; ++interp) {
+            const double t = static_cast<double>(interp - index + 1) / span;
+            data[interp] = v0 + t * (v1 - v0);
+        }
+        index = next_valid;
+    }
+}
+
+} // namespace
+
 std::vector<std::vector<double>> filterTime(
     const std::vector<std::vector<double>>& data,
     double freq_filt,
@@ -36,8 +116,6 @@ std::vector<std::vector<double>> filterTime(
     // Prepare output
     std::vector<std::vector<double>> filtered(nPoints, std::vector<double>(nFrames, NAN));
     
-    int npad = 5;  // Padding to reduce border effects
-    
     // Process each point's time series
     for (size_t ipt = 0; ipt < nPoints; ++ipt) {
         // Check if all frames are valid (no NaN)
@@ -56,35 +134,65 @@ std::vector<std::vector<double>> filterTime(
             continue;
         }
         
-        // Pad the signal
-        std::vector<double> padded;
-        padded.reserve(nFrames + 2 * npad);
-        
-        // Pad beginning with first value
-        for (int i = 0; i < npad; ++i) {
-            padded.push_back(data[ipt][0]);
-        }
-        
-        // Copy data
-        for (size_t iframe = 0; iframe < nFrames; ++iframe) {
-            padded.push_back(data[ipt][iframe]);
-        }
-        
-        // Pad end with last value
-        for (int i = 0; i < npad; ++i) {
-            padded.push_back(data[ipt][nFrames - 1]);
-        }
-        
-        // Apply zero-phase filter
-        std::vector<double> result = filtfilt(b, a, padded);
-        
-        // Extract unpadded result
-        for (size_t iframe = 0; iframe < nFrames; ++iframe) {
-            filtered[ipt][iframe] = result[npad + iframe];
-        }
+        filtered[ipt] = padAndFilterSeries(data[ipt], b, a);
     }
     
     return filtered;
+}
+
+std::vector<std::vector<double>> filterTimeFrameMajor(
+    const std::vector<std::vector<double>>& data,
+    double freq_filt,
+    double freq_acq,
+    bool interpolate_missing
+) {
+    if (data.empty() || data.front().empty()) {
+        return data;
+    }
+
+    const size_t n_frames = data.size();
+    const size_t n_points = data.front().size();
+
+    std::vector<std::vector<double>> point_major(n_points, std::vector<double>(n_frames, std::numeric_limits<double>::quiet_NaN()));
+    for (size_t frame = 0; frame < n_frames; ++frame) {
+        for (size_t point = 0; point < std::min(n_points, data[frame].size()); ++point) {
+            point_major[point][frame] = data[frame][point];
+        }
+    }
+
+    if (interpolate_missing) {
+        double wn = freq_filt / (freq_acq / 2.0);
+        if (wn >= 1.0) wn = 0.99;
+        if (wn <= 0.0) wn = 0.01;
+
+        auto [b, a] = butterLowPass(4, wn);
+        for (auto& series : point_major) {
+            bool has_valid = false;
+            for (const double value : series) {
+                if (!std::isnan(value)) {
+                    has_valid = true;
+                    break;
+                }
+            }
+            if (!has_valid) {
+                continue;
+            }
+
+            fillMissingLinear(series);
+            series = padAndFilterSeries(series, b, a);
+        }
+    } else {
+        point_major = filterTime(point_major, freq_filt, freq_acq);
+    }
+
+    std::vector<std::vector<double>> frame_major(n_frames, std::vector<double>(n_points, std::numeric_limits<double>::quiet_NaN()));
+    for (size_t point = 0; point < n_points; ++point) {
+        for (size_t frame = 0; frame < n_frames; ++frame) {
+            frame_major[frame][point] = point_major[point][frame];
+        }
+    }
+
+    return frame_major;
 }
 
 std::tuple<

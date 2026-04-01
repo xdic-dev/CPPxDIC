@@ -215,8 +215,8 @@ void Utils::getCamerasForPair(int stereopair, int& cam_first, int& cam_second) {
     // Pair 1 -> cameras 1, 2
     // Pair 2 -> cameras 4, 3
     // error.
-    if (stereopair < 1 && stereopair != 2) {
-        throw std::runtime_error("Invalid stereopair value: must be >= 1 or equal to 2");
+    if (stereopair != 1 && stereopair != 2) {
+        throw std::runtime_error("Invalid stereopair value: must be 1 or 2");
     }
 
     if (stereopair == 2) {
@@ -1177,7 +1177,6 @@ std::string Utils::buildNcorrFilePath(const std::string pathdir, int cam_1, int 
     }
     return pathdir + "/ncorr" + std::to_string(cam_1) + std::to_string(cam_2) + extension;
 }
-
 
 
 

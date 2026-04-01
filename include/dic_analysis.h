@@ -30,10 +30,16 @@ public:
      * @return true if all steps complete successfully
      */
     bool run();
+
+    /**
+     * Run 2D DIC Analysis (Step D) only — for integration testing
+     * Requires source videos / ROI / seed configuration to exist
+     */
+    bool runStepD(const std::vector<int>& trial_target) { return dic2DAnalysis(trial_target); }
     
     /**
      * Run 3D Reconstruction (Step E) only — for integration testing
-     * Requires Step D outputs (.cache/*.bin) and calibration files to exist
+     * Requires Step D outputs in binary cache form and calibration files to exist
      */
     bool runStepE(const std::vector<int>& trial_target) { return dic3DReconstruction(trial_target); }
     

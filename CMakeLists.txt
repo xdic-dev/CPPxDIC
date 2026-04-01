@@ -15,9 +15,8 @@ include_directories(Tools/CppNCorr/include)
 # Build NCorr from source so local workflow changes are linked into cppxdic
 add_subdirectory(Tools/CppNCorr)
 
-# Add executable with new source files
-add_executable(cppxdic
-    src/main.cpp
+# Core legacy implementation kept intact behind new app/pipeline/io boundaries.
+set(CPPXDIC_CORE_SOURCES
     src/config.cpp
     src/dic_analysis.cpp
     src/dic_structures.cpp
@@ -37,40 +36,69 @@ add_executable(cppxdic
     src/matlab_functions.cpp
 )
 
+set(CPPXDIC_IO_SOURCES
+    src/io/project_paths.cpp
+    src/io/mat/matio_helpers.cpp
+    src/io/mat/mat_schema.cpp
+)
+
+set(CPPXDIC_PIPELINE_SOURCES
+    src/pipeline/trial_selector.cpp
+    src/pipeline/checkpoint_policy.cpp
+    src/pipeline/step_d_runner.cpp
+    src/pipeline/step_e_runner.cpp
+    src/pipeline/step_f_runner.cpp
+    src/pipeline/pipeline_runner.cpp
+)
+
+set(CPPXDIC_APP_SOURCES
+    src/app/cli.cpp
+    src/app/app_config.cpp
+)
+
+add_library(cppxdic_core ${CPPXDIC_CORE_SOURCES})
+add_library(cppxdic_io ${CPPXDIC_IO_SOURCES})
+add_library(cppxdic_pipeline ${CPPXDIC_PIPELINE_SOURCES})
+add_library(cppxdic_app ${CPPXDIC_APP_SOURCES})
+
+add_executable(cppxdic
+    src/main.cpp
+)
+
 # Find OpenCV (following ncorr pattern)
 find_package(OpenCV REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})
-target_link_libraries(cppxdic ${OpenCV_LIBS})
+target_link_libraries(cppxdic_core PUBLIC ${OpenCV_LIBS})
 
 # Add ncorr library
-target_link_libraries(cppxdic ncorr)
+target_link_libraries(cppxdic_core PUBLIC ncorr)
 
 # Add OpenCV libraries explicitly (following ncorr pattern)
 find_library(OPENCV_LIBRARY1 NAMES opencv_core)
-target_link_libraries(cppxdic ${OPENCV_LIBRARY1})
+target_link_libraries(cppxdic_core PUBLIC ${OPENCV_LIBRARY1})
 
 find_library(OPENCV_LIBRARY2 NAMES opencv_highgui)
-target_link_libraries(cppxdic ${OPENCV_LIBRARY2})
+target_link_libraries(cppxdic_core PUBLIC ${OPENCV_LIBRARY2})
 
 find_library(OPENCV_LIBRARY3 NAMES opencv_imgcodecs)
-target_link_libraries(cppxdic ${OPENCV_LIBRARY3})
+target_link_libraries(cppxdic_core PUBLIC ${OPENCV_LIBRARY3})
 
 find_library(OPENCV_LIBRARY4 NAMES opencv_imgproc)
-target_link_libraries(cppxdic ${OPENCV_LIBRARY4})
+target_link_libraries(cppxdic_core PUBLIC ${OPENCV_LIBRARY4})
 
 find_library(OPENCV_LIBRARY5 NAMES opencv_videoio)
-target_link_libraries(cppxdic ${OPENCV_LIBRARY5})
+target_link_libraries(cppxdic_core PUBLIC ${OPENCV_LIBRARY5})
 
 # Add fftw library
 find_library(FFTW_LIBRARY NAMES fftw3)
-target_link_libraries(cppxdic ${FFTW_LIBRARY})
+target_link_libraries(cppxdic_core PUBLIC ${FFTW_LIBRARY})
 
 # Add FFTW include directory for IDE support
 find_path(FFTW_INCLUDE_DIR fftw3.h
   HINTS /opt/homebrew/include /usr/local/include /usr/include
 )
 if(FFTW_INCLUDE_DIR)
-    target_include_directories(cppxdic PRIVATE ${FFTW_INCLUDE_DIR})
+    target_include_directories(cppxdic_core PRIVATE ${FFTW_INCLUDE_DIR})
     message(STATUS "Found FFTW include: ${FFTW_INCLUDE_DIR}")
 else()
     message(WARNING "FFTW include directory not found")
@@ -79,14 +107,14 @@ endif()
 # Add matio library for reading/writing MATLAB .mat files
 find_library(MATIO_LIBRARY NAMES matio)
 if(MATIO_LIBRARY)
-    target_link_libraries(cppxdic ${MATIO_LIBRARY})
+    target_link_libraries(cppxdic_core PUBLIC ${MATIO_LIBRARY})
     message(STATUS "Found MATIO library: ${MATIO_LIBRARY}")
     # Also add MATIO include directory if available
     find_path(MATIO_INCLUDE_DIR matio.h
       HINTS /opt/homebrew/include /usr/local/include /usr/include
     )
     if(MATIO_INCLUDE_DIR)
-        target_include_directories(cppxdic PRIVATE ${MATIO_INCLUDE_DIR})
+        target_include_directories(cppxdic_core PRIVATE ${MATIO_INCLUDE_DIR})
         message(STATUS "Found MATIO include: ${MATIO_INCLUDE_DIR}")
     else()
         message(WARNING "MATIO include directory not found. If build fails, install headers (brew install matio).")
@@ -98,8 +126,8 @@ endif()
 # Add HDF5 library (required for MATIO v7.3 support)
 find_package(HDF5 COMPONENTS C)
 if(HDF5_FOUND)
-    target_include_directories(cppxdic PRIVATE ${HDF5_INCLUDE_DIRS})
-    target_link_libraries(cppxdic ${HDF5_C_LIBRARIES})
+    target_include_directories(cppxdic_core PRIVATE ${HDF5_INCLUDE_DIRS})
+    target_link_libraries(cppxdic_core PUBLIC ${HDF5_C_LIBRARIES})
     message(STATUS "Found HDF5: ${HDF5_C_LIBRARIES}")
 else()
     message(WARNING "HDF5 not found. MAT v7.3 (HDF5) format may not work. Install with: brew install hdf5")
@@ -108,7 +136,7 @@ endif()
 # Add CGAL library (for Delaunay triangulation matching MATLAB)
 find_package(CGAL REQUIRED)
 if(CGAL_FOUND)
-    target_link_libraries(cppxdic CGAL::CGAL)
+    target_link_libraries(cppxdic_core PUBLIC CGAL::CGAL)
     message(STATUS "Found CGAL: ${CGAL_VERSION}")
 else()
     message(FATAL_ERROR "CGAL not found. Please install it: brew install cgal")
@@ -119,15 +147,15 @@ find_package(Eigen3 REQUIRED)
 if(Eigen3_FOUND)
     # Prefer imported target when available
     if(TARGET Eigen3::Eigen)
-        target_link_libraries(cppxdic Eigen3::Eigen)
+        target_link_libraries(cppxdic_core PUBLIC Eigen3::Eigen)
         message(STATUS "Found Eigen3 target: Eigen3::Eigen")
     endif()
     # Also add include dirs for header-only usage depending on variable name
     if(DEFINED EIGEN3_INCLUDE_DIRS)
-        target_include_directories(cppxdic PRIVATE ${EIGEN3_INCLUDE_DIRS})
+        target_include_directories(cppxdic_core PRIVATE ${EIGEN3_INCLUDE_DIRS})
         message(STATUS "Eigen3 include dirs: ${EIGEN3_INCLUDE_DIRS}")
     elseif(DEFINED EIGEN3_INCLUDE_DIR)
-        target_include_directories(cppxdic PRIVATE ${EIGEN3_INCLUDE_DIR})
+        target_include_directories(cppxdic_core PRIVATE ${EIGEN3_INCLUDE_DIR})
         message(STATUS "Eigen3 include dir: ${EIGEN3_INCLUDE_DIR}")
     endif()
 else()
@@ -136,31 +164,31 @@ endif()
 
 # Add suite sparse libraries
 find_library(SUITESPARSE_LIBRARY1 NAMES spqr)
-target_link_libraries(cppxdic ${SUITESPARSE_LIBRARY1})
+target_link_libraries(cppxdic_core PUBLIC ${SUITESPARSE_LIBRARY1})
 
 find_library(SUITESPARSE_LIBRARY2 NAMES cholmod)
-target_link_libraries(cppxdic ${SUITESPARSE_LIBRARY2})
+target_link_libraries(cppxdic_core PUBLIC ${SUITESPARSE_LIBRARY2})
 
 find_library(SUITESPARSE_LIBRARY3 NAMES suitesparseconfig)
-target_link_libraries(cppxdic ${SUITESPARSE_LIBRARY3})
+target_link_libraries(cppxdic_core PUBLIC ${SUITESPARSE_LIBRARY3})
 
 find_library(SUITESPARSE_LIBRARY4 NAMES amd)
-target_link_libraries(cppxdic ${SUITESPARSE_LIBRARY4})
+target_link_libraries(cppxdic_core PUBLIC ${SUITESPARSE_LIBRARY4})
 
 find_library(SUITESPARSE_LIBRARY5 NAMES colamd)
-target_link_libraries(cppxdic ${SUITESPARSE_LIBRARY5})
+target_link_libraries(cppxdic_core PUBLIC ${SUITESPARSE_LIBRARY5})
 
 # Add lapack library
 find_library(LAPACK_LIBRARY NAMES lapack)
-target_link_libraries(cppxdic ${LAPACK_LIBRARY})
+target_link_libraries(cppxdic_core PUBLIC ${LAPACK_LIBRARY})
 
 # Add blas library
 find_library(BLAS_LIBRARY NAMES blas)
-target_link_libraries(cppxdic ${BLAS_LIBRARY})
+target_link_libraries(cppxdic_core PUBLIC ${BLAS_LIBRARY})
 
 # Add pthreads
 find_package(Threads)
-target_link_libraries(cppxdic ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(cppxdic_core PUBLIC ${CMAKE_THREAD_LIBS_INIT})
 
 # Add OpenMP support (required by ncorr library) - following ncorr's approach
 if(APPLE)
@@ -183,12 +211,21 @@ endif()
 find_package(OpenMP)
 if(OpenMP_CXX_FOUND)
     message(STATUS "OpenMP found - enabling parallel support")
-    target_link_libraries(cppxdic OpenMP::OpenMP_CXX)
+    target_link_libraries(cppxdic_core PUBLIC OpenMP::OpenMP_CXX)
 else()
     message(WARNING "OpenMP not found - please install: brew install libomp")
 endif()
 
+target_link_libraries(cppxdic_io PUBLIC cppxdic_core)
+target_link_libraries(cppxdic_pipeline PUBLIC cppxdic_core cppxdic_io)
+target_link_libraries(cppxdic_app PUBLIC cppxdic_core)
+target_link_libraries(cppxdic PRIVATE cppxdic_app cppxdic_pipeline cppxdic_io cppxdic_core)
+
 # Compiler flags
+target_compile_options(cppxdic_core PRIVATE -Wall -Wextra -O2)
+target_compile_options(cppxdic_io PRIVATE -Wall -Wextra -O2)
+target_compile_options(cppxdic_pipeline PRIVATE -Wall -Wextra -O2)
+target_compile_options(cppxdic_app PRIVATE -Wall -Wextra -O2)
 target_compile_options(cppxdic PRIVATE -Wall -Wextra -O2)
 
 # Create directories for output
@@ -205,43 +242,13 @@ endif()
 # generate_ncorr_bin tool: converts MATLAB ncorr .mat → ncorr native .bin
 add_executable(generate_ncorr_bin
     src/generate_ncorr_bin.cpp
-    src/mat_reader.cpp
-    src/dic_structures.cpp
 )
 target_include_directories(generate_ncorr_bin PRIVATE include Tools/CppNCorr/include)
 target_link_libraries(generate_ncorr_bin
-    ncorr
-    ${OpenCV_LIBS}
-    ${OPENCV_LIBRARY1} ${OPENCV_LIBRARY2} ${OPENCV_LIBRARY3} ${OPENCV_LIBRARY4} ${OPENCV_LIBRARY5}
-    ${FFTW_LIBRARY}
-    ${MATIO_LIBRARY}
-    ${SUITESPARSE_LIBRARY1} ${SUITESPARSE_LIBRARY2} ${SUITESPARSE_LIBRARY3}
-    ${SUITESPARSE_LIBRARY4} ${SUITESPARSE_LIBRARY5}
-    ${LAPACK_LIBRARY} ${BLAS_LIBRARY}
-    ${CMAKE_THREAD_LIBS_INIT}
+    cppxdic_core
 )
 if(MATIO_INCLUDE_DIR)
     target_include_directories(generate_ncorr_bin PRIVATE ${MATIO_INCLUDE_DIR})
-endif()
-if(HDF5_FOUND)
-    target_include_directories(generate_ncorr_bin PRIVATE ${HDF5_INCLUDE_DIRS})
-    target_link_libraries(generate_ncorr_bin ${HDF5_C_LIBRARIES})
-endif()
-if(OpenMP_CXX_FOUND)
-    target_link_libraries(generate_ncorr_bin OpenMP::OpenMP_CXX)
-endif()
-if(Eigen3_FOUND)
-    if(TARGET Eigen3::Eigen)
-        target_link_libraries(generate_ncorr_bin Eigen3::Eigen)
-    endif()
-    if(DEFINED EIGEN3_INCLUDE_DIRS)
-        target_include_directories(generate_ncorr_bin PRIVATE ${EIGEN3_INCLUDE_DIRS})
-    elseif(DEFINED EIGEN3_INCLUDE_DIR)
-        target_include_directories(generate_ncorr_bin PRIVATE ${EIGEN3_INCLUDE_DIR})
-    endif()
-endif()
-if(CGAL_FOUND)
-    target_link_libraries(generate_ncorr_bin CGAL::CGAL)
 endif()
 if(FFTW_INCLUDE_DIR)
     target_include_directories(generate_ncorr_bin PRIVATE ${FFTW_INCLUDE_DIR})
@@ -259,7 +266,7 @@ message(STATUS "OpenCV version: ${OpenCV_VERSION}")
 # Find and link nlohmann/json library for ncorr_test_json, ncorr_test_verif
 find_package(nlohmann_json CONFIG)
 if(nlohmann_json_FOUND)
-target_link_libraries(cppxdic nlohmann_json::nlohmann_json)
+target_link_libraries(cppxdic PRIVATE nlohmann_json::nlohmann_json)
 else()
   # If package not found via find_package, try to find the header-only library
   find_path(NLOHMANN_JSON_INCLUDE_DIRS "nlohmann/json.hpp" 

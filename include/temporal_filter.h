@@ -37,6 +37,20 @@ std::vector<std::vector<double>> filterTime(
 );
 
 /**
+ * Apply temporal filtering to frame-major data (nFrames x nPoints).
+ *
+ * This keeps the visualization/export layer on the same filtering backend as
+ * the deformation pipeline while allowing the caller to opt into gap-filling
+ * interpolation before filtering.
+ */
+std::vector<std::vector<double>> filterTimeFrameMajor(
+    const std::vector<std::vector<double>>& data,
+    double freq_filt = 10.0,
+    double freq_acq = 50.0,
+    bool interpolate_missing = false
+);
+
+/**
  * Apply temporal filtering to 3D displacement vectors
  * 
  * @param disp_x X-component displacement (nPoints x nFrames)

@@ -7,6 +7,7 @@
 #include "utils.h"
 #include "step_d_workflow.h"
 #include "data_serializer.h"
+#include "cppxdic/pipeline/trial_selector.h"
 #include "strain_computation.h"
 #include "surface_stitching.h"
 #include "temporal_filter.h"
@@ -1308,7 +1309,7 @@ bool DicAnalysis::setupNcorrAnalysis(const std::vector<std::string>& images,
 
 bool DicAnalysis::run() {
     // Search for trial targets (equivalent to search_trial2target)
-    std::vector<int> trial_target = {7};//{7, 12, 25};//#searchTrialTarget();
+    std::vector<int> trial_target = searchTrialTarget();
     
     std::cout << "Trial target set: [";
     for (size_t i = 0; i < trial_target.size(); ++i) {
@@ -1440,192 +1441,7 @@ bool DicAnalysis::run() {
 }
 
 std::vector<int> DicAnalysis::searchTrialTarget() {
-    std::vector<int> trials;
-
-    // Build protocol directory path
-    std::string protocol_dir = Utils::buildProtocolDir(config_, true, true, true, true);
-
-    // Find protocol .mat file
-    auto protos = Utils::findFiles(protocol_dir, "*.mat");
-    if (protos.empty()) {
-        std::cerr << "Protocol file not found in: " << protocol_dir << std::endl;
-        // Fallback to reference + next
-        trials.push_back(config_.ref_trial_id);
-        trials.push_back(config_.ref_trial_id + 1);
-        return trials;
-    }
-
-    std::string proto_file = protos.front();
-
-    // Open MAT file
-    mat_t *matfp = Mat_Open(proto_file.c_str(), MAT_ACC_RDONLY);
-    if (!matfp) {
-        std::cerr << "Failed to open MAT file: " << proto_file << std::endl;
-        trials.push_back(config_.ref_trial_id);
-        trials.push_back(config_.ref_trial_id + 1);
-        return trials;
-    }
-
-    // Load 'cond' struct
-    matvar_t *cond = Mat_VarRead(matfp, "cond");
-    if (!cond || cond->class_type != MAT_C_STRUCT) {
-        if (cond) Mat_VarFree(cond);
-        Mat_Close(matfp);
-        std::cerr << "Variable 'cond' not found or not a struct in: " << proto_file << std::endl;
-        trials.push_back(config_.ref_trial_id);
-        trials.push_back(config_.ref_trial_id + 1);
-        return trials;
-    }
-
-    // Read titles (cell array of strings)
-    matvar_t *titles = Mat_VarGetStructFieldByName(cond, "titles", 0);
-    matvar_t *table = Mat_VarGetStructFieldByName(cond, "table", 0);
-    if (!titles || titles->class_type != MAT_C_CELL || !table || table->class_type != MAT_C_CELL) {
-        if (cond) Mat_VarFree(cond);
-        Mat_Close(matfp);
-        std::cerr << "Fields 'titles' or 'table' missing or of wrong type in 'cond'" << std::endl;
-        trials.push_back(config_.ref_trial_id);
-        trials.push_back(config_.ref_trial_id + 1);
-        return trials;
-    }
-
-    // Extract column names
-    std::vector<std::string> col_names;
-    size_t ncols = titles->dims[1];
-    col_names.reserve(ncols);
-    for (size_t j = 0; j < ncols; ++j) {
-        matvar_t *cell = static_cast<matvar_t **>(titles->data)[j];
-        std::string name;
-        if (cell && cell->class_type == MAT_C_CHAR && cell->data) {
-            size_t len = cell->nbytes / cell->data_size;
-            name.assign(static_cast<const char *>(cell->data), len);
-            // Titles might have trailing nulls; trim
-            while (!name.empty() && (name.back() == '\0' || name.back() == ' ')) name.pop_back();
-        }
-        col_names.push_back(name);
-    }
-
-    // Identify indices for 'dir', 'nf', 'spddxl'
-    auto find_col = [&](const std::string &key) -> int {
-        for (size_t j = 0; j < col_names.size(); ++j) {
-            if (col_names[j] == key) return static_cast<int>(j);
-        }
-        return -1;
-    };
-    int dir_idx = find_col("dir");
-    int nf_idx = find_col("nf");
-    int spd_idx = find_col("spddxl");
-    if (dir_idx < 0 || nf_idx < 0 || spd_idx < 0) {
-        if (cond) Mat_VarFree(cond);
-        Mat_Close(matfp);
-        std::cerr << "Required columns not found in titles (need 'dir','nf','spddxl')" << std::endl;
-        trials.push_back(config_.ref_trial_id);
-        trials.push_back(config_.ref_trial_id + 1);
-        return trials;
-    }
-
-    // Table dimensions: Ntrial x Ncond
-    size_t ntrial = table->dims[0];
-    size_t ncond = table->dims[1];
-
-    // Pre-extract columns from cell table
-    auto cell_at = [&](size_t i, size_t j) -> matvar_t * {
-        size_t idx = i + j * ntrial; // column-major
-        return static_cast<matvar_t **>(table->data)[idx];
-    };
-
-    std::vector<std::string> dircol(ntrial);
-    std::vector<double> nfcol(ntrial, std::numeric_limits<double>::quiet_NaN());
-    std::vector<double> spdcol(ntrial, std::numeric_limits<double>::quiet_NaN());
-
-    for (size_t i = 0; i < ntrial; ++i) {
-        // dir as string
-        if (dir_idx < static_cast<int>(ncond)) {
-            matvar_t *c = cell_at(i, static_cast<size_t>(dir_idx));
-            if (c && c->class_type == MAT_C_CHAR && c->data) {
-                size_t len = c->nbytes / c->data_size;
-                std::string s(static_cast<const char *>(c->data), len);
-                while (!s.empty() && (s.back() == '\0' || s.back() == ' ')) s.pop_back();
-                dircol[i] = s;
-            }
-        }
-        // nf numeric
-        if (nf_idx < static_cast<int>(ncond)) {
-            matvar_t *c = cell_at(i, static_cast<size_t>(nf_idx));
-            if (c && c->data) {
-                if (c->class_type == MAT_C_DOUBLE) {
-                    nfcol[i] = static_cast<const double *>(c->data)[0];
-                } else if (c->class_type == MAT_C_SINGLE) {
-                    nfcol[i] = static_cast<const float *>(c->data)[0];
-                } else if (c->class_type == MAT_C_INT32) {
-                    nfcol[i] = static_cast<const int32_t *>(c->data)[0];
-                }
-            }
-        }
-        // spddxl numeric
-        if (spd_idx < static_cast<int>(ncond)) {
-            matvar_t *c = cell_at(i, static_cast<size_t>(spd_idx));
-            if (c && c->data) {
-                if (c->class_type == MAT_C_DOUBLE) {
-                    spdcol[i] = static_cast<const double *>(c->data)[0];
-                } else if (c->class_type == MAT_C_SINGLE) {
-                    spdcol[i] = static_cast<const float *>(c->data)[0];
-                } else if (c->class_type == MAT_C_INT32) {
-                    spdcol[i] = static_cast<const int32_t *>(c->data)[0];
-                }
-            }
-        }
-    }
-
-    // Subject numeric id
-    int subj_num = 0;
-    {
-        // extract digits from subject_id
-        for (char ch : config_.subject_id) {
-            if (std::isdigit(static_cast<unsigned char>(ch))) {
-                subj_num = subj_num * 10 + (ch - '0');
-            }
-        }
-    }
-
-    // Correction if subject < 8
-    if (subj_num < 8 && ntrial > 1) {
-        size_t half = ntrial / 2;
-        for (size_t i = 0; i < ntrial; ++i) {
-            spdcol[i] = (i < half) ? 0.04 : 0.08;
-        }
-    }
-
-    // Build trial indices 1..Ntrial (Matlab-style) based on filters
-
-    bool is_loading = (config_.phase_id == "loading");
-    std::vector<int> trialnum;
-    trialnum.reserve(ntrial);
-    for (size_t i = 0; i < ntrial; ++i) trialnum.push_back(static_cast<int>(i + 1));
-
-    for (size_t ii = 0; ii < config_.nfcond_set.size(); ++ii) {
-        int nf_set = config_.nfcond_set[ii];
-        for (size_t jj = 0; jj < config_.spddxlcond_set.size(); ++jj) {
-            double spd_set = config_.spddxlcond_set[jj];
-
-            for (size_t i = 0; i < ntrial; ++i) {
-                bool pass = true;
-                if (is_loading) {
-                    bool dir_ok = (dircol[i] == "Ubnf" || dircol[i] == "Rbnf");
-                    bool nf_ok = std::fabs(nfcol[i] - nf_set) < 1e-6;
-                    bool spd_ok = std::fabs(spdcol[i] - spd_set) < 1e-9;
-                    pass = dir_ok && nf_ok && spd_ok;
-                }
-                if (pass) trials.push_back(trialnum[i]);
-            }
-        }
-    }
-
-    // Clean up
-    if (cond) Mat_VarFree(cond);
-    Mat_Close(matfp);
-
-    return trials;
+    return cppxdic::pipeline::TrialSelector(config_).selectTargets();
 }
 
 bool DicAnalysis::dic2DAnalysis(const std::vector<int>& trial_target) {

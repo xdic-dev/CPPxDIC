@@ -5,6 +5,7 @@
 #include "visualization.h"
 #include "dic_structures.h"
 #include "strain_computation.h"
+#include "temporal_filter.h"
 #include <fstream>
 #include <iostream>
 #include <iomanip>
@@ -656,7 +657,7 @@ void Visualization::exportFrameCSV(
         ofs << i << "," << pts.x[i] << "," << pts.y[i] << "," << pts.z[i];
         
         // Add scalar fields (if point-based conversion available)
-        for (const auto& [field_name, field_data] : vis_data.FaceScalars) {
+        for (const auto& [_, field_data] : vis_data.FaceScalars) {
             // For simplicity, write NaN for now
             // Full implementation would interpolate face data to points
             ofs << ",NaN";
@@ -819,186 +820,6 @@ void Visualization::printTrialInfo(const DIC3DPPresults& results) {
     std::cout << "========================================\n\n";
 }
 
-/**
- * Design 4th order Butterworth low-pass filter coefficients
- * Equivalent to MATLAB's [B,A] = butter(4, Wn)
- * @param Wn Normalized cutoff frequency (0 to 1, where 1 = Nyquist)
- * @param b Output numerator coefficients (size 5 for 4th order)
- * @param a Output denominator coefficients (size 5 for 4th order)
- */
-static void designButterworth4(double Wn, std::vector<double>& b, std::vector<double>& a) {
-    // Pre-warp the cutoff frequency for bilinear transform
-    double Wn_clamped = std::max(0.001, std::min(0.999, Wn));
-    double Wp = std::tan(M_PI * Wn_clamped / 2.0);
-    
-    // Scale by cutoff frequency
-    double Wp2 = Wp * Wp;
-    double Wp4 = Wp2 * Wp2;
-    
-    // Pre-computed coefficients for 4th order Butterworth analog prototype
-    // Based on analog prototype: H(s) = 1 / (s^4 + 2.6131*s^3 + 3.4142*s^2 + 2.6131*s + 1)
-    double a1_analog = 2.6131;  // 2*(cos(5π/8) + cos(7π/8)) with sign
-    double a2_analog = 3.4142;  // 2 + 2*cos(5π/8)*cos(7π/8) + ...
-    double a3_analog = 2.6131;
-    double a4_analog = 1.0;
-    
-    // Bilinear transform with frequency pre-warping
-    // s = Wp * (z-1)/(z+1)
-    double Wp1 = Wp;
-    double Wp3 = Wp2 * Wp;
-    
-    // Denominator coefficients after bilinear transform
-    double d0 = Wp4 + a1_analog*Wp3 + a2_analog*Wp2 + a3_analog*Wp1 + a4_analog;
-    double d1 = 4*Wp4 + 2*a1_analog*Wp3 - 2*a3_analog*Wp1 - 4*a4_analog;
-    double d2 = 6*Wp4 - 2*a2_analog*Wp2 + 6*a4_analog;
-    double d3 = 4*Wp4 - 2*a1_analog*Wp3 + 2*a3_analog*Wp1 - 4*a4_analog;
-    double d4 = Wp4 - a1_analog*Wp3 + a2_analog*Wp2 - a3_analog*Wp1 + a4_analog;
-    
-    // Normalize by d0
-    a.resize(5);
-    a[0] = 1.0;
-    a[1] = d1 / d0;
-    a[2] = d2 / d0;
-    a[3] = d3 / d0;
-    a[4] = d4 / d0;
-    
-    // Numerator: all-pole filter, so numerator is Wp^4 * (1 + z^-1)^4
-    // = Wp^4 * (1 + 4*z^-1 + 6*z^-2 + 4*z^-3 + z^-4)
-    double gain = Wp4 / d0;
-    b.resize(5);
-    b[0] = gain;
-    b[1] = 4 * gain;
-    b[2] = 6 * gain;
-    b[3] = 4 * gain;
-    b[4] = gain;
-}
-
-/**
- * Apply zero-phase filtering (equivalent to MATLAB's filtfilt)
- * Filters forward and backward to eliminate phase distortion
- * @param b Numerator coefficients
- * @param a Denominator coefficients
- * @param x Input signal
- * @return Filtered signal
- */
-static std::vector<double> filtfilt(const std::vector<double>& b, 
-                                     const std::vector<double>& a,
-                                     const std::vector<double>& x) {
-    if (x.empty()) return x;
-    
-    size_t n = x.size();
-    size_t order = b.size() - 1;
-    
-    // Pad length (3 times filter order, similar to MATLAB)
-    size_t npad = std::min(3 * order, n - 1);
-    
-    // Create padded signal with reflected boundaries
-    std::vector<double> xpad(n + 2 * npad);
-    
-    // Reflect at beginning: 2*x[0] - x[npad], ..., 2*x[0] - x[1]
-    for (size_t i = 0; i < npad; ++i) {
-        xpad[i] = 2.0 * x[0] - x[npad - i];
-    }
-    // Copy original signal
-    for (size_t i = 0; i < n; ++i) {
-        xpad[npad + i] = x[i];
-    }
-    // Reflect at end: 2*x[n-1] - x[n-2], ..., 2*x[n-1] - x[n-1-npad]
-    for (size_t i = 0; i < npad; ++i) {
-        xpad[npad + n + i] = 2.0 * x[n - 1] - x[n - 2 - i];
-    }
-    
-    // Forward filter (Direct Form II Transposed)
-    auto filter = [&](const std::vector<double>& input) -> std::vector<double> {
-        std::vector<double> output(input.size());
-        std::vector<double> z(order + 1, 0.0);  // State variables
-        
-        for (size_t i = 0; i < input.size(); ++i) {
-            double y = b[0] * input[i] + z[0];
-            for (size_t j = 0; j < order; ++j) {
-                z[j] = b[j + 1] * input[i] - a[j + 1] * y + z[j + 1];
-            }
-            output[i] = y;
-        }
-        return output;
-    };
-    
-    // Forward pass
-    std::vector<double> y_fwd = filter(xpad);
-    
-    // Reverse the signal
-    std::reverse(y_fwd.begin(), y_fwd.end());
-    
-    // Backward pass
-    std::vector<double> y_bwd = filter(y_fwd);
-    
-    // Reverse back and extract original length
-    std::reverse(y_bwd.begin(), y_bwd.end());
-    
-    // Extract the central portion (remove padding)
-    std::vector<double> result(n);
-    for (size_t i = 0; i < n; ++i) {
-        result[i] = y_bwd[npad + i];
-    }
-    
-    return result;
-}
-
-/**
- * Fill missing values (NaN) with linear interpolation
- * Equivalent to MATLAB's fillmissing(d,'linear',1,'EndValues','nearest')
- */
-static void fillMissingLinear(std::vector<double>& data) {
-    size_t n = data.size();
-    if (n == 0) return;
-    
-    // Find first valid value for start
-    size_t first_valid = 0;
-    while (first_valid < n && std::isnan(data[first_valid])) {
-        first_valid++;
-    }
-    if (first_valid == n) return;  // All NaN
-    
-    // Fill leading NaNs with first valid value
-    for (size_t i = 0; i < first_valid; ++i) {
-        data[i] = data[first_valid];
-    }
-    
-    // Find last valid value for end
-    size_t last_valid = n - 1;
-    while (last_valid > 0 && std::isnan(data[last_valid])) {
-        last_valid--;
-    }
-    
-    // Fill trailing NaNs with last valid value
-    for (size_t i = last_valid + 1; i < n; ++i) {
-        data[i] = data[last_valid];
-    }
-    
-    // Linear interpolation for interior NaNs
-    size_t i = first_valid;
-    while (i < last_valid) {
-        if (std::isnan(data[i])) {
-            // Find next valid value
-            size_t j = i + 1;
-            while (j < n && std::isnan(data[j])) {
-                j++;
-            }
-            // Linear interpolate between i-1 and j
-            double v0 = data[i - 1];
-            double v1 = data[j];
-            double span = static_cast<double>(j - i + 1);
-            for (size_t k = i; k < j; ++k) {
-                double t = static_cast<double>(k - i + 1) / span;
-                data[k] = v0 + t * (v1 - v0);
-            }
-            i = j;
-        } else {
-            i++;
-        }
-    }
-}
-
 std::vector<std::vector<double>> Visualization::butterworthFilter(
     const std::vector<std::vector<double>>& data,
     double cutoff_freq,
@@ -1007,9 +828,6 @@ std::vector<std::vector<double>> Visualization::butterworthFilter(
     if (data.empty() || data[0].empty()) {
         return data;
     }
-    
-    size_t n_frames = data.size();
-    size_t n_points = data[0].size();
     
     // Validate frequencies
     double nyquist = sample_freq / 2.0;
@@ -1020,58 +838,10 @@ std::vector<std::vector<double>> Visualization::butterworthFilter(
         return data;
     }
     
-    // Normalized cutoff frequency (0 to 1, where 1 = Nyquist)
-    double Wn = cutoff_freq / nyquist;
-    
-    // Design 4th order Butterworth filter (matching MATLAB's butter(4, Wn))
-    std::vector<double> b, a;
-    designButterworth4(Wn, b, a);
-    
-    std::cout << "  Applying 4th order Butterworth filter (fc=" << cutoff_freq 
-              << " Hz, fs=" << sample_freq << " Hz, Wn=" << Wn << ")" << std::endl;
-    
-    // Transpose data: from [frame][point] to [point][frame] for temporal filtering
-    std::vector<std::vector<double>> transposed(n_points, std::vector<double>(n_frames));
-    for (size_t f = 0; f < n_frames; ++f) {
-        for (size_t p = 0; p < n_points && p < data[f].size(); ++p) {
-            transposed[p][f] = data[f][p];
-        }
-    }
-    
-    // Filter each point's time series
-    size_t filtered_count = 0;
-    for (size_t p = 0; p < n_points; ++p) {
-        // Check if this point has valid data (not all NaN)
-        bool has_valid = false;
-        for (size_t f = 0; f < n_frames; ++f) {
-            if (!std::isnan(transposed[p][f])) {
-                has_valid = true;
-                break;
-            }
-        }
-        
-        if (has_valid) {
-            // Fill missing values with linear interpolation
-            fillMissingLinear(transposed[p]);
-            
-            // Apply zero-phase Butterworth filter
-            transposed[p] = filtfilt(b, a, transposed[p]);
-            filtered_count++;
-        }
-    }
-    
-    // Transpose back: from [point][frame] to [frame][point]
-    std::vector<std::vector<double>> result(n_frames, std::vector<double>(n_points));
-    for (size_t f = 0; f < n_frames; ++f) {
-        for (size_t p = 0; p < n_points; ++p) {
-            result[f][p] = transposed[p][f];
-        }
-    }
-    
-    std::cout << "  Filtered " << filtered_count << "/" << n_points 
-              << " point time series" << std::endl;
-    
-    return result;
+    std::cout << "  Applying shared 4th order Butterworth filter (fc=" << cutoff_freq
+              << " Hz, fs=" << sample_freq << " Hz)" << std::endl;
+
+    return cppxdic::filterTimeFrameMajor(data, cutoff_freq, sample_freq, true);
 }
 
 cv::Vec3b Visualization::applyJetColormap(double val) {
