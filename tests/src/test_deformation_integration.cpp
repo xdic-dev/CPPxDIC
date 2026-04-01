@@ -196,28 +196,49 @@ DeformRef loadDeformFromPPresults(const std::string& mat_path) {
     mat_t* matfp = Mat_Open(mat_path.c_str(), MAT_ACC_RDONLY);
     if (!matfp) return ref;
     
-    matvar_t* dv = Mat_VarRead(matfp, "Deform");
-    if (!dv || dv->class_type != MAT_C_STRUCT) {
-        if (dv) Mat_VarFree(dv);
-        Mat_Close(matfp);
-        return ref;
+    matvar_t* owned_var = Mat_VarRead(matfp, "Deform");
+    matvar_t* deform_var = owned_var;
+
+    if (!deform_var || deform_var->class_type != MAT_C_STRUCT) {
+        if (owned_var) {
+            Mat_VarFree(owned_var);
+            owned_var = nullptr;
+        }
+
+        owned_var = Mat_VarRead(matfp, "DIC3DPPresults");
+        if (!owned_var || owned_var->class_type != MAT_C_STRUCT) {
+            if (owned_var) {
+                Mat_VarFree(owned_var);
+            }
+            Mat_Close(matfp);
+            return ref;
+        }
+
+        deform_var = Mat_VarGetStructFieldByName(owned_var, "Deform", 0);
+        if (!deform_var || deform_var->class_type != MAT_C_STRUCT) {
+            Mat_VarFree(owned_var);
+            Mat_Close(matfp);
+            return ref;
+        }
     }
-    
-    ref.Epc1      = loadCellField(dv, "Epc1");
-    ref.Epc2      = loadCellField(dv, "Epc2");
-    ref.epc1      = loadCellField(dv, "epc1");
-    ref.epc2      = loadCellField(dv, "epc2");
-    ref.EShearMax = loadCellField(dv, "EShearMax");
-    ref.eShearMax = loadCellField(dv, "eShearMax");
-    ref.Eeq       = loadCellField(dv, "Eeq");
-    ref.eeq       = loadCellField(dv, "eeq");
-    ref.Emgn      = loadCellField(dv, "Emgn");
-    ref.emgn      = loadCellField(dv, "emgn");
-    ref.J         = loadCellField(dv, "J");
-    ref.Lamda1    = loadCellField(dv, "Lamda1");
-    ref.Lamda2    = loadCellField(dv, "Lamda2");
-    
-    Mat_VarFree(dv);
+
+    ref.Epc1      = loadCellField(deform_var, "Epc1");
+    ref.Epc2      = loadCellField(deform_var, "Epc2");
+    ref.epc1      = loadCellField(deform_var, "epc1");
+    ref.epc2      = loadCellField(deform_var, "epc2");
+    ref.EShearMax = loadCellField(deform_var, "EShearMax");
+    ref.eShearMax = loadCellField(deform_var, "eShearMax");
+    ref.Eeq       = loadCellField(deform_var, "Eeq");
+    ref.eeq       = loadCellField(deform_var, "eeq");
+    ref.Emgn      = loadCellField(deform_var, "Emgn");
+    ref.emgn      = loadCellField(deform_var, "emgn");
+    ref.J         = loadCellField(deform_var, "J");
+    ref.Lamda1    = loadCellField(deform_var, "Lamda1");
+    ref.Lamda2    = loadCellField(deform_var, "Lamda2");
+
+    if (owned_var) {
+        Mat_VarFree(owned_var);
+    }
     Mat_Close(matfp);
     ref.valid = !ref.Epc1.empty();
     return ref;
