@@ -44,7 +44,7 @@ public:
     std::string dic_path;                // location of the output data from DIC
     
     // Processing flags
-    bool im_filter_mode = false;
+    bool im_filter_mode = true;
     bool automatic_process = true;       // automatic processing flag
     bool parallel_processing = true;     // parallel processing flag
     
@@ -124,7 +124,7 @@ public:
     
     // Step E specific parameters (3D reconstruction)
     bool step_e_distortion_removal = false;  // Remove distortion from 2D points (MATLAB default: false)
-    bool step_d_replacebadcorr = false;      // Replace bad correlation subsets (MATLAB step2_dic_finish: active, but slow)
+    bool step_d_replacebadcorr = true;      // Replace bad correlation subsets (MATLAB step2_dic_finish: active, but slow)
     
     // Step F specific parameters (deformation analysis)
     bool step_f_temporal_filtering = true;   // Enable temporal filtering of displacements

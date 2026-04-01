@@ -34,6 +34,7 @@ add_executable(cppxdic
     src/face_isotropy.cpp
     src/visualization.cpp
     src/data_serializer.cpp
+    src/matlab_functions.cpp
 )
 
 # Find OpenCV (following ncorr pattern)

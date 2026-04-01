@@ -12,6 +12,7 @@
 #include "delaunay_triangulation.h"
 #include "ncorr.h"
 #include "utils.h"
+#include "matlab_functions.h"
 #include <iostream>
 #include <opencv2/imgcodecs.hpp>
 #include <sstream>
@@ -787,6 +788,15 @@ void StepDWorkflow::formatOutput(const std::string& trial,
     if (dic1.disps.empty() || dic2.disps.empty() || dic12.disps.empty()) {
         std::cerr << "Error: DIC outputs are empty" << std::endl;
         return;
+    }
+
+    // Apply replacebadcorr if enabled (MATLAB step2_dic_finish equivalent)
+    // This replaces badly correlated subsets with spatiotemporally filtered values
+    if (config_.step_d_replacebadcorr) {
+        std::cout << "  Applying replacebadcorr (MATLAB step2_dic_finish)..." << std::endl;
+        cppxdic::matlab_replacebadcorr(dic1);
+        cppxdic::matlab_replacebadcorr(dic2);
+        cppxdic::matlab_replacebadcorr(dic12);
     }
 
     const size_t n_frames_cam1 = dic1.disps.size();
