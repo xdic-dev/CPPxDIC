@@ -6,14 +6,16 @@
 
 namespace cppxdic::pipeline {
 
-class StepFRunner {
+class DeformationRunner {
 public:
-    explicit StepFRunner(const Config& config);
+    explicit DeformationRunner(const Config& config);
     bool run(const std::vector<int>& trial_target) const;
 
 private:
     const Config& config_;
 };
+
+using StepFRunner = DeformationRunner;
 
 } // namespace cppxdic::pipeline
 

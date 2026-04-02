@@ -37,10 +37,10 @@ DicAnalysis::DicAnalysis(const Config& config) : config_(config) {
 }
 
 bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
-    return cppxdic::pipeline::StepFRunner(config_).run(trial_target);
+    return cppxdic::pipeline::DeformationRunner(config_).run(trial_target);
 }
 bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
-    return cppxdic::pipeline::StepERunner(config_).run(trial_target);
+    return cppxdic::pipeline::Reconstruction3DRunner(config_).run(trial_target);
 }
 
 bool DicAnalysis::setupNcorrAnalysis(const std::vector<std::string>& images,
@@ -137,14 +137,14 @@ bool DicAnalysis::run() {
         return true;
     };
     
-    // STEP D: 2D-DIC
+    // DIC2D analysis
     bool step_d_complete = check_2d_outputs_exist();
     if (step_d_complete) {
-        std::cout << "\n=== STEP D: 2D-DIC ===" << std::endl;
+        std::cout << "\n=== DIC2D Analysis ===" << std::endl;
         std::cout << "✓ Checkpoint detected: All 2D DIC output files exist" << std::endl;
         std::cout << "  Skipping 2D analysis (use existing results)" << std::endl;
     } else {
-        std::cout << "\n=== STEP D: 2D-DIC ===" << std::endl;
+        std::cout << "\n=== DIC2D Analysis ===" << std::endl;
         std::cout << "Running 2D DIC analysis..." << std::endl;
         auto start = std::chrono::high_resolution_clock::now();
         bool success = dic2DAnalysis(trial_target);
@@ -159,15 +159,15 @@ bool DicAnalysis::run() {
         std::cout << "✓ DIC 2D Analysis done in " << duration.count() / 1000.0 << " s" << std::endl;
     }
     
-    // STEP E: 3D Reconstruction
+    // 3D reconstruction
     bool step_e_complete = check_3d_outputs_exist();
     if (step_e_complete) {
-        std::cout << "\n=== STEP E: 3D Reconstruction ===" << std::endl;
+        std::cout << "\n=== 3D Reconstruction ===" << std::endl;
         std::cout << "✓ Checkpoint detected: All 3D reconstruction output files exist" << std::endl;
         std::cout << "  Skipping 3D reconstruction (use existing results)" << std::endl;
     } else {
         if (!step_d_complete) {
-            std::cout << "\n=== STEP E: 3D Reconstruction ===" << std::endl;
+            std::cout << "\n=== 3D Reconstruction ===" << std::endl;
         }
         std::cout << "Running 3D reconstruction..." << std::endl;
         auto start = std::chrono::high_resolution_clock::now();
@@ -183,15 +183,15 @@ bool DicAnalysis::run() {
         std::cout << "✓ DIC 3D Reconstruction done in " << duration.count() / 1000.0 << " s" << std::endl;
     }
     
-    // STEP F: Deformation analysis
+    // Deformation analysis
     bool step_f_complete = check_deformation_outputs_exist();
     if (step_f_complete) {
-        std::cout << "\n=== STEP F: Deformation Analysis ===" << std::endl;
+        std::cout << "\n=== Deformation Analysis ===" << std::endl;
         std::cout << "✓ Checkpoint detected: Deformation analysis output exists" << std::endl;
         std::cout << "  Skipping deformation analysis (use existing results)" << std::endl;
     } else {
         if (!step_e_complete) {
-            std::cout << "\n=== STEP F: Deformation Analysis ===" << std::endl;
+            std::cout << "\n=== Deformation Analysis ===" << std::endl;
         }
         std::cout << "Running deformation analysis..." << std::endl;
         auto start = std::chrono::high_resolution_clock::now();
@@ -219,11 +219,11 @@ std::vector<int> DicAnalysis::searchTrialTarget() {
 }
 
 bool DicAnalysis::dic2DAnalysis(const std::vector<int>& trial_target) {
-    std::cout << "Starting 2D DIC Analysis (using StepDWorkflow)..." << std::endl;
+    std::cout << "Starting 2D DIC Analysis (using Dic2DWorkflow)..." << std::endl;
     
     try {
         // Create workflow instance
-        StepDWorkflow workflow(config_);
+        Dic2DWorkflow workflow(config_);
         
         // Process each trial and stereo pair
         for (int trial : trial_target) {

@@ -6,14 +6,16 @@
 
 namespace cppxdic::pipeline {
 
-class StepERunner {
+class Reconstruction3DRunner {
 public:
-    explicit StepERunner(const Config& config);
+    explicit Reconstruction3DRunner(const Config& config);
     bool run(const std::vector<int>& trial_target) const;
 
 private:
     const Config& config_;
 };
+
+using StepERunner = Reconstruction3DRunner;
 
 } // namespace cppxdic::pipeline
 

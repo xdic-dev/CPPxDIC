@@ -6,14 +6,16 @@
 
 namespace cppxdic::pipeline {
 
-class StepDRunner {
+class Dic2DRunner {
 public:
-    explicit StepDRunner(const Config& config);
+    explicit Dic2DRunner(const Config& config);
     bool run(const std::vector<int>& trial_target) const;
 
 private:
     const Config& config_;
 };
+
+using StepDRunner = Dic2DRunner;
 
 } // namespace cppxdic::pipeline
 

@@ -3,9 +3,9 @@
  * Main analysis functionality equivalent to Matlab dic_analysis.m
  * 
  * This class orchestrates the three main DIC analysis steps:
- * - Step D: 2D DIC Analysis (DIC2DWorkflow)
- * - Step E: 3D Reconstruction (Reconstruction3DWorkflow)
- * - Step F: Deformation Analysis (DeformationWorkflow)
+ * - DIC2D analysis (Dic2DWorkflow)
+ * - 3D reconstruction (Reconstruction3DRunner)
+ * - Deformation analysis (DeformationRunner)
  * 
  * Each step is implemented as a separate workflow class with clear
  * inputs, outputs, and testable milestone functions.
@@ -25,29 +25,32 @@ public:
     
     /**
      * Run complete DIC analysis pipeline
-     * Executes preprocessing, Step D, Step E, and Step F in sequence
+     * Executes preprocessing, DIC2D, reconstruction, and deformation in sequence
      * 
      * @return true if all steps complete successfully
      */
     bool run();
 
     /**
-     * Run 2D DIC Analysis (Step D) only — for integration testing
+     * Run DIC2D analysis only — for integration testing
      * Requires source videos / ROI / seed configuration to exist
      */
-    bool runStepD(const std::vector<int>& trial_target) { return dic2DAnalysis(trial_target); }
+    bool runDic2D(const std::vector<int>& trial_target) { return dic2DAnalysis(trial_target); }
+    bool runStepD(const std::vector<int>& trial_target) { return runDic2D(trial_target); }
     
     /**
-     * Run 3D Reconstruction (Step E) only — for integration testing
-     * Requires Step D outputs in binary cache form and calibration files to exist
+     * Run 3D reconstruction only — for integration testing
+     * Requires DIC2D outputs in binary cache form and calibration files to exist
      */
-    bool runStepE(const std::vector<int>& trial_target) { return dic3DReconstruction(trial_target); }
+    bool runReconstruction3D(const std::vector<int>& trial_target) { return dic3DReconstruction(trial_target); }
+    bool runStepE(const std::vector<int>& trial_target) { return runReconstruction3D(trial_target); }
     
     /**
-     * Run Deformation Analysis (Step F) only — for integration testing
-     * Requires DIC3Dcombined_*.bin from Step E to exist
+     * Run deformation analysis only — for integration testing
+     * Requires DIC3Dcombined_*.bin from reconstruction to exist
      */
-    bool runStepF(const std::vector<int>& trial_target) { return dicDeformationAnalysis(trial_target); }
+    bool runDeformation(const std::vector<int>& trial_target) { return dicDeformationAnalysis(trial_target); }
+    bool runStepF(const std::vector<int>& trial_target) { return runDeformation(trial_target); }
     
 private:
     const Config& config_;

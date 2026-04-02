@@ -50,11 +50,11 @@ std::array<double, 3> solve3DPoint(const std::vector<double>& l1, const std::vec
 
 } // namespace
 
-StepERunner::StepERunner(const Config& config)
+Reconstruction3DRunner::Reconstruction3DRunner(const Config& config)
     : config_(config) {}
 
-bool StepERunner::run(const std::vector<int>& trial_target) const {
-    std::cout << "Starting 3D Reconstruction (Step E)..." << std::endl;
+bool Reconstruction3DRunner::run(const std::vector<int>& trial_target) const {
+    std::cout << "Starting 3D reconstruction..." << std::endl;
 
     try {
         for (int trial : trial_target) {

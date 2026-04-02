@@ -527,6 +527,8 @@ set(PROJECT_SOURCES
     ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_schema.cpp
     ${CMAKE_SOURCE_DIR}/../src/pipeline/trial_selector.cpp
     ${CMAKE_SOURCE_DIR}/../src/pipeline/checkpoint_policy.cpp
+    ${CMAKE_SOURCE_DIR}/../src/pipeline/dic2d_frame_preparer.cpp
+    ${CMAKE_SOURCE_DIR}/../src/pipeline/dic2d_output_formatter.cpp
     ${CMAKE_SOURCE_DIR}/../src/pipeline/step_d_runner.cpp
     ${CMAKE_SOURCE_DIR}/../src/pipeline/step_e_runner.cpp
     ${CMAKE_SOURCE_DIR}/../src/pipeline/step_f_runner.cpp

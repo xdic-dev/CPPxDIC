@@ -63,33 +63,33 @@ bool PipelineRunner::run() const {
 
     const bool step_d_complete = checkpoints.hasStepDOutputs(trial_target, *serializer);
     if (step_d_complete) {
-        std::cout << "\n=== STEP D: 2D-DIC ===" << std::endl;
+        std::cout << "\n=== DIC2D Analysis ===" << std::endl;
         std::cout << "✓ Checkpoint detected: All 2D DIC output files exist" << std::endl;
         std::cout << "  Skipping 2D analysis (use existing results)" << std::endl;
-    } else if (!runStep("STEP D: 2D-DIC", "Running 2D DIC analysis...", "✓ DIC 2D Analysis done",
-                        StepDRunner(config_), trial_target)) {
+    } else if (!runStep("DIC2D Analysis", "Running 2D DIC analysis...", "✓ DIC 2D Analysis done",
+                        Dic2DRunner(config_), trial_target)) {
         std::cerr << "2D DIC Analysis failed!" << std::endl;
         return false;
     }
 
     const bool step_e_complete = checkpoints.hasStepEOutputs(trial_target, *serializer);
     if (step_e_complete) {
-        std::cout << "\n=== STEP E: 3D Reconstruction ===" << std::endl;
+        std::cout << "\n=== 3D Reconstruction ===" << std::endl;
         std::cout << "✓ Checkpoint detected: All 3D reconstruction output files exist" << std::endl;
         std::cout << "  Skipping 3D reconstruction (use existing results)" << std::endl;
-    } else if (!runStep("STEP E: 3D Reconstruction", "Running 3D reconstruction...", "✓ DIC 3D Reconstruction done",
-                        StepERunner(config_), trial_target)) {
+    } else if (!runStep("3D Reconstruction", "Running 3D reconstruction...", "✓ DIC 3D Reconstruction done",
+                        Reconstruction3DRunner(config_), trial_target)) {
         std::cerr << "3D Reconstruction failed!" << std::endl;
         return false;
     }
 
     const bool step_f_complete = checkpoints.hasStepFOutputs(trial_target, *serializer);
     if (step_f_complete) {
-        std::cout << "\n=== STEP F: Deformation Analysis ===" << std::endl;
+        std::cout << "\n=== Deformation Analysis ===" << std::endl;
         std::cout << "✓ Checkpoint detected: Deformation analysis output exists" << std::endl;
         std::cout << "  Skipping deformation analysis (use existing results)" << std::endl;
-    } else if (!runStep("STEP F: Deformation Analysis", "Running deformation analysis...", "✓ DIC Deformation Analysis done",
-                        StepFRunner(config_), trial_target)) {
+    } else if (!runStep("Deformation Analysis", "Running deformation analysis...", "✓ DIC Deformation Analysis done",
+                        DeformationRunner(config_), trial_target)) {
         std::cerr << "Deformation Analysis failed!" << std::endl;
         return false;
     }

@@ -4,12 +4,12 @@
 
 namespace cppxdic::pipeline {
 
-StepDRunner::StepDRunner(const Config& config)
+Dic2DRunner::Dic2DRunner(const Config& config)
     : config_(config) {}
 
-bool StepDRunner::run(const std::vector<int>& trial_target) const {
+bool Dic2DRunner::run(const std::vector<int>& trial_target) const {
     DicAnalysis analysis(config_);
-    return analysis.runStepD(trial_target);
+    return analysis.runDic2D(trial_target);
 }
 
 } // namespace cppxdic::pipeline

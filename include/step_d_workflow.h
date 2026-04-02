@@ -1,6 +1,6 @@
 /**
- * Step D: 2D DIC Analysis Workflow for CPPXDIC
- * Complete implementation of stepD_2DDIC from Matlab xDIC
+ * DIC2D workflow for CPPXDIC
+ * Complete implementation of the MATLAB 2D DIC stage
  * Handles the full 2D DIC analysis pipeline
  */
 
@@ -11,6 +11,8 @@
 #include "image_processor.h"
 #include "roi_manager.h"
 #include "config.h"
+#include "cppxdic/pipeline/dic2d_frame_preparer.h"
+#include "cppxdic/pipeline/dic2d_output_formatter.h"
 #include <ncorr.h>
 #include <opencv2/opencv.hpp>
 #include <string>
@@ -19,21 +21,21 @@
 namespace cppxdic {
 
 /**
- * StepDWorkflow class
+ * Dic2DWorkflow class
  * Implements the complete 2D DIC analysis workflow
  * Equivalent to stepD_2DDIC.m in Matlab
  */
-class StepDWorkflow {
+class Dic2DWorkflow {
 public:
     /**
      * Constructor
      * 
      * @param config Global configuration
      */
-    explicit StepDWorkflow(const Config& config);
+    explicit Dic2DWorkflow(const Config& config);
     
     /**
-     * Execute Step D: 2D DIC Analysis
+     * Execute the DIC2D workflow
      * Main entry point for 2D DIC processing
      * 
      * @param trial Trial ID string (e.g., "005")
@@ -294,6 +296,8 @@ private:
                                                 const bool use_no_update = false);
     
 };
+
+using StepDWorkflow = Dic2DWorkflow;
 
 } // namespace cppxdic
 

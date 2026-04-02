@@ -359,12 +359,12 @@ void exportVisualizationIfEnabled(const Config& config, DIC3DPPresults& results,
 
 } // namespace
 
-StepFRunner::StepFRunner(const Config& config)
+DeformationRunner::DeformationRunner(const Config& config)
     : config_(config) {}
 
-bool StepFRunner::run(const std::vector<int>& trial_target) const {
-    std::cout << "Starting Deformation/Strain Analysis (Step F)..." << std::endl;
-    std::cout << "NOTE: This requires DIC3Dcombined from Step E" << std::endl;
+bool DeformationRunner::run(const std::vector<int>& trial_target) const {
+    std::cout << "Starting deformation/strain analysis..." << std::endl;
+    std::cout << "NOTE: This requires DIC3Dcombined from 3D reconstruction" << std::endl;
 
     try {
         for (int trial : trial_target) {
@@ -376,7 +376,7 @@ bool StepFRunner::run(const std::vector<int>& trial_target) const {
 
             if (!std::filesystem::exists(dic3d_file)) {
                 std::cerr << "ERROR: DIC3Dcombined file not found: " << dic3d_file << std::endl;
-                std::cerr << "You must run Step E (dic3DReconstruction) first!" << std::endl;
+                std::cerr << "You must run 3D reconstruction first!" << std::endl;
                 return false;
             }
 
@@ -517,7 +517,7 @@ bool StepFRunner::run(const std::vector<int>& trial_target) const {
                 std::cout << "  Filtered max displacement magnitude: " << filtered_max_disp << std::endl;
 
                 if (filtered_valid_faces == 0 || filtered_valid_faces * 20 < face_count || filtered_exploded) {
-                    std::cout << "  Warning: Temporal filtering produced unusable geometry; keeping unfiltered geometry for Step F" << std::endl;
+                    std::cout << "  Warning: Temporal filtering produced unusable geometry; keeping unfiltered geometry for deformation" << std::endl;
                 } else {
                     vertices_all_frames = std::move(filtered);
                     for (size_t point_index = 0; point_index < point_count; ++point_index) {
@@ -664,7 +664,7 @@ bool StepFRunner::run(const std::vector<int>& trial_target) const {
 
             exportVisualizationIfEnabled(config_, ppresults, output_dir);
 
-            std::cout << "\n=== Step F Complete ===" << std::endl;
+            std::cout << "\n=== Deformation Complete ===" << std::endl;
             std::cout << "\u2713 3D deformation and strain analysis finished for trial " << trial << std::endl;
         }
 

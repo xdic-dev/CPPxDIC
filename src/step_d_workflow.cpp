@@ -1,6 +1,6 @@
 /**
- * Step D: 2D DIC Analysis Workflow for CPPXDIC
- * Implementation of complete stepD_2DDIC workflow
+ * DIC2D workflow for CPPXDIC
+ * Implementation of the complete 2D DIC workflow
  * Based on MATLAB xDIC stepD_2DDIC.m
  */
 
@@ -8,11 +8,8 @@
 #include "Array2D.h"
 #include "mat_writer.h"
 #include "mat_reader.h"
-#include "data_serializer.h"
-#include "delaunay_triangulation.h"
 #include "ncorr.h"
 #include "utils.h"
-#include "matlab_functions.h"
 #include <iostream>
 #include <opencv2/imgcodecs.hpp>
 #include <sstream>
@@ -94,13 +91,13 @@ std::string sanitizeStageName(const std::string& stage_name) {
 
 namespace cppxdic {
 
-StepDWorkflow::StepDWorkflow(const Config& config) : config_(config) {
+Dic2DWorkflow::Dic2DWorkflow(const Config& config) : config_(config) {
     // Initialize with default DIC constants
     setupStepParameters();
 }
 
 std::tuple<std::string, std::vector<int>, bool> 
-StepDWorkflow::execute(const std::string& trial, int stereopair) {
+Dic2DWorkflow::execute(const std::string& trial, int stereopair) {
     std::cout << "-------------------------------------------" << std::endl;
     std::cout << "-------------------------------------------" << std::endl;
     std::cout << "Digital Image Correlation analysis launch" << std::endl;
@@ -129,32 +126,33 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     setupBaseParameters(trial, stereopair, reftrial);
     
     // 3. Import video frames
-    std::vector<cv::Mat> cam_first_raw, cam_second_raw;
+    pipeline::PreparedDic2DFrames frames;
+    pipeline::Dic2DFramePreparer frame_preparer(config_);
     std::cout << "Reading video data... ";
-    if (!importVideoFrames(trial, stereopair, cam_first_raw, cam_second_raw)) {
+    if (!frame_preparer.importVideoFrames(trial, stereopair,
+                                          frames.cam_first_raw,
+                                          frames.cam_second_raw)) {
         std::cerr << "Failed to import video frames" << std::endl;
         return {"", {}, false};
     }
-    std::cout << "Reading done. Frames: " << cam_first_raw.size() << std::endl;
+    std::cout << "Reading done. Frames: " << frames.cam_first_raw.size() << std::endl;
     
     // 4. Phase-specific frame selection
-    if (config_.phase_id == "slide1") {
-        size_t keep = cam_first_raw.size() / 2 + 5;
-        cam_first_raw.resize(keep);
-        cam_second_raw.resize(keep);
-        std::cout << "Phase 'slide1': keeping " << keep << " frames" << std::endl;
-    }
+    frame_preparer.trimForPhase(frames);
     
     // 5. Saturation
-    std::vector<cv::Mat> cam_first_satur, cam_second_satur;
     std::cout << "Applying saturation..." << std::endl;
-    performSaturation(cam_first_raw, cam_second_raw, cam_first_satur, cam_second_satur);
+    frame_preparer.performSaturation(frames.cam_first_raw,
+                                     frames.cam_second_raw,
+                                     base_params_.limit_grayscale,
+                                     frames.cam_first_saturated,
+                                     frames.cam_second_saturated);
     
     // II. ROI, Seed, and Matching REF to Trial at frame 1
     cv::Mat refmask_REF, refmask_trial;
     SeedPoint ref_seed_point, initial_seed_point_set1;
     std::cout << "Initializing ROI, seed, and matching REF to Trial..." << std::endl;
-    if (!initializeROIAndSeed(cam_first_satur, refmask_REF, refmask_trial,
+    if (!initializeROIAndSeed(frames.cam_first_saturated, refmask_REF, refmask_trial,
                              ref_seed_point, initial_seed_point_set1)) {
         std::cerr << "Failed to initialize ROI and seed" << std::endl;
         return {"", {}, false};
@@ -165,23 +163,25 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     std::cout << "--> STEP: Matching REF to Trial loaded and formatted" << std::endl;
     
     // post-III. Image filtering
-    std::vector<cv::Mat> cam_first, cam_second;
     if(config_.im_filter_mode) {
         std::cout << "Applying image filtering..." << std::endl;
-        applyImageFiltering(cam_first_satur, cam_second_satur, refmask_trial,
-                           cam_first, cam_second);
+        frame_preparer.applyImageFiltering(frames.cam_first_saturated,
+                                           frames.cam_second_saturated,
+                                           refmask_trial,
+                                           frames.cam_first_filtered,
+                                           frames.cam_second_filtered);
         std::cout << "--> STEP: filtering done" << std::endl;
     } else {
         std::cout << "Skipping image filtering" << std::endl;
-        cam_first = cam_first_satur;
-        cam_second = cam_second_satur;
+        frames.cam_first_filtered = frames.cam_first_saturated;
+        frames.cam_second_filtered = frames.cam_second_saturated;
     }
 
     // III. Matching inside a Trial between cameras (cam1 -> cam2 at frame 1)
     cv::Mat refmask_trial_matched;
     SeedPoint initial_seed_point_set2;
     std::cout << "\nPerforming camera matching..." << std::endl;
-    if (!performMatching(cam_first_satur, cam_second_satur, refmask_trial,
+    if (!performMatching(frames.cam_first_saturated, frames.cam_second_saturated, refmask_trial,
                         initial_seed_point_set1, refmask_trial_matched,
                         initial_seed_point_set2)) {
         std::cerr << "Failed matching step" << std::endl;
@@ -189,18 +189,18 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     }
     
     // IV. Save trial information
-    saveTrialInfo(trial, stereopair, cam_first.size());
+    saveTrialInfo(trial, stereopair, static_cast<int>(frames.cam_first_filtered.size()));
     
     // V. Tracking camera 1
     std::cout << "\nPerforming tracking camera 1..." << std::endl;
-    if (!performTracking1(cam_first, refmask_trial, initial_seed_point_set1)) {
+    if (!performTracking1(frames.cam_first_filtered, refmask_trial, initial_seed_point_set1)) {
         std::cerr << "Failed tracking1 step" << std::endl;
         return {"", {}, false};
     }
     
     // VI. Tracking camera 2
     std::cout << "\nPerforming tracking camera 2..." << std::endl;
-    if (!performTracking2(cam_second, refmask_trial_matched, initial_seed_point_set2)) {
+    if (!performTracking2(frames.cam_second_filtered, refmask_trial_matched, initial_seed_point_set2)) {
         std::cerr << "Failed tracking2 step" << std::endl;
         return {"", {}, false};
     }
@@ -224,9 +224,9 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     return {base_params_.outputPath, pairOrder, pairForced};
 }
 
-void StepDWorkflow::setupBaseParameters(const std::string& trial,
-                                       int stereopair,
-                                       const std::string& reftrial) {
+void Dic2DWorkflow::setupBaseParameters(const std::string& trial,
+                                        int stereopair,
+                                        const std::string& reftrial) {
     base_params_.baseDataPath = config_.data_path;
     base_params_.baseResultPath = config_.dic_path;
     base_params_.subject = config_.subject_id;
@@ -263,7 +263,7 @@ void StepDWorkflow::setupBaseParameters(const std::string& trial,
     base_params_.seedfile = Utils::buildSeedFilePath(base_params_, reftrial, stereopair);
 }
 
-void StepDWorkflow::setupStepParameters() {
+void Dic2DWorkflow::setupStepParameters() {
     // Setup tracking parameters (camera 1) — defaults from DICConstants,
     // then override with config values from dic_params.txt (step_d_* keys)
     step1_params_.type = config_.step_d.analysis_type;
@@ -287,7 +287,7 @@ void StepDWorkflow::setupStepParameters() {
     step1_2_params_.cutoff_diffnorm = config_.step_e.cutoff_diffnorm;
 }
 
-bool StepDWorkflow::loadProtocol() {
+bool Dic2DWorkflow::loadProtocol() {
     // Load protocol MAT file
     std::string protocol_dir = Utils::buildProtocolDir(config_, true, true, true, true);
     std::cout << "protocol_path: " << protocol_dir << std::endl;
@@ -346,7 +346,7 @@ bool StepDWorkflow::loadProtocol() {
     return true;
 }
 
-std::string StepDWorkflow::determineReferenceTrial(const std::string& trial) {
+std::string Dic2DWorkflow::determineReferenceTrial(const std::string& trial) {
     // Manual override from config
     if (config_.ref_trial_id > 0) {
         std::ostringstream oss;
@@ -397,79 +397,31 @@ std::string StepDWorkflow::determineReferenceTrial(const std::string& trial) {
     return trial;
 }
 
-bool StepDWorkflow::importVideoFrames(const std::string& trial,
-                                     int stereopair,
-                                     std::vector<cv::Mat>& cam_first_raw,
-                                     std::vector<cv::Mat>& cam_second_raw) {
-    // Use Utils::importVid to get frame paths
-    std::vector<std::string> cam1_frames, cam2_frames;
-    
-    // Convert trial string to integer for Utils::importVid
-    int trial_num = std::stoi(trial);
-    
-    // Import video frames using Utils
-    if (!Utils::importVid(config_, trial_num, stereopair, cam1_frames, cam2_frames)) {
-        std::cerr << "Failed to import video frames for trial " << trial 
-                  << " stereopair " << stereopair << std::endl;
-        return false;
-    }
-    
-    // Check that we got frames
-    if (cam1_frames.empty() || cam2_frames.empty()) {
-        std::cerr << "No frames imported for trial " << trial 
-                  << " stereopair " << stereopair << std::endl;
-        return false;
-    }
-    
-    // Check frame count consistency
-    if (cam1_frames.size() != cam2_frames.size()) {
-        std::cerr << "Frame count mismatch: cam1=" << cam1_frames.size() 
-                  << " cam2=" << cam2_frames.size() << std::endl;
-        return false;
-    }
-    
-    // Load frames into cv::Mat vectors
-    cam_first_raw.clear();
-    cam_second_raw.clear();
-    cam_first_raw.reserve(cam1_frames.size());
-    cam_second_raw.reserve(cam2_frames.size());
-    
-    for (size_t i = 0; i < cam1_frames.size(); ++i) {
-        // Load first camera frame
-        cv::Mat img1 = cv::imread(cam1_frames[i], cv::IMREAD_GRAYSCALE);
-        if (img1.empty()) {
-            std::cerr << "Failed to load frame: " << cam1_frames[i] << std::endl;
-            return false;
-        }
-        
-        // Load second camera frame
-        cv::Mat img2 = cv::imread(cam2_frames[i], cv::IMREAD_GRAYSCALE);
-        if (img2.empty()) {
-            std::cerr << "Failed to load frame: " << cam2_frames[i] << std::endl;
-            return false;
-        }
-        
-        cam_first_raw.push_back(img1);
-        cam_second_raw.push_back(img2);
-    }
-    
-    std::cout << "Loaded " << cam_first_raw.size() << " frames for each camera" << std::endl;
-    return true;
+bool Dic2DWorkflow::importVideoFrames(const std::string& trial,
+                                      int stereopair,
+                                      std::vector<cv::Mat>& cam_first_raw,
+                                      std::vector<cv::Mat>& cam_second_raw) {
+    return pipeline::Dic2DFramePreparer(config_).importVideoFrames(
+        trial, stereopair, cam_first_raw, cam_second_raw);
 }
 
-void StepDWorkflow::performSaturation(const std::vector<cv::Mat>& cam_first_raw,
-                                     const std::vector<cv::Mat>& cam_second_raw,
-                                     std::vector<cv::Mat>& cam_first_satur,
-                                     std::vector<cv::Mat>& cam_second_satur) {
-    cam_first_satur = ImageProcessor::saturate(cam_first_raw, base_params_.limit_grayscale);
-    cam_second_satur = ImageProcessor::saturate(cam_second_raw, base_params_.limit_grayscale);
+void Dic2DWorkflow::performSaturation(const std::vector<cv::Mat>& cam_first_raw,
+                                      const std::vector<cv::Mat>& cam_second_raw,
+                                      std::vector<cv::Mat>& cam_first_satur,
+                                      std::vector<cv::Mat>& cam_second_satur) {
+    pipeline::Dic2DFramePreparer(config_).performSaturation(
+        cam_first_raw,
+        cam_second_raw,
+        base_params_.limit_grayscale,
+        cam_first_satur,
+        cam_second_satur);
 }
 
-bool StepDWorkflow::initializeROIAndSeed(const std::vector<cv::Mat>& cam_first_satur,
-                                        cv::Mat& refmask_REF,
-                                        cv::Mat& refmask_trial,
-                                        SeedPoint& ref_seed_point,
-                                        SeedPoint& after_disp_seed_point) {
+bool Dic2DWorkflow::initializeROIAndSeed(const std::vector<cv::Mat>& cam_first_satur,
+                                         cv::Mat& refmask_REF,
+                                         cv::Mat& refmask_trial,
+                                         SeedPoint& ref_seed_point,
+                                         SeedPoint& after_disp_seed_point) {
     std::vector<cv::Mat> reftrial_cam_first_raw;
 
     // Load or create ROI
@@ -549,14 +501,14 @@ bool StepDWorkflow::initializeROIAndSeed(const std::vector<cv::Mat>& cam_first_s
     return false;
 }
 
-bool StepDWorkflow::matchingInitialFrame(const std::vector<cv::Mat>& cam_ref,
-                                   const std::vector<cv::Mat>& cam_cur,
-                                   const cv::Mat& refmask_ref,
-                                   const std::string ncorr_matching_path,
-                                   const std::string message,
-                                   const SeedPoint& ref_seed_point,
-                                   cv::Mat& refmask_cur_matched,
-                                   SeedPoint& after_disp_seed_point) {
+bool Dic2DWorkflow::matchingInitialFrame(const std::vector<cv::Mat>& cam_ref,
+                                         const std::vector<cv::Mat>& cam_cur,
+                                         const cv::Mat& refmask_ref,
+                                         const std::string ncorr_matching_path,
+                                         const std::string message,
+                                         const SeedPoint& ref_seed_point,
+                                         cv::Mat& refmask_cur_matched,
+                                         SeedPoint& after_disp_seed_point) {
     std::cout << message << std::endl;
     
     // MATLAB uses a two-frame current stack during matching to avoid an ncorr edge case.
@@ -586,12 +538,12 @@ bool StepDWorkflow::matchingInitialFrame(const std::vector<cv::Mat>& cam_ref,
     return true;
 }
 
-bool StepDWorkflow::performMatching(const std::vector<cv::Mat>& cam_first_satur,
-                                   const std::vector<cv::Mat>& cam_second_satur,
-                                   cv::Mat& refmask,
-                                   SeedPoint& ref_seed_point,
-                                   cv::Mat& after_disp_mask,
-                                   SeedPoint& after_disp_seed_point) {
+bool Dic2DWorkflow::performMatching(const std::vector<cv::Mat>& cam_first_satur,
+                                    const std::vector<cv::Mat>& cam_second_satur,
+                                    cv::Mat& refmask,
+                                    SeedPoint& ref_seed_point,
+                                    cv::Mat& after_disp_mask,
+                                    SeedPoint& after_disp_seed_point) {
     std::cout << "MATCHING STEP - RUN #1" << std::endl;
     
     // Get camera numbers
@@ -649,10 +601,10 @@ bool StepDWorkflow::performMatching(const std::vector<cv::Mat>& cam_first_satur,
     return false;
 }
 
-bool StepDWorkflow::performTracking(const int tracking_number,
-                         const std::vector<cv::Mat>& cam_frames,
-                         const cv::Mat& refmask,
-                         const SeedPoint& initial_seed_point) {
+bool Dic2DWorkflow::performTracking(const int tracking_number,
+                                    const std::vector<cv::Mat>& cam_frames,
+                                    const cv::Mat& refmask,
+                                    const SeedPoint& initial_seed_point) {
     // Get actual camera number for this pair
     int cam_1, cam_2;
     Utils::getCamerasForPair(base_params_.stereopair, cam_1, cam_2);
@@ -698,40 +650,34 @@ bool StepDWorkflow::performTracking(const int tracking_number,
     return true;
 }
 
-bool StepDWorkflow::performTracking1(const std::vector<cv::Mat>& cam_first,
-                                    const cv::Mat& refmask_trial,
-                                    const SeedPoint& initial_seed_point_set1) {
+bool Dic2DWorkflow::performTracking1(const std::vector<cv::Mat>& cam_first,
+                                     const cv::Mat& refmask_trial,
+                                     const SeedPoint& initial_seed_point_set1) {
     std::cout << "Performing tracking camera 1..." << initial_seed_point_set1.pw[0] << "," << initial_seed_point_set1.pw[1] << std::endl;
     return performTracking(1, cam_first, refmask_trial, initial_seed_point_set1);
 }
 
-bool StepDWorkflow::performTracking2(const std::vector<cv::Mat>& cam_second,
-                                    const cv::Mat& refmask_trial_matched,
-                                    const SeedPoint& initial_seed_point_set2) {
+bool Dic2DWorkflow::performTracking2(const std::vector<cv::Mat>& cam_second,
+                                     const cv::Mat& refmask_trial_matched,
+                                     const SeedPoint& initial_seed_point_set2) {
     std::cout << "Performing tracking camera 2..." << initial_seed_point_set2.pw[0] << "," << initial_seed_point_set2.pw[1] << std::endl;
     return performTracking(2, cam_second, refmask_trial_matched, initial_seed_point_set2);
 }
 
-void StepDWorkflow::applyImageFiltering(const std::vector<cv::Mat>& cam_first_satur,
-                                       const std::vector<cv::Mat>& cam_second_satur,
-                                       const cv::Mat& refmask_trial,
-                                       std::vector<cv::Mat>& cam_first,
-                                       std::vector<cv::Mat>& cam_second) {
-    // Apply Ben's filtering
-    std::vector<int> param_filt = {25, 300};
-    
-    auto [filtered_first, gs_bounds] = ImageProcessor::filterLikeBen(
-        cam_first_satur, refmask_trial, param_filt, nullptr);
-    
-    // Use same boundaries for second camera
-    auto [filtered_second, _] = ImageProcessor::filterLikeBen(
-        cam_second_satur, refmask_trial, param_filt, &gs_bounds);
-    
-    cam_first = filtered_first;
-    cam_second = filtered_second;
+void Dic2DWorkflow::applyImageFiltering(const std::vector<cv::Mat>& cam_first_satur,
+                                        const std::vector<cv::Mat>& cam_second_satur,
+                                        const cv::Mat& refmask_trial,
+                                        std::vector<cv::Mat>& cam_first,
+                                        std::vector<cv::Mat>& cam_second) {
+    pipeline::Dic2DFramePreparer(config_).applyImageFiltering(
+        cam_first_satur,
+        cam_second_satur,
+        refmask_trial,
+        cam_first,
+        cam_second);
 }
 
-void StepDWorkflow::saveTrialInfo(const std::string& trial, int stereopair, int num_frames) {
+void Dic2DWorkflow::saveTrialInfo(const std::string& trial, int stereopair, int num_frames) {
     (void)trial;
     std::string filename = base_params_.outputPath + "/dic_info_data_target_pair" +
         std::to_string(stereopair) + ".mat";
@@ -748,271 +694,16 @@ void StepDWorkflow::saveTrialInfo(const std::string& trial, int stereopair, int 
     MatWriter::writeTrialInfoFile(filename, actual_fps, idxframe);
 }
 
-void StepDWorkflow::formatOutput(const std::string& trial,
-                                int stereopair,
-                                const std::vector<int>& pairOrder,
-                                bool pairForced) {
+void Dic2DWorkflow::formatOutput(const std::string& trial,
+                                 int stereopair,
+                                 const std::vector<int>& pairOrder,
+                                 bool pairForced) {
     (void)trial;
-    std::cout << "Formatting output files (step2_dic_finish equivalent)..." << std::endl;
-    
-    int cam_1, cam_2;
-    Utils::getCamerasForPair(stereopair, cam_1, cam_2);
-    
-    // ncorr outputs live directly in the output directory as .bin (ncorr native format)
-    std::string ncorr1_bin = base_params_.outputPath + "/ncorr" + std::to_string(cam_1) + ".bin";
-    std::string ncorr2_bin = base_params_.outputPath + "/ncorr" + std::to_string(cam_2) + ".bin";
-    std::string ncorr12_bin = base_params_.outputPath + "/ncorr" + std::to_string(cam_1) + std::to_string(cam_2) + ".bin";
-    
-    if (!std::filesystem::exists(ncorr1_bin) || !std::filesystem::exists(ncorr2_bin) || !std::filesystem::exists(ncorr12_bin)) {
-        std::cerr << "Warning: cached ncorr result files not found" << std::endl;
-        if (!std::filesystem::exists(ncorr1_bin)) std::cerr << "  Missing: " << ncorr1_bin << std::endl;
-        if (!std::filesystem::exists(ncorr2_bin)) std::cerr << "  Missing: " << ncorr2_bin << std::endl;
-        if (!std::filesystem::exists(ncorr12_bin)) std::cerr << "  Missing: " << ncorr12_bin << std::endl;
-        return;
-    }
-    
-    auto d_serializer = cppxdic::DataSerializer::create(config_.data_format);
-    std::string output_file = base_params_.outputPath + "/myDIC2DpairResults_C_" + 
-        std::to_string(cam_1) + "_C_" + std::to_string(cam_2) + d_serializer->extension();
-    
-    if (std::filesystem::exists(output_file)) {
-        std::cout << "Checkpoint found: " << output_file << std::endl;
-        return;
-    }
-    
-    std::cout << "  Loading cached DIC outputs..." << std::endl;
-    ncorr::DIC_analysis_output dic1 = ncorr::DIC_analysis_output::load(ncorr1_bin);
-    ncorr::DIC_analysis_output dic2 = ncorr::DIC_analysis_output::load(ncorr2_bin);
-    ncorr::DIC_analysis_output dic12 = ncorr::DIC_analysis_output::load(ncorr12_bin);
-    
-    if (dic1.disps.empty() || dic2.disps.empty() || dic12.disps.empty()) {
-        std::cerr << "Error: DIC outputs are empty" << std::endl;
-        return;
-    }
-
-    // Apply replacebadcorr if enabled (MATLAB step2_dic_finish equivalent)
-    // This replaces badly correlated subsets with spatiotemporally filtered values
-    if (config_.step_d_replacebadcorr) {
-        std::cout << "  Applying replacebadcorr (MATLAB step2_dic_finish)..." << std::endl;
-        cppxdic::matlab_replacebadcorr(dic1);
-        cppxdic::matlab_replacebadcorr(dic2);
-        cppxdic::matlab_replacebadcorr(dic12);
-    }
-
-    const size_t n_frames_cam1 = dic1.disps.size();
-    const size_t n_frames_cam2 = dic2.disps.size();
-    const int Factor = dic1.disps[0].get_scalefactor(); // MATLAB: spacing + 1
-    const double nan = std::numeric_limits<double>::quiet_NaN();
-
-    std::cout << "  Processing " << n_frames_cam1 << " cam1 frames, "
-              << n_frames_cam2 << " cam2 frames, Factor=" << Factor << std::endl;
-    if (n_frames_cam2 + 1 != n_frames_cam1) {
-        std::cout << "  Warning: cam2 tracking count differs from MATLAB expectation "
-                  << "(expected " << (n_frames_cam1 - 1) << ", got " << n_frames_cam2 << ")" << std::endl;
-    }
-
-    DIC2DPairResults results;
-    results.nCamRef = cam_1;
-    results.nCamDef = cam_2;
-    results.nImages = static_cast<int>(n_frames_cam1);
-    results.pairOrder = pairOrder;
-    results.pairForced = pairForced;
-    results.ncorrInfo.cutoff_corrcoef = {
-        config_.ncorr_cutoff_corrcoef,
-        config_.ncorr_cutoff_corrcoef,
-        config_.ncorr_cutoff_corrcoef
-    };
-    results.ncorrInfo.cutoff_diffnorm = step1_params_.cutoff_diffnorm;
-    results.ncorrInfo.cutoff_iteration = step1_params_.cutoff_iteration;
-    results.ncorrInfo.imgcorr = {"reference", "current"};
-    results.ncorrInfo.lenscoef = 0;
-    results.ncorrInfo.pixtounits = config_.units_per_pixel;
-    results.ncorrInfo.radius = step1_params_.radius;
-    results.ncorrInfo.spacing = step1_params_.spacing;
-    results.ncorrInfo.stepanalysis.enabled = step1_params_.stepanalysis_params.enabled;
-    results.ncorrInfo.stepanalysis.type = step1_params_.stepanalysis_params.type;
-    results.ncorrInfo.stepanalysis.auto_update = step1_params_.stepanalysis_params.auto_update;
-    results.ncorrInfo.stepanalysis.step = step1_params_.stepanalysis_params.step;
-    results.ncorrInfo.subsettrunc = false;
-    results.ncorrInfo.total_threads = step1_params_.total_threads;
-    results.ncorrInfo.type = step1_params_.type;
-    results.ncorrInfo.units = "pixels";
-    
-    const auto& roi1 = dic1.disps[0].get_roi();
-    const auto& roi_mask = roi1.get_mask();
-    results.ROImask = cv::Mat(roi_mask.height(), roi_mask.width(), CV_8U);
-    std::vector<std::pair<int, int>> roi_coords;
-    std::vector<cv::Point2d> Pref;
-
-    for (int y = 0; y < roi_mask.height(); ++y) {
-        for (int x = 0; x < roi_mask.width(); ++x) {
-            results.ROImask.at<uint8_t>(y, x) = roi_mask(y, x) ? 255 : 0;
-            if (roi_mask(y, x)) {
-                roi_coords.emplace_back(y, x);
-                Pref.emplace_back(static_cast<double>(x * Factor + 1),
-                                  static_cast<double>(y * Factor + 1));
-            }
-        }
-    }
-    std::cout << "  Reference points: " << Pref.size() << std::endl;
-
-    const size_t n_total_frames = n_frames_cam1 + 1 + n_frames_cam2;
-    results.Points.resize(n_total_frames);
-    results.CorCoeffVec.resize(n_total_frames);
-
-    auto fillDirectFrame = [&](const ncorr::Disp2D& disp, size_t out_idx) {
-        const auto& u_array = disp.get_u().get_array();
-        const auto& v_array = disp.get_v().get_array();
-        const auto& cc_array = disp.get_cc().get_array();
-
-        Points2D pts2d;
-        pts2d.x.reserve(Pref.size());
-        pts2d.y.reserve(Pref.size());
-        std::vector<double> corrcoef;
-        corrcoef.reserve(Pref.size());
-
-        for (size_t idx = 0; idx < roi_coords.size(); ++idx) {
-            const auto [y, x] = roi_coords[idx];
-            double u = u_array(y, x);
-            double v = v_array(y, x);
-            double cc = cc_array(y, x);
-
-            if (u == 0.0) u = nan;
-            if (v == 0.0) v = nan;
-            if (cc == 0.0) cc = nan;
-
-            pts2d.x.push_back(std::isnan(u) ? nan : (Pref[idx].x + u));
-            pts2d.y.push_back(std::isnan(v) ? nan : (Pref[idx].y + v));
-            corrcoef.push_back(cc);
-        }
-
-        results.Points[out_idx] = std::move(pts2d);
-        results.CorCoeffVec[out_idx] = std::move(corrcoef);
-    };
-
-    std::cout << "  Processing cam1 frames..." << std::endl;
-    for (size_t ii = 0; ii < n_frames_cam1; ++ii) {
-        fillDirectFrame(dic1.disps[ii], ii);
-    }
-
-    std::cout << "  Processing inter-camera matching frame..." << std::endl;
-    fillDirectFrame(dic12.disps.front(), n_frames_cam1);
-
-    const auto& disp12_ref = dic12.disps.front();
-    const auto& u12_full = disp12_ref.get_u().get_array();
-    const auto& v12_full = disp12_ref.get_v().get_array();
-
-    std::cout << "  Processing cam2 frames (mapped through matching)..." << std::endl;
-    for (size_t ii = 0; ii < n_frames_cam2; ++ii) {
-        const auto& disp2 = dic2.disps[ii];
-        const auto& u2_array = disp2.get_u().get_array();
-        const auto& v2_array = disp2.get_v().get_array();
-        const auto& cc2_array = disp2.get_cc().get_array();
-        const int H2 = disp2.get_u().data_height();
-        const int W2 = disp2.get_u().data_width();
-
-        auto interpolateWeighted = [&](const auto& arr, double rx, double ry) -> double {
-            const int x0 = static_cast<int>(std::floor(rx));
-            const int y0 = static_cast<int>(std::floor(ry));
-            const int x1 = x0 + 1;
-            const int y1 = y0 + 1;
-
-            double numerator = 0.0;
-            double denominator = 0.0;
-            const std::array<std::pair<int, int>, 4> samples = {{
-                {x0, y0}, {x1, y0}, {x0, y1}, {x1, y1}
-            }};
-
-            for (const auto& [sx, sy] : samples) {
-                if (sx < 0 || sy < 0 || sx >= W2 || sy >= H2) {
-                    continue;
-                }
-                const double value = arr(sy, sx);
-                if (value == 0.0) {
-                    continue;
-                }
-                const double dx = rx - static_cast<double>(sx);
-                const double dy = ry - static_cast<double>(sy);
-                const double dist = std::sqrt(dx * dx + dy * dy);
-                const double weight = dist < 1e-12 ? 1e12 : 1.0 / dist;
-                numerator += value * weight;
-                denominator += weight;
-            }
-
-            if (denominator > 0.0) {
-                return numerator / denominator;
-            }
-
-            const int cx = std::clamp(static_cast<int>(std::round(rx)), 0, W2 - 1);
-            const int cy = std::clamp(static_cast<int>(std::round(ry)), 0, H2 - 1);
-            const double fallback = arr(cy, cx);
-            return fallback == 0.0 ? nan : fallback;
-        };
-
-        Points2D pts2d;
-        pts2d.x.reserve(Pref.size());
-        pts2d.y.reserve(Pref.size());
-        std::vector<double> corrcoef;
-        corrcoef.reserve(Pref.size());
-
-        for (size_t idx = 0; idx < roi_coords.size(); ++idx) {
-            const auto [y, x] = roi_coords[idx];
-            const double u12 = u12_full(y, x);
-            const double v12 = v12_full(y, x);
-            double cc = cc2_array(y, x);
-            if (cc == 0.0) {
-                cc = nan;
-            }
-            corrcoef.push_back(cc);
-
-            if (u12 == 0.0 && v12 == 0.0) {
-                pts2d.x.push_back(nan);
-                pts2d.y.push_back(nan);
-                continue;
-            }
-
-            const double cam2_rx = static_cast<double>(x) + u12 / static_cast<double>(Factor);
-            const double cam2_ry = static_cast<double>(y) + v12 / static_cast<double>(Factor);
-            const double u2_mapped = interpolateWeighted(u2_array, cam2_rx, cam2_ry);
-            const double v2_mapped = interpolateWeighted(v2_array, cam2_rx, cam2_ry);
-
-            if (std::isnan(u2_mapped) || std::isnan(v2_mapped)) {
-                pts2d.x.push_back(nan);
-                pts2d.y.push_back(nan);
-                continue;
-            }
-
-            pts2d.x.push_back(Pref[idx].x + u12 + u2_mapped);
-            pts2d.y.push_back(Pref[idx].y + v12 + v2_mapped);
-        }
-
-        results.Points[n_frames_cam1 + 1 + ii] = std::move(pts2d);
-        results.CorCoeffVec[n_frames_cam1 + 1 + ii] = std::move(corrcoef);
-    }
-    
-    std::cout << "  Creating Delaunay triangulation..." << std::endl;
-    std::vector<cv::Point2f> pref_float;
-    pref_float.reserve(Pref.size());
-    for (const auto& p : Pref) {
-        pref_float.emplace_back(static_cast<float>(p.x), static_cast<float>(p.y));
-    }
-    results.Faces = DelaunayTriangulation::compute(pref_float);
-    double max_edge = 1.1 * std::sqrt(2.0) * Factor;
-    results.Faces = DelaunayTriangulation::filterByEdgeLength(results.Faces, pref_float, max_edge);
-    results.Faces = DelaunayTriangulation::flipOrientation(results.Faces);
-    std::cout << "  Triangles: " << (results.Faces.size() / 3) << std::endl;
-    
-    results.FaceColors.resize(results.Faces.size() / 3, 128.0);
-    
-    std::cout << "  Writing results..." << std::endl;
-    if (d_serializer->saveDIC2DPairResults(output_file, results)) {
-        std::cout << "Output formatting complete: " << output_file << std::endl;
-    } else {
-        std::cerr << "Failed to write DIC2DPairResults" << std::endl;
-    }
+    pipeline::Dic2DOutputFormatter(config_, base_params_, step1_params_)
+        .format(stereopair, pairOrder, pairForced);
 }
 
-bool StepDWorkflow::updateMaskAndSeedFromOutput(const cv::Mat& input_mask,
+bool Dic2DWorkflow::updateMaskAndSeedFromOutput(const cv::Mat& input_mask,
                                                 const SeedPoint& input_seed,
                                                 const ncorr::DIC_analysis_output& dic_output,
                                                 cv::Mat& output_mask,
@@ -1053,7 +744,7 @@ bool StepDWorkflow::updateMaskAndSeedFromOutput(const cv::Mat& input_mask,
     return true;
 }
 
-void StepDWorkflow::writeNcorrMatSidecar(const std::string& output_path,
+void Dic2DWorkflow::writeNcorrMatSidecar(const std::string& output_path,
                                          const cv::Mat& ref_img,
                                          const std::vector<cv::Mat>& cur_imgs,
                                          const cv::Mat& roi_mask,
@@ -1091,7 +782,7 @@ void StepDWorkflow::writeNcorrMatSidecar(const std::string& output_path,
     }
 }
 
-void StepDWorkflow::writeMatchingDebugPanel(const std::string& stage_name,
+void Dic2DWorkflow::writeMatchingDebugPanel(const std::string& stage_name,
                                             const cv::Mat& ref_img,
                                             const cv::Mat& cur_img,
                                             const cv::Mat& mask_before,
@@ -1160,7 +851,7 @@ void StepDWorkflow::writeMatchingDebugPanel(const std::string& stage_name,
     cv::imwrite(debug_file.string(), panel);
 }
 
-ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
+ncorr::DIC_analysis_output Dic2DWorkflow::runNcorrAnalysis(
     const cv::Mat& ref_img,
     const std::vector<cv::Mat>& cur_imgs,
     const cv::Mat& roi_mask,
