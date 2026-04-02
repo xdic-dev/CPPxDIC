@@ -8,6 +8,8 @@
 #include "Array2D.h"
 #include "mat_writer.h"
 #include "mat_reader.h"
+#include "cppxdic/pipeline/dic2d_ncorr_runner.h"
+#include "cppxdic/pipeline/dic2d_tracking_service.h"
 #include "ncorr.h"
 #include "utils.h"
 #include <iostream>
@@ -605,49 +607,11 @@ bool Dic2DWorkflow::performTracking(const int tracking_number,
                                     const std::vector<cv::Mat>& cam_frames,
                                     const cv::Mat& refmask,
                                     const SeedPoint& initial_seed_point) {
-    // Get actual camera number for this pair
-    int cam_1, cam_2;
-    Utils::getCamerasForPair(base_params_.stereopair, cam_1, cam_2);
-
-    auto cam_number = tracking_number == 1 ? cam_1 : cam_2;
-
-    std::cout << "\nTRACKING STEP " << tracking_number << std::endl;
-    
-    std::string output_path = base_params_.outputPath + "/ncorr" + std::to_string(cam_number) + ".bin";
-    
-    // Checkpoint: Check if ncorr binary already exists
-    if (std::filesystem::exists(output_path)) {
-        std::cout << "Checkpoint found: " << output_path << std::endl;
-        std::cout << "--> STEP: Ncorr " << cam_number << " loaded from checkpoint (skipped computation)" << std::endl;
-        return true;
-    }
-    
-    auto step_params_ = step2_params_;
-    if (tracking_number == 1) {
-        step_params_ = step1_params_;
-    } else {
-        step_params_ = step2_params_;
-    }
-    step_params_.initial_seed = {
-        static_cast<int>(initial_seed_point.pw[0]),
-        static_cast<int>(initial_seed_point.pw[1])
-    };
-
-    std::vector<cv::Mat> cur_frames = cam_frames;
-    if (tracking_number == 2 && !cur_frames.empty()) {
-        cur_frames.erase(cur_frames.begin());
-    }
-    if (cur_frames.empty()) {
-        std::cerr << "No current frames available for tracking " << tracking_number << std::endl;
-        return false;
-    }
-    
-    runNcorrAnalysis(cam_frames[0], cur_frames, refmask,
-                     initial_seed_point, step_params_,
-                     output_path, config_.parallel_processing, true);
-    
-    std::cout << "--> STEP: Ncorr " << cam_number << " done and saved to " << output_path << std::endl;
-    return true;
+    pipeline::Dic2DNcorrRunner ncorr_runner(config_, base_params_);
+    pipeline::Dic2DTrackingService tracking_service(
+        config_, base_params_, step1_params_, step2_params_, ncorr_runner);
+    return tracking_service.trackCamera(
+        tracking_number, cam_frames, refmask, initial_seed_point);
 }
 
 bool Dic2DWorkflow::performTracking1(const std::vector<cv::Mat>& cam_first,
@@ -744,44 +708,6 @@ bool Dic2DWorkflow::updateMaskAndSeedFromOutput(const cv::Mat& input_mask,
     return true;
 }
 
-void Dic2DWorkflow::writeNcorrMatSidecar(const std::string& output_path,
-                                         const cv::Mat& ref_img,
-                                         const std::vector<cv::Mat>& cur_imgs,
-                                         const cv::Mat& roi_mask,
-                                         const StepParameters& step_params,
-                                         const ncorr::DIC_analysis_output& dic_output) const {
-    if (cur_imgs.empty()) {
-        return;
-    }
-
-    const std::filesystem::path mat_path = std::filesystem::path(output_path).replace_extension(".mat");
-    std::vector<cv::Mat> cur_rois(cur_imgs.size(), roi_mask.clone());
-    std::vector<ncorr::DIC_analysis_output> dic_outputs = {dic_output};
-
-    std::map<std::string, double> dispinfo = {
-        {"cutoff_corrcoef", config_.ncorr_cutoff_corrcoef},
-        {"cutoff_diffnorm", step_params.cutoff_diffnorm},
-        {"cutoff_iteration", static_cast<double>(step_params.cutoff_iteration)},
-        {"lenscoef", 0.0},
-        {"pixtounits", config_.units_per_pixel},
-        {"radius", static_cast<double>(step_params.radius)},
-        {"spacing", static_cast<double>(step_params.spacing)},
-        {"subsettrunc", 0.0},
-        {"total_threads", static_cast<double>(step_params.total_threads)}
-    };
-
-    if (!MatWriter::writeMultiFrameNcorrFile(mat_path.string(),
-                                             ref_img,
-                                             cur_imgs,
-                                             roi_mask,
-                                             cur_rois,
-                                             dic_outputs,
-                                             dispinfo)) {
-        std::cerr << "  Warning: failed to write ncorr MAT sidecar: "
-                  << mat_path << std::endl;
-    }
-}
-
 void Dic2DWorkflow::writeMatchingDebugPanel(const std::string& stage_name,
                                             const cv::Mat& ref_img,
                                             const cv::Mat& cur_img,
@@ -861,126 +787,15 @@ ncorr::DIC_analysis_output Dic2DWorkflow::runNcorrAnalysis(
     const bool go_parallel,
     const bool use_no_update) {
     
-    std::cout << "Running ncorr DIC analysis..." << std::endl;
-    std::cout << "  Radius: " << step_params.radius << ", Spacing: " << step_params.spacing << std::endl;
-    std::cout << "  Scalefactor: " << (step_params.spacing + 1) << " (spacing + 1)" << std::endl;
-    std::cout << "  Seed: (" << seed_point.pw[0] << ", " << seed_point.pw[1] << ")" << std::endl;
-    
-    // Convert images to ncorr Image2D format
-    // ncorr::Image2D expects file paths, so we need to save cv::Mat as temporary files
-    std::vector<ncorr::Image2D> ncorr_images;
-    std::vector<std::string> temp_image_paths;
-    
-    // Create temporary directory for images
-    std::string temp_dir = base_params_.outputPath + "/tmp_ncorr_images";
-    std::filesystem::create_directories(temp_dir);
-    
-    // Save reference image
-    std::string ref_path = temp_dir + "/ref.png";
-    cv::imwrite(ref_path, ref_img);
-    ncorr_images.emplace_back(ref_path);
-    temp_image_paths.push_back(ref_path);
-    
-    // Save current images
-    for (unsigned int i = 0; i < cur_imgs.size(); ++i) {
-        std::ostringstream oss;
-        oss << temp_dir << "/cur_" << std::setw(4) << std::setfill('0') << i << ".png";
-        std::string cur_path = oss.str();
-        cv::imwrite(cur_path, cur_imgs[i]);
-        ncorr_images.emplace_back(cur_path);
-        temp_image_paths.push_back(cur_path);
-    }
-    
-    // Convert ROI mask
-    ncorr::ROI2D roi = ROIManager::matToNcorrROI(roi_mask);
-
-    cv::imwrite(temp_dir + "/roi_mask.png", get_cv_img(roi.get_mask(), 0, 255));
-    
-    // Setup DIC input
-    // Note: scalefactor = spacing + 1 (this is how ncorr downsamples the displacement field)
-    int scalefactor = step_params.spacing + 1;
-    
-    ncorr::DIC_analysis_input dic_input(
-        ncorr_images,
-        roi,
-        scalefactor,
-        ncorr::INTERP::QUINTIC_BSPLINE_PRECOMPUTE,
-        ncorr::SUBREGION::CIRCLE,
-        step_params.radius,
-        step_params.total_threads,
-        use_no_update ? ncorr::DIC_analysis_config::NO_UPDATE : ncorr::DIC_analysis_config::KEEP_MOST_POINTS,
-        config_.debug_mode
-    );
-    
-    // Run DIC analysis (returns Lagrangian perspective in pixels)
-    ncorr::DIC_analysis_output dic_output_raw;
-    
-    if (go_parallel) {
-        std::cout << "  Using parallel DIC processing..." << std::endl;
-        
-        // Create seed parameters from the seed point
-        std::vector<ncorr::SeedParams> seeds;
-        seeds.push_back(ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1]));
-        
-        // Create parallel input structure
-        ncorr::DIC_analysis_parallel_input dic_parallel_input(dic_input, seeds);
-        
-        // Run parallel DIC analysis
-        dic_output_raw = ncorr::matlab_DIC_analysis_parallel(dic_parallel_input);
-    } else {
-        std::cout << "  Using Matlab-style sequential DIC processing..." << std::endl;
-        dic_output_raw = ncorr::matlab_DIC_analysis_sequential(
-            dic_input,
-            {ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1])},
-            false
-        );
-    }
-    
-    // Post-process with both perspectives
-    std::cout << "Post-processing displacements..." << std::endl;
-    
-    // Step 1: Convert to Eulerian perspective with sign inversion (still in pixels)
-    ncorr::DIC_analysis_output dic_eulerian_pixels = ncorr::change_perspective_with_inversion(
-        dic_output_raw, 
-        ncorr::INTERP::CUBIC_KEYS  // Use cubic interpolation for perspective change
-    );
-    
-    // Step 3: Apply units to BOTH perspectives
-    ncorr::DIC_analysis_output dic_lagrangian = ncorr::set_units(dic_output_raw, "mm", config_.units_per_pixel);
-    ncorr::DIC_analysis_output dic_eulerian = ncorr::set_units(dic_eulerian_pixels, "mm", config_.units_per_pixel);
-    
-    std::cout << "  Created both Lagrangian and Eulerian perspectives" << std::endl;
-    
-    // Save debug videos if debug mode is enabled
-    if (config_.debug_mode) {
-        std::string video_dir = std::filesystem::path(output_path).parent_path().string() + "/debug_video/";
-        std::filesystem::create_directories(video_dir);
-        std::string base_name = std::filesystem::path(output_path).stem().string();
-        double alpha = config_.video_alpha;
-        double fps = static_cast<double>(config_.video_fps);
-        
-        std::cout << "  Saving debug DIC videos to " << video_dir << std::endl;
-        try {
-            ncorr::save_DIC_video(video_dir + base_name + "_v_eulerian.avi",
-                           dic_input, dic_eulerian, ncorr::DISP::V, alpha, fps);
-            ncorr::save_DIC_video(video_dir + base_name + "_u_eulerian.avi",
-                           dic_input, dic_eulerian, ncorr::DISP::U, alpha, fps);
-            std::cout << "  ✓ Debug DIC videos saved" << std::endl;
-        } catch (const std::exception& e) {
-            std::cerr << "  Warning: Failed to save debug videos: " << e.what() << std::endl;
-        }
-    }
-    
-    // Save ncorr output directly as binary (ncorr's native format)
-    // output_path already has .bin extension
-    // IMPORTANT: Save raw pixel displacements, NOT mm-scaled.
-    // dic3DReconstruction and formatOutput need pixel-coordinate displacements
-    // because they combine (x*scalefactor + displacement) for DLT reconstruction.
-    save(dic_output_raw, output_path);
-    writeNcorrMatSidecar(output_path, ref_img, cur_imgs, roi_mask, step_params, dic_output_raw);
-    std::cout << "DIC analysis saved: " << output_path << std::endl;
-    
-    return dic_output_raw;
+    return pipeline::Dic2DNcorrRunner(config_, base_params_).run(
+        ref_img,
+        cur_imgs,
+        roi_mask,
+        seed_point,
+        step_params,
+        output_path,
+        go_parallel,
+        use_no_update);
 }
 
 } // namespace cppxdic
