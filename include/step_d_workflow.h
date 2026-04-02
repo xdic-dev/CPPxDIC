@@ -131,28 +131,6 @@ private:
     /**
      * Perform matching between cameras at initial frame
      * 
-     * @param cam_ref First camera saturated frames
-     * @param cam_cur Second camera saturated frames
-     * @param refmask_ref Trial ROI mask
-     * @param ncorr_matching_path Path to ncorr matching results
-     * @param message Message to display
-     * @param initial_seed_point_ref Initial seed for camera 1
-     * @param refmask_cur_matched Output: matched trial ROI mask
-     * @param initial_seed_point_cur Output: initial seed for camera 2
-     * @return Success status
-     */
-    bool matchingInitialFrame(const std::vector<cv::Mat>& cam_ref,
-        const std::vector<cv::Mat>& cam_cur,
-        const cv::Mat& refmask_ref,
-        const std::string ncorr_matching_path,
-        const std::string message,
-        const SeedPoint& initial_seed_point_ref,
-        cv::Mat& refmask_cur_matched,
-        SeedPoint& initial_seed_point_cur);
-    
-    /**
-     * Perform matching between cameras at initial frame
-     * 
      * @param cam_first_satur First camera saturated frames
      * @param cam_second_satur Second camera saturated frames
      * @param refmask_trial Trial ROI mask
@@ -243,27 +221,6 @@ private:
                       const std::vector<int>& pairOrder,
                       bool pairForced);
 
-    /**
-     * Map an ROI mask and seed point through the first displacement field.
-     */
-    bool updateMaskAndSeedFromOutput(const cv::Mat& input_mask,
-                                     const SeedPoint& input_seed,
-                                     const ncorr::DIC_analysis_output& dic_output,
-                                     cv::Mat& output_mask,
-                                     SeedPoint& output_seed) const;
-
-    /**
-     * Write a compact debug panel for matching stages.
-     */
-    void writeMatchingDebugPanel(const std::string& stage_name,
-                                 const cv::Mat& ref_img,
-                                 const cv::Mat& cur_img,
-                                 const cv::Mat& mask_before,
-                                 const cv::Mat& mask_after,
-                                 const SeedPoint& seed_before,
-                                 const SeedPoint& seed_after,
-                                 const ncorr::DIC_analysis_output& dic_output) const;
-    
     /**
      * Run NCorr DIC analysis
      * 

@@ -46,6 +46,7 @@ set(CPPXDIC_PIPELINE_SOURCES
     src/pipeline/trial_selector.cpp
     src/pipeline/checkpoint_policy.cpp
     src/pipeline/dic2d_frame_preparer.cpp
+    src/pipeline/dic2d_matching_service.cpp
     src/pipeline/dic2d_ncorr_runner.cpp
     src/pipeline/dic2d_output_formatter.cpp
     src/pipeline/dic2d_tracking_service.cpp

@@ -528,6 +528,7 @@ set(PROJECT_SOURCES
     ${CMAKE_SOURCE_DIR}/../src/pipeline/trial_selector.cpp
     ${CMAKE_SOURCE_DIR}/../src/pipeline/checkpoint_policy.cpp
     ${CMAKE_SOURCE_DIR}/../src/pipeline/dic2d_frame_preparer.cpp
+    ${CMAKE_SOURCE_DIR}/../src/pipeline/dic2d_matching_service.cpp
     ${CMAKE_SOURCE_DIR}/../src/pipeline/dic2d_ncorr_runner.cpp
     ${CMAKE_SOURCE_DIR}/../src/pipeline/dic2d_output_formatter.cpp
     ${CMAKE_SOURCE_DIR}/../src/pipeline/dic2d_tracking_service.cpp
