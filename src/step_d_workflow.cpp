@@ -8,8 +8,10 @@
 #include "Array2D.h"
 #include "mat_writer.h"
 #include "mat_reader.h"
+#include "cppxdic/pipeline/dic2d_frame_preparer.h"
 #include "cppxdic/pipeline/dic2d_matching_service.h"
 #include "cppxdic/pipeline/dic2d_ncorr_runner.h"
+#include "cppxdic/pipeline/dic2d_output_formatter.h"
 #include "cppxdic/pipeline/dic2d_tracking_service.h"
 #include "ncorr.h"
 #include "utils.h"
@@ -60,6 +62,13 @@ Dic2DWorkflow::execute(const std::string& trial, int stereopair) {
     // 3. Import video frames
     pipeline::PreparedDic2DFrames frames;
     pipeline::Dic2DFramePreparer frame_preparer(config_);
+    pipeline::Dic2DMatchingService matching_service(
+        config_, base_params_, step1_params_, step1_2_params_);
+    pipeline::Dic2DNcorrRunner ncorr_runner(config_, base_params_);
+    pipeline::Dic2DTrackingService tracking_service(
+        config_, base_params_, step1_params_, step2_params_, ncorr_runner);
+    pipeline::Dic2DOutputFormatter output_formatter(config_, base_params_, step1_params_);
+
     std::cout << "Reading video data... ";
     if (!frame_preparer.importVideoFrames(trial, stereopair,
                                           frames.cam_first_raw,
@@ -84,8 +93,11 @@ Dic2DWorkflow::execute(const std::string& trial, int stereopair) {
     cv::Mat refmask_REF, refmask_trial;
     SeedPoint ref_seed_point, initial_seed_point_set1;
     std::cout << "Initializing ROI, seed, and matching REF to Trial..." << std::endl;
-    if (!initializeROIAndSeed(frames.cam_first_saturated, refmask_REF, refmask_trial,
-                             ref_seed_point, initial_seed_point_set1)) {
+    if (!matching_service.initializeROIAndSeed(frames.cam_first_saturated,
+                                               refmask_REF,
+                                               refmask_trial,
+                                               ref_seed_point,
+                                               initial_seed_point_set1)) {
         std::cerr << "Failed to initialize ROI and seed" << std::endl;
         return {"", {}, false};
     }
@@ -113,9 +125,12 @@ Dic2DWorkflow::execute(const std::string& trial, int stereopair) {
     cv::Mat refmask_trial_matched;
     SeedPoint initial_seed_point_set2;
     std::cout << "\nPerforming camera matching..." << std::endl;
-    if (!performMatching(frames.cam_first_saturated, frames.cam_second_saturated, refmask_trial,
-                        initial_seed_point_set1, refmask_trial_matched,
-                        initial_seed_point_set2)) {
+    if (!matching_service.performStereoPairMatching(frames.cam_first_saturated,
+                                                    frames.cam_second_saturated,
+                                                    refmask_trial,
+                                                    initial_seed_point_set1,
+                                                    refmask_trial_matched,
+                                                    initial_seed_point_set2)) {
         std::cerr << "Failed matching step" << std::endl;
         return {"", {}, false};
     }
@@ -125,14 +140,18 @@ Dic2DWorkflow::execute(const std::string& trial, int stereopair) {
     
     // V. Tracking camera 1
     std::cout << "\nPerforming tracking camera 1..." << std::endl;
-    if (!performTracking1(frames.cam_first_filtered, refmask_trial, initial_seed_point_set1)) {
+    if (!tracking_service.trackCamera1(frames.cam_first_filtered,
+                                       refmask_trial,
+                                       initial_seed_point_set1)) {
         std::cerr << "Failed tracking1 step" << std::endl;
         return {"", {}, false};
     }
     
     // VI. Tracking camera 2
     std::cout << "\nPerforming tracking camera 2..." << std::endl;
-    if (!performTracking2(frames.cam_second_filtered, refmask_trial_matched, initial_seed_point_set2)) {
+    if (!tracking_service.trackCamera2(frames.cam_second_filtered,
+                                       refmask_trial_matched,
+                                       initial_seed_point_set2)) {
         std::cerr << "Failed tracking2 step" << std::endl;
         return {"", {}, false};
     }
@@ -149,7 +168,7 @@ Dic2DWorkflow::execute(const std::string& trial, int stereopair) {
     }
 
     // Post-preps. Format output
-    formatOutput(trial, stereopair, pairOrder, pairForced);
+    output_formatter.format(stereopair, pairOrder, pairForced);
     
     std::cout << "--> STEP: Ncorr analysis completed" << std::endl;
     
@@ -329,94 +348,6 @@ std::string Dic2DWorkflow::determineReferenceTrial(const std::string& trial) {
     return trial;
 }
 
-bool Dic2DWorkflow::importVideoFrames(const std::string& trial,
-                                      int stereopair,
-                                      std::vector<cv::Mat>& cam_first_raw,
-                                      std::vector<cv::Mat>& cam_second_raw) {
-    return pipeline::Dic2DFramePreparer(config_).importVideoFrames(
-        trial, stereopair, cam_first_raw, cam_second_raw);
-}
-
-void Dic2DWorkflow::performSaturation(const std::vector<cv::Mat>& cam_first_raw,
-                                      const std::vector<cv::Mat>& cam_second_raw,
-                                      std::vector<cv::Mat>& cam_first_satur,
-                                      std::vector<cv::Mat>& cam_second_satur) {
-    pipeline::Dic2DFramePreparer(config_).performSaturation(
-        cam_first_raw,
-        cam_second_raw,
-        base_params_.limit_grayscale,
-        cam_first_satur,
-        cam_second_satur);
-}
-
-bool Dic2DWorkflow::initializeROIAndSeed(const std::vector<cv::Mat>& cam_first_satur,
-                                         cv::Mat& refmask_REF,
-                                         cv::Mat& refmask_trial,
-                                         SeedPoint& ref_seed_point,
-                                         SeedPoint& after_disp_seed_point) {
-    return pipeline::Dic2DMatchingService(
-        config_, base_params_, step1_params_, step1_2_params_)
-        .initializeROIAndSeed(cam_first_satur,
-                              refmask_REF,
-                              refmask_trial,
-                              ref_seed_point,
-                              after_disp_seed_point);
-}
-
-bool Dic2DWorkflow::performMatching(const std::vector<cv::Mat>& cam_first_satur,
-                                    const std::vector<cv::Mat>& cam_second_satur,
-                                    cv::Mat& refmask,
-                                    SeedPoint& ref_seed_point,
-                                    cv::Mat& after_disp_mask,
-                                    SeedPoint& after_disp_seed_point) {
-    return pipeline::Dic2DMatchingService(
-        config_, base_params_, step1_params_, step1_2_params_)
-        .performStereoPairMatching(cam_first_satur,
-                                   cam_second_satur,
-                                   refmask,
-                                   ref_seed_point,
-                                   after_disp_mask,
-                                   after_disp_seed_point);
-}
-
-bool Dic2DWorkflow::performTracking(const int tracking_number,
-                                    const std::vector<cv::Mat>& cam_frames,
-                                    const cv::Mat& refmask,
-                                    const SeedPoint& initial_seed_point) {
-    pipeline::Dic2DNcorrRunner ncorr_runner(config_, base_params_);
-    pipeline::Dic2DTrackingService tracking_service(
-        config_, base_params_, step1_params_, step2_params_, ncorr_runner);
-    return tracking_service.trackCamera(
-        tracking_number, cam_frames, refmask, initial_seed_point);
-}
-
-bool Dic2DWorkflow::performTracking1(const std::vector<cv::Mat>& cam_first,
-                                     const cv::Mat& refmask_trial,
-                                     const SeedPoint& initial_seed_point_set1) {
-    std::cout << "Performing tracking camera 1..." << initial_seed_point_set1.pw[0] << "," << initial_seed_point_set1.pw[1] << std::endl;
-    return performTracking(1, cam_first, refmask_trial, initial_seed_point_set1);
-}
-
-bool Dic2DWorkflow::performTracking2(const std::vector<cv::Mat>& cam_second,
-                                     const cv::Mat& refmask_trial_matched,
-                                     const SeedPoint& initial_seed_point_set2) {
-    std::cout << "Performing tracking camera 2..." << initial_seed_point_set2.pw[0] << "," << initial_seed_point_set2.pw[1] << std::endl;
-    return performTracking(2, cam_second, refmask_trial_matched, initial_seed_point_set2);
-}
-
-void Dic2DWorkflow::applyImageFiltering(const std::vector<cv::Mat>& cam_first_satur,
-                                        const std::vector<cv::Mat>& cam_second_satur,
-                                        const cv::Mat& refmask_trial,
-                                        std::vector<cv::Mat>& cam_first,
-                                        std::vector<cv::Mat>& cam_second) {
-    pipeline::Dic2DFramePreparer(config_).applyImageFiltering(
-        cam_first_satur,
-        cam_second_satur,
-        refmask_trial,
-        cam_first,
-        cam_second);
-}
-
 void Dic2DWorkflow::saveTrialInfo(const std::string& trial, int stereopair, int num_frames) {
     (void)trial;
     std::string filename = base_params_.outputPath + "/dic_info_data_target_pair" +
@@ -432,36 +363,6 @@ void Dic2DWorkflow::saveTrialInfo(const std::string& trial, int stereopair, int 
     }
     
     MatWriter::writeTrialInfoFile(filename, actual_fps, idxframe);
-}
-
-void Dic2DWorkflow::formatOutput(const std::string& trial,
-                                 int stereopair,
-                                 const std::vector<int>& pairOrder,
-                                 bool pairForced) {
-    (void)trial;
-    pipeline::Dic2DOutputFormatter(config_, base_params_, step1_params_)
-        .format(stereopair, pairOrder, pairForced);
-}
-
-ncorr::DIC_analysis_output Dic2DWorkflow::runNcorrAnalysis(
-    const cv::Mat& ref_img,
-    const std::vector<cv::Mat>& cur_imgs,
-    const cv::Mat& roi_mask,
-    const SeedPoint& seed_point,
-    const StepParameters& step_params,
-    const std::string& output_path,
-    const bool go_parallel,
-    const bool use_no_update) {
-    
-    return pipeline::Dic2DNcorrRunner(config_, base_params_).run(
-        ref_img,
-        cur_imgs,
-        roi_mask,
-        seed_point,
-        step_params,
-        output_path,
-        go_parallel,
-        use_no_update);
 }
 
 } // namespace cppxdic

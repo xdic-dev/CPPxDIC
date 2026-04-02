@@ -24,6 +24,7 @@ set(CPPXDIC_CORE_SOURCES
     src/image_processor.cpp
     src/roi_manager.cpp
     src/mat_writer.cpp
+    src/io/mat/mat_ncorr_writer.cpp
     src/step_d_workflow.cpp
     src/strain_computation.cpp
     src/mat_reader.cpp

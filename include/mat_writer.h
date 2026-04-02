@@ -17,6 +17,10 @@
 #include "dic_structures.h"
 #include "strain_computation.h"
 
+namespace cppxdic::io::mat {
+class MatNcorrWriter;
+}
+
 namespace cppxdic {
 
 /**
@@ -306,6 +310,8 @@ public:
                               const std::vector<DIC2DPairResults>& dic2d_info);
 
 private:
+    friend class io::mat::MatNcorrWriter;
+
     /**
      * Create MAT file with HDF5 format (v7.3)
      * 
