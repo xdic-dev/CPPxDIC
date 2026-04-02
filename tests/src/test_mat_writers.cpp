@@ -6,6 +6,7 @@
 #include "mat_writer.h"
 #include "dic_structures.h"
 #include <opencv2/opencv.hpp>
+#include <matio.h>
 #include <iostream>
 #include <filesystem>
 #include <cassert>
@@ -30,6 +31,11 @@ bool fileExists(const std::string& filename) {
 // Helper function to get file size
 size_t getFileSize(const std::string& filename) {
     return std::filesystem::file_size(filename);
+}
+
+bool hasStructField(matvar_t* struct_var, const char* field_name) {
+    return struct_var && struct_var->class_type == MAT_C_STRUCT &&
+           Mat_VarGetStructFieldByName(struct_var, field_name, 0) != nullptr;
 }
 
 // ============================================================================
@@ -334,6 +340,47 @@ bool test_write3DCombinedResults() {
         for (int i = 0; i < 50; ++i) {
             combined.PointPairInds.push_back(1);
         }
+
+        // Add one embedded DIC2D entry so nested MAT codec fields are exercised
+        DIC2DPairResults dic2d;
+        dic2d.nCamRef = 1;
+        dic2d.nCamDef = 2;
+        dic2d.nImages = 2;
+        dic2d.pairOrder = {1, 2};
+        dic2d.pairForced = true;
+        dic2d.ROImask = cv::Mat::ones(8, 8, CV_8U);
+        dic2d.ncorrInfo.cutoff_corrcoef = {0.5, 0.6};
+        dic2d.ncorrInfo.type = "2D";
+        dic2d.ncorrInfo.units = "mm";
+        Points2D pts2d;
+        pts2d.x = {0.0, 1.0};
+        pts2d.y = {2.0, 3.0};
+        dic2d.Points.push_back(pts2d);
+        dic2d.CorCoeffVec.push_back({0.95, 0.96});
+        dic2d.Faces = {0, 1, 1};
+        dic2d.FaceColors = {1.0};
+        combined.DIC2Dinfo.push_back(dic2d);
+
+        // Add one embedded stereo-pair result so AllPairsResults is exercised
+        DIC3DpairResults pair_result;
+        pair_result.cameraPairInd = {1, 2};
+        pair_result.DLTpath = {"path/cam1.dlt", "path/cam2.dlt"};
+        pair_result.DLTparameters = {dlt1, dlt2};
+        pair_result.distortionModel = {"model1", "model1"};
+        pair_result.distortionPath = {"path/cam1_dist.mat", "path/cam2_dist.mat"};
+        pair_result.Faces = {0, 1, 2};
+        pair_result.FaceColors = {1.0};
+        Points3D pair_pts;
+        pair_pts.x = {1.0, 2.0};
+        pair_pts.y = {3.0, 4.0};
+        pair_pts.z = {5.0, 6.0};
+        pair_result.Points3D.push_back(pair_pts);
+        pair_result.Disp.DispVec.push_back({0.1, 0.2, 0.3, 0.4, 0.5, 0.6});
+        pair_result.Disp.DispMgn.push_back({0.7, 0.8});
+        pair_result.FaceCentroids.push_back({1.0, 2.0, 3.0});
+        pair_result.corrComb.push_back({0.91, 0.92});
+        pair_result.FaceCorrComb.push_back({0.93});
+        combined.AllPairsResults.push_back(pair_result);
         
         // Write file
         std::string filename = TEST_OUTPUT_DIR + "/test_DIC3Dcombined.mat";
@@ -343,6 +390,23 @@ bool test_write3DCombinedResults() {
         assert(success && "write3DCombinedResults should succeed");
         assert(fileExists(filename) && "Output file should exist");
         assert(getFileSize(filename) > 0 && "Output file should not be empty");
+
+        mat_t* matfp = Mat_Open(filename.c_str(), MAT_ACC_RDONLY);
+        assert(matfp && "Written MAT file should be readable");
+        matvar_t* combined_var = Mat_VarRead(matfp, "DIC3Dcombined");
+        assert(combined_var && "DIC3Dcombined root struct should exist");
+        assert(hasStructField(combined_var, "AllPairsResults") &&
+               "DIC3Dcombined should contain AllPairsResults");
+        assert(hasStructField(combined_var, "DIC2Dinfo") &&
+               "DIC3Dcombined should contain DIC2Dinfo");
+        matvar_t* all_pairs_var = Mat_VarGetStructFieldByName(combined_var, "AllPairsResults", 0);
+        matvar_t* dic2d_var = Mat_VarGetStructFieldByName(combined_var, "DIC2Dinfo", 0);
+        assert(all_pairs_var && all_pairs_var->class_type == MAT_C_CELL);
+        assert(dic2d_var && dic2d_var->class_type == MAT_C_CELL);
+        assert(Mat_VarGetCell(all_pairs_var, 0) != nullptr);
+        assert(Mat_VarGetCell(dic2d_var, 0) != nullptr);
+        Mat_VarFree(combined_var);
+        Mat_Close(matfp);
         
         std::cout << "✓ write3DCombinedResults test PASSED" << std::endl;
         std::cout << "  File: " << filename << " (" << getFileSize(filename) << " bytes)" << std::endl;
@@ -434,6 +498,43 @@ bool test_write3DPPresults() {
         for (int i = 0; i < 40; ++i) {
             ppresults.PointPairInds.push_back(1);
         }
+
+        DIC2DPairResults dic2d;
+        dic2d.nCamRef = 1;
+        dic2d.nCamDef = 2;
+        dic2d.nImages = 1;
+        dic2d.ROImask = cv::Mat::ones(6, 6, CV_8U);
+        dic2d.ncorrInfo.cutoff_corrcoef = {0.5};
+        dic2d.ncorrInfo.type = "2D";
+        dic2d.ncorrInfo.units = "mm";
+        Points2D pts2d;
+        pts2d.x = {1.0};
+        pts2d.y = {2.0};
+        dic2d.Points.push_back(pts2d);
+        dic2d.CorCoeffVec.push_back({0.99});
+        dic2d.Faces = {0, 0, 0};
+        dic2d.FaceColors = {1.0};
+        ppresults.DIC2Dinfo.push_back(dic2d);
+
+        DIC3DpairResults pair_result;
+        pair_result.cameraPairInd = {1, 2};
+        pair_result.DLTpath = {"path/cam1.dlt", "path/cam2.dlt"};
+        pair_result.DLTparameters = {dlt1, dlt2};
+        pair_result.distortionModel = {"model1", "model1"};
+        pair_result.distortionPath = {"path/cam1_dist.mat", "path/cam2_dist.mat"};
+        pair_result.Faces = {0, 1, 2};
+        pair_result.FaceColors = {1.0};
+        Points3D pair_pts;
+        pair_pts.x = {1.0};
+        pair_pts.y = {2.0};
+        pair_pts.z = {3.0};
+        pair_result.Points3D.push_back(pair_pts);
+        pair_result.Disp.DispVec.push_back({0.1, 0.2, 0.3});
+        pair_result.Disp.DispMgn.push_back({0.4});
+        pair_result.FaceCentroids.push_back({1.0, 2.0, 3.0});
+        pair_result.corrComb.push_back({0.95});
+        pair_result.FaceCorrComb.push_back({0.96});
+        ppresults.AllPairsResults.push_back(pair_result);
         
         // Set deftype
         ppresults.deftype = "cum";
@@ -447,6 +548,19 @@ bool test_write3DPPresults() {
         assert(success && "write3DPPresults should succeed");
         assert(fileExists(filename) && "Output file should exist");
         assert(getFileSize(filename) > 0 && "Output file should not be empty");
+
+        mat_t* matfp = Mat_Open(filename.c_str(), MAT_ACC_RDONLY);
+        assert(matfp && "Written MAT file should be readable");
+        matvar_t* pp_var = Mat_VarRead(matfp, "DIC3DPPresults");
+        assert(pp_var && "DIC3DPPresults root struct should exist");
+        assert(hasStructField(pp_var, "AllPairsResults") &&
+               "DIC3DPPresults should contain AllPairsResults");
+        assert(hasStructField(pp_var, "DIC2Dinfo") &&
+               "DIC3DPPresults should contain DIC2Dinfo");
+        assert(hasStructField(pp_var, "deftype") &&
+               "DIC3DPPresults should contain deftype");
+        Mat_VarFree(pp_var);
+        Mat_Close(matfp);
         
         std::cout << "✓ write3DPPresults test PASSED" << std::endl;
         std::cout << "  File: " << filename << " (" << getFileSize(filename) << " bytes)" << std::endl;

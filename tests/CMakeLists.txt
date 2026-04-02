@@ -135,6 +135,8 @@ add_executable(test_ncorr_to_mat
     src/test_ncorr_to_mat.cpp
     ${CMAKE_SOURCE_DIR}/../src/dic_structures.cpp
     ${CMAKE_SOURCE_DIR}/../src/mat_writer.cpp
+    ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_ncorr_writer.cpp
+    ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_results_writer.cpp
 )
 
 # Add matio library (following parent project pattern)
@@ -254,6 +256,7 @@ add_executable(test_mat_writers
     ${CMAKE_SOURCE_DIR}/../src/dic_structures.cpp
     ${CMAKE_SOURCE_DIR}/../src/mat_writer.cpp
     ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_ncorr_writer.cpp
+    ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_results_writer.cpp
 )
 
 # Link matio library
@@ -512,6 +515,7 @@ set(PROJECT_SOURCES
     ${CMAKE_SOURCE_DIR}/../src/roi_manager.cpp
     ${CMAKE_SOURCE_DIR}/../src/mat_writer.cpp
     ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_ncorr_writer.cpp
+    ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_results_writer.cpp
     ${CMAKE_SOURCE_DIR}/../src/mat_reader.cpp
     ${CMAKE_SOURCE_DIR}/../src/step_d_workflow.cpp
     ${CMAKE_SOURCE_DIR}/../src/strain_computation.cpp

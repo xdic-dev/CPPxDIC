@@ -19,6 +19,7 @@
 
 namespace cppxdic::io::mat {
 class MatNcorrWriter;
+class MatResultsWriter;
 }
 
 namespace cppxdic {
@@ -311,6 +312,7 @@ public:
 
 private:
     friend class io::mat::MatNcorrWriter;
+    friend class io::mat::MatResultsWriter;
 
     /**
      * Create MAT file with HDF5 format (v7.3)
