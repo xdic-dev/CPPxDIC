@@ -135,6 +135,7 @@ add_executable(test_ncorr_to_mat
     src/test_ncorr_to_mat.cpp
     ${CMAKE_SOURCE_DIR}/../src/dic_structures.cpp
     ${CMAKE_SOURCE_DIR}/../src/mat_writer.cpp
+    ${CMAKE_SOURCE_DIR}/../src/io/mat/matio_helpers.cpp
     ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_ncorr_writer.cpp
     ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_results_writer.cpp
 )
@@ -255,6 +256,7 @@ add_executable(test_mat_writers
     src/test_mat_writers.cpp
     ${CMAKE_SOURCE_DIR}/../src/dic_structures.cpp
     ${CMAKE_SOURCE_DIR}/../src/mat_writer.cpp
+    ${CMAKE_SOURCE_DIR}/../src/io/mat/matio_helpers.cpp
     ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_ncorr_writer.cpp
     ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_results_writer.cpp
 )

@@ -1,4 +1,5 @@
 #include "cppxdic/io/mat/mat_results_writer.h"
+#include "cppxdic/io/mat/matio_helpers.h"
 
 #include "mat_writer.h"
 
@@ -24,19 +25,6 @@ matvar_t* createStringVar(const char* name, const std::string& value) {
     std::vector<size_t> dims = {1, value.length()};
     return Mat_VarCreate(name, MAT_C_CHAR, MAT_T_UINT8, 2, dims.data(),
                          const_cast<char*>(value.c_str()), 0);
-}
-
-matvar_t* createStructVariableLocal(const std::string& struct_name,
-                                    const std::vector<std::string>& field_names) {
-    std::vector<size_t> dims = {1, 1};
-    std::vector<const char*> c_field_names;
-    c_field_names.reserve(field_names.size());
-    for (const auto& field_name : field_names) {
-        c_field_names.push_back(field_name.c_str());
-    }
-
-    return Mat_VarCreateStruct(struct_name.c_str(), 2, dims.data(),
-                               c_field_names.data(), field_names.size());
 }
 
 matvar_t* createCvMatVar(const char* name, const cv::Mat& mat) {
@@ -205,7 +193,7 @@ matvar_t* buildFaceTripletCell(const char* name, const std::vector<std::vector<d
 
 matvar_t* buildDispStruct(const ::cppxdic::DispData& disp) {
     std::vector<std::string> disp_fields = {"DispVec", "DispMgn"};
-    matvar_t* disp_struct = createStructVariableLocal("Disp", disp_fields);
+    matvar_t* disp_struct = cppxdic::io::mat::createStructVariable("Disp", disp_fields);
     if (!disp_struct) {
         return nullptr;
     }
@@ -250,7 +238,7 @@ matvar_t* buildNcorrInfoStruct(const ::cppxdic::DICInfo& info) {
         "imgcorr", "lenscoef", "pixtounits", "radius", "spacing",
         "stepanalysis", "subsettrunc", "total_threads", "type", "units"
     };
-    matvar_t* ncorr_struct = createStructVariableLocal("ncorrInfo", ncorr_fields);
+    matvar_t* ncorr_struct = cppxdic::io::mat::createStructVariable("ncorrInfo", ncorr_fields);
     if (!ncorr_struct) {
         return nullptr;
     }
@@ -281,7 +269,7 @@ matvar_t* buildNcorrInfoStruct(const ::cppxdic::DICInfo& info) {
                                 createInt32ScalarVar("total_threads", info.total_threads));
 
     std::vector<std::string> stepanalysis_fields = {"enabled", "type", "auto", "step"};
-    matvar_t* stepanalysis_struct = createStructVariableLocal("stepanalysis", stepanalysis_fields);
+    matvar_t* stepanalysis_struct = cppxdic::io::mat::createStructVariable("stepanalysis", stepanalysis_fields);
     if (stepanalysis_struct) {
         Mat_VarSetStructFieldByName(
             stepanalysis_struct, "enabled", 0,
@@ -328,7 +316,7 @@ matvar_t* buildDIC2DPairStruct(const ::cppxdic::DIC2DPairResults& dic2d,
         "nCamRef", "nCamDef", "nImages", "pairOrder", "pairForced", "ROImask", "ncorrInfo",
         "Points", "CorCoeffVec", "Faces", "FaceColors"
     };
-    matvar_t* dic2d_struct = createStructVariableLocal(struct_name, fields);
+    matvar_t* dic2d_struct = cppxdic::io::mat::createStructVariable(struct_name, fields);
     if (!dic2d_struct) {
         return nullptr;
     }
@@ -425,7 +413,7 @@ matvar_t* buildDIC3DPairStruct(const ::cppxdic::DIC3DpairResults& pair) {
         "Faces", "FaceColors", "Points3D", "Disp", "FaceCentroids",
         "corrComb", "FaceCorrComb"
     };
-    matvar_t* pair_struct = createStructVariableLocal("pair", pair_fields);
+    matvar_t* pair_struct = cppxdic::io::mat::createStructVariable("pair", pair_fields);
     if (!pair_struct) {
         return nullptr;
     }
@@ -438,7 +426,7 @@ matvar_t* buildDIC3DPairStruct(const ::cppxdic::DIC3DpairResults& pair) {
     }
 
     std::vector<std::string> calib_fields = {"DLTpath", "DLTparameters"};
-    matvar_t* calibration_struct = createStructVariableLocal("calibration", calib_fields);
+    matvar_t* calibration_struct = cppxdic::io::mat::createStructVariable("calibration", calib_fields);
     if (calibration_struct) {
         matvar_t* dlt_path = buildPairStringCell("DLTpath", pair.DLTpath);
         if (dlt_path) {
@@ -546,20 +534,20 @@ bool MatResultsWriter::writeDIC2DPairResults(const std::string& filename,
         return false;
     }
 
-    ::cppxdic::MatWriter::writeScalarVariable(matfp, "nCamRef", results.nCamRef);
-    ::cppxdic::MatWriter::writeScalarVariable(matfp, "nCamDef", results.nCamDef);
-    ::cppxdic::MatWriter::writeScalarVariable(matfp, "nImages", results.nImages);
-    ::cppxdic::MatWriter::writeScalarVariable(matfp, "pairForced", results.pairForced ? 1.0 : 0.0);
+    writeScalarVariable(matfp, "nCamRef", results.nCamRef);
+    writeScalarVariable(matfp, "nCamDef", results.nCamDef);
+    writeScalarVariable(matfp, "nImages", results.nImages);
+    writeScalarVariable(matfp, "pairForced", results.pairForced ? 1.0 : 0.0);
 
     if (!results.pairOrder.empty()) {
         std::vector<double> pair_order(results.pairOrder.begin(), results.pairOrder.end());
         std::vector<size_t> dims = {1, pair_order.size()};
-        ::cppxdic::MatWriter::writeArrayVariable(
+        writeArrayVariable(
             matfp, "pairOrder", pair_order.data(), dims, MAT_T_DOUBLE, MAT_C_DOUBLE);
     }
 
     if (!results.ROImask.empty()) {
-        ::cppxdic::MatWriter::writeMatVariable(matfp, "ROImask", results.ROImask);
+        writeMatVariable(matfp, "ROImask", results.ROImask);
     }
 
     matvar_t* ncorr_struct = buildNcorrInfoStruct(results.ncorrInfo);
@@ -590,7 +578,7 @@ bool MatResultsWriter::writeDIC2DPairResults(const std::string& filename,
 
     if (!results.FaceColors.empty()) {
         std::vector<size_t> dims = {results.FaceColors.size(), 1};
-        ::cppxdic::MatWriter::writeArrayVariable(
+        writeArrayVariable(
             matfp, "FaceColors", results.FaceColors.data(), dims, MAT_T_DOUBLE, MAT_C_DOUBLE);
     }
 
@@ -668,7 +656,7 @@ matvar_t* MatResultsWriter::buildCombinedStructFields(
     }
 
     matvar_t* combined_struct =
-        ::cppxdic::MatWriter::createStructVariable(struct_name, combined_fields);
+        createStructVariable(struct_name, combined_fields);
     if (!combined_struct) {
         std::cerr << "Failed to create " << struct_name << " struct" << std::endl;
         return nullptr;
@@ -753,16 +741,16 @@ matvar_t* MatResultsWriter::buildCombinedStructFields(
     if (!combined.calibration.DLT_paths.empty()) {
         std::vector<std::string> calib_fields = {"DLTpath", "DLTparameters"};
         matvar_t* calib_struct =
-            ::cppxdic::MatWriter::createStructVariable("calibration", calib_fields);
+            createStructVariable("calibration", calib_fields);
         const size_t rows = combined.calibration.DLT_paths.size();
         const size_t cols = rows > 0 ? combined.calibration.DLT_paths[0].size() : 0;
         Mat_VarSetStructFieldByName(
             calib_struct, "DLTpath", 0,
-            ::cppxdic::MatWriter::createCellArray2DFromStrings(
+            createCellArray2DFromStrings(
                 "DLTpath", combined.calibration.DLT_paths, rows, cols));
         Mat_VarSetStructFieldByName(
             calib_struct, "DLTparameters", 0,
-            ::cppxdic::MatWriter::createCellArray2DFromVectors(
+            createCellArray2DFromVectors(
                 "DLTparameters", combined.calibration.DLT_params, rows, cols));
         Mat_VarSetStructFieldByName(combined_struct, "calibration", 0, calib_struct);
     }
@@ -770,16 +758,16 @@ matvar_t* MatResultsWriter::buildCombinedStructFields(
     if (!combined.distortion.distortion_models.empty()) {
         std::vector<std::string> dist_fields = {"distortionModel", "distortionPath"};
         matvar_t* dist_struct =
-            ::cppxdic::MatWriter::createStructVariable("distortion", dist_fields);
+            createStructVariable("distortion", dist_fields);
         const size_t rows = combined.distortion.distortion_models.size();
         const size_t cols = rows > 0 ? combined.distortion.distortion_models[0].size() : 0;
         Mat_VarSetStructFieldByName(
             dist_struct, "distortionModel", 0,
-            ::cppxdic::MatWriter::createCellArray2DFromStrings(
+            createCellArray2DFromStrings(
                 "distortionModel", combined.distortion.distortion_models, rows, cols));
         Mat_VarSetStructFieldByName(
             dist_struct, "distortionPath", 0,
-            ::cppxdic::MatWriter::createCellArray2DFromStrings(
+            createCellArray2DFromStrings(
                 "distortionPath", combined.distortion.distortion_paths, rows, cols));
         Mat_VarSetStructFieldByName(combined_struct, "distortion", 0, dist_struct);
     }
@@ -943,47 +931,47 @@ matvar_t* MatResultsWriter::buildDeformationStruct(
         emat_data[i] = frame.emat;
     }
 
-    matvar_t* Area_cell = ::cppxdic::MatWriter::createCellArrayFromScalars("Area", Area_data, n_frames);
-    matvar_t* Lamda1_cell = ::cppxdic::MatWriter::createCellArrayFromScalars("Lamda1", Lamda1_data, n_frames);
-    matvar_t* Lamda2_cell = ::cppxdic::MatWriter::createCellArrayFromScalars("Lamda2", Lamda2_data, n_frames);
-    matvar_t* J_cell = ::cppxdic::MatWriter::createCellArrayFromScalars("J", J_data, n_frames);
-    matvar_t* Emgn_cell = ::cppxdic::MatWriter::createCellArrayFromScalars("Emgn", Emgn_data, n_frames);
-    matvar_t* emgn_cell = ::cppxdic::MatWriter::createCellArrayFromScalars("emgn", emgn_data, n_frames);
-    matvar_t* Epc1_cell = ::cppxdic::MatWriter::createCellArrayFromScalars("Epc1", Epc1_data, n_frames);
-    matvar_t* Epc2_cell = ::cppxdic::MatWriter::createCellArrayFromScalars("Epc2", Epc2_data, n_frames);
-    matvar_t* epc1_cell = ::cppxdic::MatWriter::createCellArrayFromScalars("epc1", epc1_data, n_frames);
-    matvar_t* epc2_cell = ::cppxdic::MatWriter::createCellArrayFromScalars("epc2", epc2_data, n_frames);
-    matvar_t* EShearMax_cell = ::cppxdic::MatWriter::createCellArrayFromScalars("EShearMax", EShearMax_data, n_frames);
-    matvar_t* eShearMax_cell = ::cppxdic::MatWriter::createCellArrayFromScalars("eShearMax", eShearMax_data, n_frames);
-    matvar_t* Eeq_cell = ::cppxdic::MatWriter::createCellArrayFromScalars("Eeq", Eeq_data, n_frames);
-    matvar_t* eeq_cell = ::cppxdic::MatWriter::createCellArrayFromScalars("eeq", eeq_data, n_frames);
-    matvar_t* Dnorm_cell = ::cppxdic::MatWriter::createCellArrayFromScalars("Dnorm", Dnorm_data, n_frames);
+    matvar_t* Area_cell = createCellArrayFromScalars("Area", Area_data, n_frames);
+    matvar_t* Lamda1_cell = createCellArrayFromScalars("Lamda1", Lamda1_data, n_frames);
+    matvar_t* Lamda2_cell = createCellArrayFromScalars("Lamda2", Lamda2_data, n_frames);
+    matvar_t* J_cell = createCellArrayFromScalars("J", J_data, n_frames);
+    matvar_t* Emgn_cell = createCellArrayFromScalars("Emgn", Emgn_data, n_frames);
+    matvar_t* emgn_cell = createCellArrayFromScalars("emgn", emgn_data, n_frames);
+    matvar_t* Epc1_cell = createCellArrayFromScalars("Epc1", Epc1_data, n_frames);
+    matvar_t* Epc2_cell = createCellArrayFromScalars("Epc2", Epc2_data, n_frames);
+    matvar_t* epc1_cell = createCellArrayFromScalars("epc1", epc1_data, n_frames);
+    matvar_t* epc2_cell = createCellArrayFromScalars("epc2", epc2_data, n_frames);
+    matvar_t* EShearMax_cell = createCellArrayFromScalars("EShearMax", EShearMax_data, n_frames);
+    matvar_t* eShearMax_cell = createCellArrayFromScalars("eShearMax", eShearMax_data, n_frames);
+    matvar_t* Eeq_cell = createCellArrayFromScalars("Eeq", Eeq_data, n_frames);
+    matvar_t* eeq_cell = createCellArrayFromScalars("eeq", eeq_data, n_frames);
+    matvar_t* Dnorm_cell = createCellArrayFromScalars("Dnorm", Dnorm_data, n_frames);
 
-    matvar_t* D1_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("D1", D1_data, n_frames);
-    matvar_t* D2_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("D2", D2_data, n_frames);
-    matvar_t* D3_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("D3", D3_data, n_frames);
-    matvar_t* d1_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("d1", d1_data, n_frames);
-    matvar_t* d2_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("d2", d2_data, n_frames);
-    matvar_t* d3_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("d3", d3_data, n_frames);
-    matvar_t* Drec1_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("Drec1", Drec1_data, n_frames);
-    matvar_t* Drec2_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("Drec2", Drec2_data, n_frames);
-    matvar_t* Epc1vec_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("Epc1vec", Epc1vec_data, n_frames);
-    matvar_t* Epc2vec_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("Epc2vec", Epc2vec_data, n_frames);
-    matvar_t* Epc1vecCur_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("Epc1vecCur", Epc1vecCur_data, n_frames);
-    matvar_t* Epc2vecCur_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("Epc2vecCur", Epc2vecCur_data, n_frames);
-    matvar_t* epc1vec_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("epc1vec", epc1vec_data, n_frames);
-    matvar_t* epc2vec_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("epc2vec", epc2vec_data, n_frames);
-    matvar_t* EShearMaxVec1_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("EShearMaxVec1", EShearMaxVec1_data, n_frames);
-    matvar_t* EShearMaxVec2_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("EShearMaxVec2", EShearMaxVec2_data, n_frames);
-    matvar_t* EShearMaxVecCur1_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("EShearMaxVecCur1", EShearMaxVecCur1_data, n_frames);
-    matvar_t* EShearMaxVecCur2_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("EShearMaxVecCur2", EShearMaxVecCur2_data, n_frames);
-    matvar_t* eShearMaxVec1_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("eShearMaxVec1", eShearMaxVec1_data, n_frames);
-    matvar_t* eShearMaxVec2_cell = ::cppxdic::MatWriter::createCellArrayFromVectors("eShearMaxVec2", eShearMaxVec2_data, n_frames);
+    matvar_t* D1_cell = createCellArrayFromVectors("D1", D1_data, n_frames);
+    matvar_t* D2_cell = createCellArrayFromVectors("D2", D2_data, n_frames);
+    matvar_t* D3_cell = createCellArrayFromVectors("D3", D3_data, n_frames);
+    matvar_t* d1_cell = createCellArrayFromVectors("d1", d1_data, n_frames);
+    matvar_t* d2_cell = createCellArrayFromVectors("d2", d2_data, n_frames);
+    matvar_t* d3_cell = createCellArrayFromVectors("d3", d3_data, n_frames);
+    matvar_t* Drec1_cell = createCellArrayFromVectors("Drec1", Drec1_data, n_frames);
+    matvar_t* Drec2_cell = createCellArrayFromVectors("Drec2", Drec2_data, n_frames);
+    matvar_t* Epc1vec_cell = createCellArrayFromVectors("Epc1vec", Epc1vec_data, n_frames);
+    matvar_t* Epc2vec_cell = createCellArrayFromVectors("Epc2vec", Epc2vec_data, n_frames);
+    matvar_t* Epc1vecCur_cell = createCellArrayFromVectors("Epc1vecCur", Epc1vecCur_data, n_frames);
+    matvar_t* Epc2vecCur_cell = createCellArrayFromVectors("Epc2vecCur", Epc2vecCur_data, n_frames);
+    matvar_t* epc1vec_cell = createCellArrayFromVectors("epc1vec", epc1vec_data, n_frames);
+    matvar_t* epc2vec_cell = createCellArrayFromVectors("epc2vec", epc2vec_data, n_frames);
+    matvar_t* EShearMaxVec1_cell = createCellArrayFromVectors("EShearMaxVec1", EShearMaxVec1_data, n_frames);
+    matvar_t* EShearMaxVec2_cell = createCellArrayFromVectors("EShearMaxVec2", EShearMaxVec2_data, n_frames);
+    matvar_t* EShearMaxVecCur1_cell = createCellArrayFromVectors("EShearMaxVecCur1", EShearMaxVecCur1_data, n_frames);
+    matvar_t* EShearMaxVecCur2_cell = createCellArrayFromVectors("EShearMaxVecCur2", EShearMaxVecCur2_data, n_frames);
+    matvar_t* eShearMaxVec1_cell = createCellArrayFromVectors("eShearMaxVec1", eShearMaxVec1_data, n_frames);
+    matvar_t* eShearMaxVec2_cell = createCellArrayFromVectors("eShearMaxVec2", eShearMaxVec2_data, n_frames);
 
-    matvar_t* Fmat_cell = ::cppxdic::MatWriter::createCellArrayFromMatrices("Fmat", Fmat_data, n_frames);
-    matvar_t* Cmat_cell = ::cppxdic::MatWriter::createCellArrayFromMatrices("Cmat", Cmat_data, n_frames);
-    matvar_t* Emat_cell = ::cppxdic::MatWriter::createCellArrayFromMatrices("Emat", Emat_data, n_frames);
-    matvar_t* emat_cell = ::cppxdic::MatWriter::createCellArrayFromMatrices("emat", emat_data, n_frames);
+    matvar_t* Fmat_cell = createCellArrayFromMatrices("Fmat", Fmat_data, n_frames);
+    matvar_t* Cmat_cell = createCellArrayFromMatrices("Cmat", Cmat_data, n_frames);
+    matvar_t* Emat_cell = createCellArrayFromMatrices("Emat", Emat_data, n_frames);
+    matvar_t* emat_cell = createCellArrayFromMatrices("emat", emat_data, n_frames);
 
     std::vector<std::string> deform_fields = {
         "Area", "Lamda1", "Lamda2", "J", "Emgn", "emgn",
@@ -994,8 +982,7 @@ matvar_t* MatResultsWriter::buildDeformationStruct(
         "EShearMaxVecCur1", "EShearMaxVecCur2", "eShearMaxVec1", "eShearMaxVec2",
         "Fmat", "Cmat", "Emat", "emat"
     };
-    matvar_t* deform_struct =
-        ::cppxdic::MatWriter::createStructVariable(group_name, deform_fields);
+    matvar_t* deform_struct = createStructVariable(group_name, deform_fields);
 
     Mat_VarSetStructFieldByName(deform_struct, "Area", 0, Area_cell);
     Mat_VarSetStructFieldByName(deform_struct, "Lamda1", 0, Lamda1_cell);

@@ -5,6 +5,7 @@
  */
 
 #include "mat_writer.h"
+#include "cppxdic/io/mat/matio_helpers.h"
 #include "cppxdic/io/mat/mat_ncorr_writer.h"
 #include "cppxdic/io/mat/mat_results_writer.h"
 #include <iostream>
@@ -242,54 +243,7 @@ mat_t* MatWriter::createMatFileV5(const std::string& filename) {
 bool MatWriter::writeMatVariable(mat_t* matfp,
                                 const std::string& varname,
                                 const cv::Mat& mat) {
-    if (mat.empty()) {
-        std::cerr << "Cannot write empty Mat" << std::endl;
-        return false;
-    }
-    
-    // Convert OpenCV Mat to matio format
-    // Note: MATLAB is column-major, OpenCV is row-major
-    std::vector<size_t> dims = {static_cast<size_t>(mat.rows), static_cast<size_t>(mat.cols)};
-    
-    matio_types mat_type;
-    matio_classes mat_class;
-    
-    switch (mat.type()) {
-        case CV_8UC1:
-            mat_type = MAT_T_UINT8;
-            mat_class = MAT_C_UINT8;
-            break;
-        case CV_16UC1:
-            mat_type = MAT_T_UINT16;
-            mat_class = MAT_C_UINT16;
-            break;
-        case CV_32FC1:
-            mat_type = MAT_T_SINGLE;
-            mat_class = MAT_C_SINGLE;
-            break;
-        case CV_64FC1:
-            mat_type = MAT_T_DOUBLE;
-            mat_class = MAT_C_DOUBLE;
-            break;
-        default:
-            std::cerr << "Unsupported Mat type: " << mat.type() << std::endl;
-            return false;
-    }
-    
-    // Transpose data for MATLAB column-major format
-    cv::Mat transposed = mat.t();
-    
-    matvar_t* matvar = Mat_VarCreate(varname.c_str(), mat_class, mat_type,
-                                     2, dims.data(), transposed.data, 0);
-    if (!matvar) {
-        std::cerr << "Failed to create variable: " << varname << std::endl;
-        return false;
-    }
-    
-    int result = Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_NONE);
-    Mat_VarFree(matvar);
-    
-    return (result == 0);
+    return io::mat::writeMatVariable(matfp, varname, mat);
 }
 
 bool MatWriter::writeArrayVariable(mat_t* matfp,
@@ -298,93 +252,31 @@ bool MatWriter::writeArrayVariable(mat_t* matfp,
                                   const std::vector<size_t>& dims,
                                   matio_types data_type,
                                   matio_classes class_type) {
-    int rank = dims.size();
-    
-    matvar_t* matvar = Mat_VarCreate(varname.c_str(), class_type, data_type,
-                                     rank, dims.data(), (void*)data, 0);
-    if (!matvar) {
-        std::cerr << "Failed to create array variable: " << varname << std::endl;
-        return false;
-    }
-    
-    int result = Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_NONE);
-    Mat_VarFree(matvar);
-    
-    return (result == 0);
+    return io::mat::writeArrayVariable(matfp, varname, data, dims, data_type, class_type);
 }
 
 bool MatWriter::writeStringVariable(mat_t* matfp,
                                    const std::string& varname,
                                    const std::string& str) {
-    std::vector<size_t> dims = {1, str.length()};
-    
-    matvar_t* matvar = Mat_VarCreate(varname.c_str(), MAT_C_CHAR, MAT_T_UTF8,
-                                     2, dims.data(), (void*)str.c_str(), 0);
-    if (!matvar) {
-        std::cerr << "Failed to create string variable: " << varname << std::endl;
-        return false;
-    }
-    
-    int result = Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_NONE);
-    Mat_VarFree(matvar);
-    
-    return (result == 0);
+    return io::mat::writeStringVariable(matfp, varname, str);
 }
 
 bool MatWriter::writeScalarVariable(mat_t* matfp,
                                    const std::string& varname,
                                    double value) {
-    std::vector<size_t> dims = {1, 1};
-    
-    matvar_t* matvar = Mat_VarCreate(varname.c_str(), MAT_C_DOUBLE, MAT_T_DOUBLE,
-                                     2, dims.data(), &value, 0);
-    if (!matvar) {
-        std::cerr << "Failed to create scalar variable: " << varname << std::endl;
-        return false;
-    }
-    
-    int result = Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_NONE);
-    Mat_VarFree(matvar);
-    
-    return (result == 0);
+    return io::mat::writeScalarVariable(matfp, varname, value);
 }
 
 matvar_t* MatWriter::createStructVariable(const std::string& struct_name,
                                          const std::vector<std::string>& field_names) {
-    // Create struct variable
-    std::vector<size_t> dims = {1, 1};  // Scalar struct
-    
-    // Convert field names to char** format
-    std::vector<const char*> c_field_names;
-    for (const auto& name : field_names) {
-        c_field_names.push_back(name.c_str());
-    }
-    
-    matvar_t* struct_var = Mat_VarCreateStruct(struct_name.c_str(),
-                                               2, dims.data(),
-                                               c_field_names.data(),
-                                               field_names.size());
-    
-    return struct_var;
+    return io::mat::createStructVariable(struct_name, field_names);
 }
 
 bool MatWriter::addFieldToStruct(matvar_t* struct_var,
                                 const std::string& field_name,
                                 matvar_t* field_var,
                                 size_t index) {
-    if (!struct_var || struct_var->class_type != MAT_C_STRUCT) {
-        std::cerr << "Error: Not a struct variable" << std::endl;
-        return false;
-    }
-    
-    if (!field_var) {
-        std::cerr << "Error: Null field variable adding: " << field_name << std::endl;
-        return false;
-    }
-    
-    // Use matio API to set struct field
-    Mat_VarSetStructFieldByName(struct_var, field_name.c_str(), index, field_var);
-    return true;
+    return io::mat::addFieldToStruct(struct_var, field_name, field_var, index);
 }
 
 void MatWriter::convertDispToArrays(const ncorr::Disp2D& disp,
@@ -1072,127 +964,21 @@ matvar_t* MatWriter::createCellArrayFromScalars(
     const std::string& name,
     const std::vector<std::vector<double>>& data,
     size_t n_frames) {
-    
-    // Create cell array (1 x n_frames)
-    std::vector<size_t> cell_dims = {1, n_frames};
-    matvar_t* cell_array = Mat_VarCreate(name.c_str(), MAT_C_CELL, MAT_T_CELL, 
-                                         2, cell_dims.data(), nullptr, 0);
-    
-    if (!cell_array) {
-        std::cerr << "Failed to create cell array: " << name << std::endl;
-        return nullptr;
-    }
-    
-    // Fill each cell with scalar array
-    for (size_t i = 0; i < n_frames && i < data.size(); ++i) {
-        const auto& frame_data = data[i];
-        size_t n_elements = frame_data.size();
-        
-        if (n_elements == 0) {
-            // Empty cell
-            Mat_VarSetCell(cell_array, i, nullptr);
-            continue;
-        }
-        
-        // Create double array for this frame (MATLAB column vector: N×1)
-        std::vector<size_t> dims = {n_elements, 1};
-        matvar_t* cell_data = Mat_VarCreate(nullptr, MAT_C_DOUBLE, MAT_T_DOUBLE,
-                                           2, dims.data(), (void*)frame_data.data(), 0);
-        
-        Mat_VarSetCell(cell_array, i, cell_data);
-    }
-    
-    return cell_array;
+    return io::mat::createCellArrayFromScalars(name, data, n_frames);
 }
 
 matvar_t* MatWriter::createCellArrayFromVectors(
     const std::string& name,
     const std::vector<std::vector<Eigen::Vector3d>>& data,
     size_t n_frames) {
-    
-    // Create cell array (1 x n_frames)
-    std::vector<size_t> cell_dims = {1, n_frames};
-    matvar_t* cell_array = Mat_VarCreate(name.c_str(), MAT_C_CELL, MAT_T_CELL,
-                                         2, cell_dims.data(), nullptr, 0);
-    
-    if (!cell_array) {
-        std::cerr << "Failed to create cell array: " << name << std::endl;
-        return nullptr;
-    }
-    
-    // Fill each cell with Nx3 array
-    for (size_t i = 0; i < n_frames && i < data.size(); ++i) {
-        const auto& frame_data = data[i];
-        size_t n_vectors = frame_data.size();
-        
-        if (n_vectors == 0) {
-            Mat_VarSetCell(cell_array, i, nullptr);
-            continue;
-        }
-        
-        // Convert vector<Vector3d> to flat double array (Nx3 in MATLAB column-major)
-        std::vector<double> flat_data(n_vectors * 3);
-        for (size_t j = 0; j < n_vectors; ++j) {
-            flat_data[j] = frame_data[j](0);
-            flat_data[j + n_vectors] = frame_data[j](1);
-            flat_data[j + 2 * n_vectors] = frame_data[j](2);
-        }
-        
-        // Create N×3 array
-        std::vector<size_t> dims = {n_vectors, 3};
-        matvar_t* cell_data = Mat_VarCreate(nullptr, MAT_C_DOUBLE, MAT_T_DOUBLE,
-                                           2, dims.data(), flat_data.data(), 0);
-        
-        Mat_VarSetCell(cell_array, i, cell_data);
-    }
-    
-    return cell_array;
+    return io::mat::createCellArrayFromVectors(name, data, n_frames);
 }
 
 matvar_t* MatWriter::createCellArrayFromMatrices(
     const std::string& name,
     const std::vector<std::vector<Eigen::Matrix3d>>& data,
     size_t n_frames) {
-    
-    // Create cell array (1 x n_frames)
-    std::vector<size_t> cell_dims = {1, n_frames};
-    matvar_t* cell_array = Mat_VarCreate(name.c_str(), MAT_C_CELL, MAT_T_CELL,
-                                         2, cell_dims.data(), nullptr, 0);
-    
-    if (!cell_array) {
-        std::cerr << "Failed to create cell array: " << name << std::endl;
-        return nullptr;
-    }
-    
-    // Fill each cell with 3×3×N 3D array (legacy MATLAB convention)
-    for (size_t i = 0; i < n_frames && i < data.size(); ++i) {
-        const auto& frame_data = data[i];
-        size_t n_matrices = frame_data.size();
-        
-        if (n_matrices == 0) {
-            Mat_VarSetCell(cell_array, i, nullptr);
-            continue;
-        }
-        
-        // Convert vector<Matrix3d> to MATLAB [3,3,N] column-major 3D array.
-        std::vector<double> flat_data(n_matrices * 9);
-        for (size_t j = 0; j < n_matrices; ++j) {
-            for (int col = 0; col < 3; ++col) {
-                for (int row = 0; row < 3; ++row) {
-                    flat_data[row + 3 * col + 9 * j] = frame_data[j](row, col);
-                }
-            }
-        }
-        
-        // Create 3×3×N array
-        std::vector<size_t> dims = {3, 3, n_matrices};
-        matvar_t* cell_data = Mat_VarCreate(nullptr, MAT_C_DOUBLE, MAT_T_DOUBLE,
-                                           3, dims.data(), flat_data.data(), 0);
-        
-        Mat_VarSetCell(cell_array, i, cell_data);
-    }
-    
-    return cell_array;
+    return io::mat::createCellArrayFromMatrices(name, data, n_frames);
 }
 
 matvar_t* MatWriter::createCellArray2DFromStrings(
@@ -1200,38 +986,7 @@ matvar_t* MatWriter::createCellArray2DFromStrings(
     const std::vector<std::vector<std::string>>& data,
     size_t rows,
     size_t cols) {
-    
-    // Create 2D cell array (rows x cols)
-    std::vector<size_t> cell_dims = {rows, cols};
-    matvar_t* cell_array = Mat_VarCreate(name.c_str(), MAT_C_CELL, MAT_T_CELL,
-                                         2, cell_dims.data(), nullptr, 0);
-    
-    if (!cell_array) {
-        std::cerr << "Failed to create 2D cell array: " << name << std::endl;
-        return nullptr;
-    }
-    
-    // Fill each cell with string
-    for (size_t i = 0; i < rows && i < data.size(); ++i) {
-        for (size_t j = 0; j < cols && j < data[i].size(); ++j) {
-            const std::string& str = data[i][j];
-            
-            if (str.empty()) {
-                // Empty cell
-                Mat_VarSetCell(cell_array, i * cols + j, nullptr);
-                continue;
-            }
-            
-            // Create string variable
-            std::vector<size_t> dims = {1, str.length()};
-            matvar_t* str_var = Mat_VarCreate(nullptr, MAT_C_CHAR, MAT_T_UINT8,
-                                             2, dims.data(), (void*)str.c_str(), 0);
-            
-            Mat_VarSetCell(cell_array, i * cols + j, str_var);
-        }
-    }
-    
-    return cell_array;
+    return io::mat::createCellArray2DFromStrings(name, data, rows, cols);
 }
 
 matvar_t* MatWriter::createCellArray2DFromVectors(
@@ -1239,38 +994,7 @@ matvar_t* MatWriter::createCellArray2DFromVectors(
     const std::vector<std::vector<std::vector<double>>>& data,
     size_t rows,
     size_t cols) {
-    
-    // Create 2D cell array (rows x cols)
-    std::vector<size_t> cell_dims = {rows, cols};
-    matvar_t* cell_array = Mat_VarCreate(name.c_str(), MAT_C_CELL, MAT_T_CELL,
-                                         2, cell_dims.data(), nullptr, 0);
-    
-    if (!cell_array) {
-        std::cerr << "Failed to create 2D cell array: " << name << std::endl;
-        return nullptr;
-    }
-    
-    // Fill each cell with double vector
-    for (size_t i = 0; i < rows && i < data.size(); ++i) {
-        for (size_t j = 0; j < cols && j < data[i].size(); ++j) {
-            const auto& vec = data[i][j];
-            
-            if (vec.empty()) {
-                // Empty cell
-                Mat_VarSetCell(cell_array, i * cols + j, nullptr);
-                continue;
-            }
-            
-            // Create double array (MATLAB: 1×N row vector)
-            std::vector<size_t> dims = {1, vec.size()};
-            matvar_t* vec_var = Mat_VarCreate(nullptr, MAT_C_DOUBLE, MAT_T_DOUBLE,
-                                             2, dims.data(), (void*)vec.data(), 0);
-            
-            Mat_VarSetCell(cell_array, i * cols + j, vec_var);
-        }
-    }
-    
-    return cell_array;
+    return io::mat::createCellArray2DFromVectors(name, data, rows, cols);
 }
 
 } // namespace cppxdic
