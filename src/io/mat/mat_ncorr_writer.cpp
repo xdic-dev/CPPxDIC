@@ -1,4 +1,5 @@
 #include "cppxdic/io/mat/mat_ncorr_writer.h"
+#include "cppxdic/io/mat/mat_ncorr_codecs.h"
 
 #include "mat_writer.h"
 
@@ -92,33 +93,8 @@ bool MatNcorrWriter::writeMultiFrameNcorrFile(
         return false;
     }
 
-    const std::vector<std::string> ref_fields = {"gs", "name", "path", "roi", "type"};
-    matvar_t* reference_save = cppxdic::MatWriter::createStructVariable("reference_save", ref_fields);
-
-    cppxdic::MatWriter::writeMatVariable(matfp, "ref_gs_temp", ref_img);
-    matvar_t* ref_gs = Mat_VarRead(matfp, "ref_gs_temp");
-    cppxdic::MatWriter::addFieldToStruct(reference_save, "gs", ref_gs, 0);
-
-    const std::vector<std::string> roi_fields = {"mask"};
-    matvar_t* ref_roi_struct = cppxdic::MatWriter::createStructVariable("roi", roi_fields);
-    cppxdic::MatWriter::writeMatVariable(matfp, "ref_roi_temp", ref_roi);
-    matvar_t* ref_roi_mask = Mat_VarRead(matfp, "ref_roi_temp");
-    cppxdic::MatWriter::addFieldToStruct(ref_roi_struct, "mask", ref_roi_mask, 0);
-    cppxdic::MatWriter::addFieldToStruct(reference_save, "roi", ref_roi_struct, 0);
-
-    matvar_t* current_save = cppxdic::MatWriter::createStructVariable("current_save", ref_fields);
-    std::vector<size_t> cell_dims = {n_frames, 1};
-
-    matvar_t* gs_cell = Mat_VarCreate("gs", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
-    for (size_t i = 0; i < n_frames; ++i) {
-        const std::string temp_name = "cur_gs_temp_" + std::to_string(i);
-        cppxdic::MatWriter::writeMatVariable(matfp, temp_name, cur_imgs[i]);
-        matvar_t* img_var = Mat_VarRead(matfp, temp_name.c_str());
-        Mat_VarSetCell(gs_cell, i, img_var);
-    }
-    cppxdic::MatWriter::addFieldToStruct(current_save, "gs", gs_cell, 0);
-
-    matvar_t* roi_cell = Mat_VarCreate("roi", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
+    std::vector<cv::Mat> updated_rois;
+    updated_rois.reserve(n_frames);
     for (size_t i = 0; i < n_frames; ++i) {
         cv::Mat roi_to_use = (i < cur_rois.size()) ? cur_rois[i] : ref_roi.clone();
 
@@ -133,56 +109,20 @@ bool MatNcorrWriter::writeMultiFrameNcorrFile(
             roi_to_use,
             roi_disp,
             "frame " + std::to_string(i));
-
-        matvar_t* frame_roi_struct = cppxdic::MatWriter::createStructVariable("roi", roi_fields);
-        const std::string temp_roi_name = "cur_roi_temp_" + std::to_string(i);
-        cppxdic::MatWriter::writeMatVariable(matfp, temp_roi_name, roi_to_use);
-        matvar_t* roi_mask_var = Mat_VarRead(matfp, temp_roi_name.c_str());
-        cppxdic::MatWriter::addFieldToStruct(frame_roi_struct, "mask", roi_mask_var, 0);
-        Mat_VarSetCell(roi_cell, i, frame_roi_struct);
+        updated_rois.push_back(std::move(roi_to_use));
     }
-    cppxdic::MatWriter::addFieldToStruct(current_save, "roi", roi_cell, 0);
-
-    matvar_t* name_cell = Mat_VarCreate("name", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
-    for (size_t i = 0; i < n_frames; ++i) {
-        matvar_t* name_var = createStringVar("", "current_" + std::to_string(i + 1));
-        Mat_VarSetCell(name_cell, i, name_var);
-    }
-    cppxdic::MatWriter::addFieldToStruct(current_save, "name", name_cell, 0);
-
-    matvar_t* path_cell = Mat_VarCreate("path", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
-    for (size_t i = 0; i < n_frames; ++i) {
-        Mat_VarSetCell(path_cell, i, nullptr);
-    }
-    cppxdic::MatWriter::addFieldToStruct(current_save, "path", path_cell, 0);
-
-    matvar_t* type_cell = Mat_VarCreate("type", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
-    for (size_t i = 0; i < n_frames; ++i) {
-        matvar_t* type_var = createStringVar("", type_str);
-        Mat_VarSetCell(type_cell, i, type_var);
-    }
-    cppxdic::MatWriter::addFieldToStruct(current_save, "type", type_cell, 0);
-
-    matvar_t* ref_name_var = createStringVar("name", ref_name);
-    cppxdic::MatWriter::addFieldToStruct(reference_save, "name", ref_name_var, 0);
-
-    matvar_t* ref_type_var = createStringVar("type", type_str);
-    cppxdic::MatWriter::addFieldToStruct(reference_save, "type", ref_type_var, 0);
-    cppxdic::MatWriter::addFieldToStruct(reference_save, "path", nullptr, 0);
+    matvar_t* reference_save =
+        ncorr_codecs::buildReferenceSaveWithMetadata(ref_img, ref_roi, type_str, ref_name);
+    matvar_t* current_save =
+        ncorr_codecs::buildCurrentSaveMultiFrame(cur_imgs, updated_rois, type_str);
 
     matvar_t* dispinfo_var = cppxdic::MatWriter::formatDispInfo(dispinfo);
     matvar_t* displacements_var = nullptr;
     if (have_aggregated_output) {
         displacements_var = cppxdic::MatWriter::formatDisplacements(aggregated_output);
     }
-
-    const std::vector<std::string> data_fields = {"dispinfo", "displacements", "straininfo", "strains"};
-    matvar_t* data_dic_save = cppxdic::MatWriter::createStructVariable("data_dic_save", data_fields);
-    cppxdic::MatWriter::addFieldToStruct(data_dic_save, "dispinfo", dispinfo_var, 0);
-    if (displacements_var) {
-        cppxdic::MatWriter::addFieldToStruct(data_dic_save, "displacements", displacements_var, 0);
-    }
-    addPlaceholderFields(data_dic_save);
+    matvar_t* data_dic_save =
+        ncorr_codecs::buildDataDicSave(dispinfo_var, displacements_var, true);
 
     Mat_VarWrite(matfp, reference_save, MAT_COMPRESSION_NONE);
     Mat_VarWrite(matfp, current_save, MAT_COMPRESSION_NONE);
@@ -222,38 +162,6 @@ cv::Mat MatNcorrWriter::updateRoiWithDisplacement(const cv::Mat& roi,
     }
 
     return updated_roi;
-}
-
-void MatNcorrWriter::addPlaceholderFields(matvar_t* data_dic_save) {
-    const std::vector<std::string> straininfo_fields = {"radius", "subsettrunc"};
-    matvar_t* straininfo_var = cppxdic::MatWriter::createStructVariable("straininfo", straininfo_fields);
-    cppxdic::MatWriter::addFieldToStruct(data_dic_save, "straininfo", straininfo_var, 0);
-
-    const std::vector<std::string> strains_fields = {
-        "plot_exx_ref_formatted",
-        "plot_exy_ref_formatted",
-        "plot_eyy_ref_formatted",
-        "roi_ref_formatted",
-        "plot_exx_cur_formatted",
-        "plot_exy_cur_formatted",
-        "plot_eyy_cur_formatted",
-        "roi_cur_formatted"
-    };
-    matvar_t* strains_var = cppxdic::MatWriter::createStructVariable("strains", strains_fields);
-    cppxdic::MatWriter::addFieldToStruct(data_dic_save, "strains", strains_var, 0);
-}
-
-matvar_t* MatNcorrWriter::createStringVar(const std::string& name,
-                                          const std::string& value) {
-    const std::vector<size_t> dims = {1, value.length()};
-    return Mat_VarCreate(
-        name.empty() ? nullptr : name.c_str(),
-        MAT_C_CHAR,
-        MAT_T_UINT8,
-        2,
-        dims.data(),
-        const_cast<char*>(value.c_str()),
-        0);
 }
 
 bool MatNcorrWriter::aggregateOutputs(const std::vector<ncorr::DIC_analysis_output>& dic_outputs,
@@ -303,19 +211,7 @@ bool MatWriter::writeDicNcorrFile(const std::string& filename,
         return false;
     }
 
-    const std::vector<std::string> ref_fields = {"gs", "name", "path", "roi", "type"};
-    matvar_t* reference_save = createStructVariable("reference_save", ref_fields);
-
-    writeMatVariable(matfp, "ref_gs_temp", ref_img);
-    matvar_t* ref_gs = Mat_VarRead(matfp, "ref_gs_temp");
-    addFieldToStruct(reference_save, "gs", ref_gs, 0);
-
-    const std::vector<std::string> roi_fields = {"mask"};
-    matvar_t* ref_roi_struct = createStructVariable("roi", roi_fields);
-    writeMatVariable(matfp, "ref_roi_temp", ref_roi);
-    matvar_t* ref_roi_mask = Mat_VarRead(matfp, "ref_roi_temp");
-    addFieldToStruct(ref_roi_struct, "mask", ref_roi_mask, 0);
-    addFieldToStruct(reference_save, "roi", ref_roi_struct, 0);
+    matvar_t* reference_save = io::mat::ncorr_codecs::buildReferenceSave(ref_img, ref_roi);
 
     cv::Mat cur_roi_updated = cur_roi.clone();
     if (!dic_output.disps.empty()) {
@@ -333,38 +229,9 @@ bool MatWriter::writeDicNcorrFile(const std::string& filename,
         }
     }
 
-    matvar_t* current_save = createStructVariable("current_save", ref_fields);
-    writeMatVariable(matfp, "cur_gs_temp", cur_img);
-    matvar_t* cur_gs = Mat_VarRead(matfp, "cur_gs_temp");
-    addFieldToStruct(current_save, "gs", cur_gs, 0);
-
-    matvar_t* cur_roi_struct = createStructVariable("roi", roi_fields);
-    writeMatVariable(matfp, "cur_roi_temp", cur_roi_updated);
-    matvar_t* cur_roi_mask = Mat_VarRead(matfp, "cur_roi_temp");
-    addFieldToStruct(cur_roi_struct, "mask", cur_roi_mask, 0);
-    addFieldToStruct(current_save, "roi", cur_roi_struct, 0);
-
-    const std::vector<std::string> data_fields = {"dispinfo", "displacements", "straininfo", "strains"};
-    matvar_t* data_dic_save = createStructVariable("data_dic_save", data_fields);
-    addFieldToStruct(data_dic_save, "dispinfo", dispinfo_var, 0);
-    addFieldToStruct(data_dic_save, "displacements", displacements_var, 0);
-
-    const std::vector<std::string> straininfo_fields = {"radius", "subsettrunc"};
-    matvar_t* straininfo_var = createStructVariable("straininfo", straininfo_fields);
-    addFieldToStruct(data_dic_save, "straininfo", straininfo_var, 0);
-
-    const std::vector<std::string> strains_fields = {
-        "plot_exx_ref_formatted",
-        "plot_exy_ref_formatted",
-        "plot_eyy_ref_formatted",
-        "roi_ref_formatted",
-        "plot_exx_cur_formatted",
-        "plot_exy_cur_formatted",
-        "plot_eyy_cur_formatted",
-        "roi_cur_formatted"
-    };
-    matvar_t* strains_var = createStructVariable("strains", strains_fields);
-    addFieldToStruct(data_dic_save, "strains", strains_var, 0);
+    matvar_t* current_save = io::mat::ncorr_codecs::buildCurrentSave(cur_img, cur_roi_updated);
+    matvar_t* data_dic_save =
+        io::mat::ncorr_codecs::buildDataDicSave(dispinfo_var, displacements_var);
 
     Mat_VarWrite(matfp, reference_save, MAT_COMPRESSION_NONE);
     Mat_VarWrite(matfp, current_save, MAT_COMPRESSION_NONE);

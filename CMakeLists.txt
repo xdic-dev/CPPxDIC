@@ -24,6 +24,7 @@ set(CPPXDIC_CORE_SOURCES
     src/image_processor.cpp
     src/roi_manager.cpp
     src/mat_writer.cpp
+    src/io/mat/mat_ncorr_codecs.cpp
     src/io/mat/mat_ncorr_writer.cpp
     src/io/mat/mat_result_codecs.cpp
     src/io/mat/mat_results_writer.cpp

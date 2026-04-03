@@ -45,11 +45,6 @@ private:
                                             const ncorr::Disp2D* disp,
                                             const std::string& warning_context);
 
-    static void addPlaceholderFields(matvar_t* data_dic_save);
-
-    static matvar_t* createStringVar(const std::string& name,
-                                     const std::string& value);
-
     static bool aggregateOutputs(const std::vector<ncorr::DIC_analysis_output>& dic_outputs,
                                  size_t n_frames,
                                  ncorr::DIC_analysis_output& aggregated_output);
