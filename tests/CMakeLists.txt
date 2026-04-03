@@ -137,6 +137,7 @@ add_executable(test_ncorr_to_mat
     ${CMAKE_SOURCE_DIR}/../src/mat_writer.cpp
     ${CMAKE_SOURCE_DIR}/../src/io/mat/matio_helpers.cpp
     ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_ncorr_writer.cpp
+    ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_result_codecs.cpp
     ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_results_writer.cpp
 )
 
@@ -258,6 +259,7 @@ add_executable(test_mat_writers
     ${CMAKE_SOURCE_DIR}/../src/mat_writer.cpp
     ${CMAKE_SOURCE_DIR}/../src/io/mat/matio_helpers.cpp
     ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_ncorr_writer.cpp
+    ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_result_codecs.cpp
     ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_results_writer.cpp
 )
 
@@ -517,6 +519,7 @@ set(PROJECT_SOURCES
     ${CMAKE_SOURCE_DIR}/../src/roi_manager.cpp
     ${CMAKE_SOURCE_DIR}/../src/mat_writer.cpp
     ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_ncorr_writer.cpp
+    ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_result_codecs.cpp
     ${CMAKE_SOURCE_DIR}/../src/io/mat/mat_results_writer.cpp
     ${CMAKE_SOURCE_DIR}/../src/mat_reader.cpp
     ${CMAKE_SOURCE_DIR}/../src/step_d_workflow.cpp
