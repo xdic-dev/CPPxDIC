@@ -306,7 +306,7 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
             dic3d.Points3D.clear();
             dic3d.Points3D.resize(vertices_all_frames.size());
             for (size_t iframe = 0; iframe < vertices_all_frames.size(); ++iframe) {
-                Points3D& frame_pts = dic3d.Points3D[iframe];
+                Point3DFrame& frame_pts = dic3d.Points3D[iframe];
                 frame_pts.x.resize(nPoints);
                 frame_pts.y.resize(nPoints);
                 frame_pts.z.resize(nPoints);
@@ -1063,7 +1063,7 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
 
                     // Solve the DLT system (MATLAB: P3D = DLT11Reconstruction(P1, P2, L1, L2))
                     std::vector<double> pts3d(N * 3, std::numeric_limits<double>::quiet_NaN());
-                    Points3D frame_pts;
+                    Point3DFrame frame_pts;
                     frame_pts.x.resize(N); frame_pts.y.resize(N); frame_pts.z.resize(N);
                     for (size_t k = 0; k < N; ++k) {
                         double x1 = P1.x[k], y1 = P1.y[k];

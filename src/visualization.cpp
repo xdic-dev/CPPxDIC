@@ -153,7 +153,7 @@ static std::vector<std::vector<int>> buildFaceAdjacency(
  * @return Vector of centroids (x, y, z) for each face
  */
 static std::vector<std::array<double, 3>> computeFaceCentroids(
-    const Points3D& points,
+    const Point3DFrame& points,
     const std::vector<int>& faces,
     size_t n_faces) {
     

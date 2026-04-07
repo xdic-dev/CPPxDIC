@@ -267,7 +267,7 @@ bool test_write3DCombinedResults() {
         
         // Create test Points3D (5 frames)
         for (int i = 0; i < 5; ++i) {
-            Points3D pts;
+            Point3DFrame pts;
             for (int j = 0; j < 50; ++j) {
                 pts.x.push_back(j * 1.0);
                 pts.y.push_back(j * 0.5);
@@ -367,7 +367,7 @@ bool test_write3DPPresults() {
         
         // Create test Points3D (3 frames)
         for (int i = 0; i < 3; ++i) {
-            Points3D pts;
+            Point3DFrame pts;
             for (int j = 0; j < 40; ++j) {
                 pts.x.push_back(j * 1.0);
                 pts.y.push_back(j * 0.5);

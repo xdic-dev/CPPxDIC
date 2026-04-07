@@ -370,7 +370,7 @@ void test_stitchPairsSimple_single_pair() {
     pair.Faces = {0, 1, 2};
     pair.FaceColors = {128.0};
     
-    Points3D pts;
+    Point3DFrame pts;
     pts.x = {0, 1, 0.5};
     pts.y = {0, 0, 1};
     pts.z = {0, 0, 0};
@@ -400,7 +400,7 @@ void test_stitchPairsSimple_two_pairs() {
     
     pair1.Faces = {0, 1, 2};
     pair1.FaceColors = {100.0};
-    Points3D pts1; pts1.x = {0,1,0.5}; pts1.y = {0,0,1}; pts1.z = {0,0,0};
+    Point3DFrame pts1; pts1.x = {0,1,0.5}; pts1.y = {0,0,1}; pts1.z = {0,0,0};
     pair1.Points3D = {pts1};
     pair1.corrComb = {{0.9, 0.8, 0.85}};
     pair1.FaceCorrComb = {{0.9}};
@@ -410,7 +410,7 @@ void test_stitchPairsSimple_two_pairs() {
     
     pair2.Faces = {0, 1, 2};
     pair2.FaceColors = {200.0};
-    Points3D pts2; pts2.x = {5,6,5.5}; pts2.y = {0,0,1}; pts2.z = {0,0,0};
+    Point3DFrame pts2; pts2.x = {5,6,5.5}; pts2.y = {0,0,1}; pts2.z = {0,0,0};
     pair2.Points3D = {pts2};
     pair2.corrComb = {{0.95, 0.88, 0.92}};
     pair2.FaceCorrComb = {{0.95}};
@@ -442,7 +442,7 @@ void test_stitchPairsGeometric_single_pair() {
     pair.cameraPairInd = {1, 2};
     pair.Faces = {0, 1, 2, 0, 2, 3};
     pair.FaceColors = {100.0, 110.0};
-    Points3D pts; pts.x = {0,1,0,1}; pts.y = {0,0,1,1}; pts.z = {0,0,0,0};
+    Point3DFrame pts; pts.x = {0,1,0,1}; pts.y = {0,0,1,1}; pts.z = {0,0,0,0};
     pair.Points3D = {pts};
     pair.corrComb = {{0.9, 0.8, 0.85, 0.82}};
     pair.FaceCorrComb = {{0.9, 0.85}};
@@ -471,7 +471,7 @@ void test_stitchPairsGeometric_overlap_removal() {
     // Pair1: quad at x=[0,2], y=[0,1]
     pair1.Faces = {0,1,3, 0,3,2};
     pair1.FaceColors = {100.0, 110.0};
-    Points3D pts1; pts1.x = {0,2,0,2}; pts1.y = {0,0,1,1}; pts1.z = {0,0,0,0};
+    Point3DFrame pts1; pts1.x = {0,2,0,2}; pts1.y = {0,0,1,1}; pts1.z = {0,0,0,0};
     pair1.Points3D = {pts1};
     pair1.corrComb = {{0.9, 0.9, 0.9, 0.9}};
     pair1.FaceCorrComb = {{0.9, 0.9}};
@@ -482,7 +482,7 @@ void test_stitchPairsGeometric_overlap_removal() {
     // Pair2: quad at x=[1,3], y=[0,1] (overlaps pair1 in x=[1,2])
     pair2.Faces = {0,1,3, 0,3,2};
     pair2.FaceColors = {200.0, 210.0};
-    Points3D pts2; pts2.x = {1,3,1,3}; pts2.y = {0,0,1,1}; pts2.z = {0,0,0,0};
+    Point3DFrame pts2; pts2.x = {1,3,1,3}; pts2.y = {0,0,1,1}; pts2.z = {0,0,0,0};
     pair2.Points3D = {pts2};
     pair2.corrComb = {{0.9, 0.9, 0.9, 0.9}};
     pair2.FaceCorrComb = {{0.9, 0.9}};

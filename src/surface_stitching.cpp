@@ -930,7 +930,7 @@ DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3DpairResults>& all_pair
     std::vector<double> cur_faceColors = all_pairs[first_idx].FaceColors;
     std::vector<int> cur_facePairInds(cur_faces.size() / 3, pair_order[0]);
     // Per-frame data: Points3D, corrComb stored as vectors-of-frames
-    std::vector<Points3D> cur_pts3d = all_pairs[first_idx].Points3D;
+    std::vector<Point3DFrame> cur_pts3d = all_pairs[first_idx].Points3D;
     std::vector<std::vector<double>> cur_corrComb = all_pairs[first_idx].corrComb;
     std::vector<int> cur_pointPairInds(cur_pts3d[0].x.size(), pair_order[0]);
     
@@ -1216,7 +1216,7 @@ DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3DpairResults>& all_pair
         combined_facePairInds.insert(combined_facePairInds.end(), nZipFaces, static_cast<int>(nPairs + ipair));
         
         // Combined Points3D and corrComb for all frames
-        std::vector<Points3D> combined_pts3d(nFrames);
+        std::vector<Point3DFrame> combined_pts3d(nFrames);
         std::vector<std::vector<double>> combined_corrComb(nFrames);
         for (size_t f = 0; f < nFrames; ++f) {
             // Concatenate vertices: [current ; next]

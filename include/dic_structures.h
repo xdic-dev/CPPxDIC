@@ -59,7 +59,7 @@ struct Points2D {
 /**
  * 3D Points per frame
  */
-struct Points3D {
+struct Point3DFrame {
     std::vector<double> x;  // X coordinates
     std::vector<double> y;  // Y coordinates
     std::vector<double> z;  // Z coordinates
@@ -130,7 +130,7 @@ struct DIC3DpairResults {
     std::vector<double> FaceColors;  // Face colors (1 x nFaces)
     
     // Per-frame data (cell arrays nImages x 1)
-    std::vector<Points3D> Points3D;  // 3D points per frame
+    std::vector<Point3DFrame> Points3D;  // 3D points per frame
     DispData Disp;  // DispVec, DispMgn per frame
     std::vector<std::vector<double>> FaceCentroids;  // Face centroids per frame (nFrames x (nFaces*3))
     std::vector<std::vector<double>> corrComb;  // Combined correlation per frame
@@ -144,7 +144,7 @@ struct DIC3DpairResults {
  */
 struct DIC3Dcombined {
     std::vector<int> pairIndices;  // Camera pair indices
-    std::vector<Points3D> Points3D;  // 3D points per frame (cell array in MATLAB)
+    std::vector<Point3DFrame> Points3D;  // 3D points per frame (cell array in MATLAB)
     std::vector<int> Faces;  // Triangular mesh faces (Nx3 flattened)
     std::vector<double> FaceColors;  // Face colors
     std::vector<std::vector<double>> corrComb;  // Combined correlation coefficients per frame

@@ -75,13 +75,13 @@ void readVector2D(std::ifstream& ifs, std::vector<std::vector<T>>& vec) {
     }
 }
 
-void writePoints3D(std::ofstream& ofs, const Points3D& pts) {
+void writePoints3D(std::ofstream& ofs, const Point3DFrame& pts) {
     writeVector(ofs, pts.x);
     writeVector(ofs, pts.y);
     writeVector(ofs, pts.z);
 }
 
-void readPoints3D(std::ifstream& ifs, Points3D& pts) {
+void readPoints3D(std::ifstream& ifs, Point3DFrame& pts) {
     readVector(ifs, pts.x);
     readVector(ifs, pts.y);
     readVector(ifs, pts.z);

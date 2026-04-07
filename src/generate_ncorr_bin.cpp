@@ -31,6 +31,15 @@
 #include "ncorr.h"
 #include "mat_reader.h"
 
+// HDF5 API compatibility: H5Rdereference changed signature between 1.10 and 1.12
+#if H5_VERSION_GE(1, 12, 0)
+  #define H5Rdereference_compat(file_id, ref) H5Rdereference2((file_id), H5P_DEFAULT, H5R_OBJECT, (ref))
+#elif H5_VERSION_GE(1, 10, 0)
+  #define H5Rdereference_compat(file_id, ref) H5Rdereference1((file_id), H5R_OBJECT, (ref))
+#else
+  #define H5Rdereference_compat(file_id, ref) H5Rdereference((file_id), H5R_OBJECT, (ref))
+#endif
+
 using namespace ncorr;
 using namespace cppxdic;
 
@@ -49,7 +58,7 @@ static matvar_t* getField(matvar_t* parent, const char* name) {
 
 // Read a 2D double dataset from an HDF5 object id (column-major → Array2D row-major)
 static Array2D<double> h5ReadDoubleArray2D(hid_t file_id, const hobj_ref_t& ref) {
-    hid_t obj_id = H5Rdereference(file_id, H5P_DEFAULT, H5R_OBJECT, &ref);
+    hid_t obj_id = H5Rdereference_compat(file_id, &ref);
     if (obj_id < 0) return {};
 
     hid_t space = H5Dget_space(obj_id);
@@ -86,7 +95,7 @@ static Array2D<double> h5ReadDoubleArray2D(hid_t file_id, const hobj_ref_t& ref)
 
 // Read a 2D uint8/logical mask from an HDF5 object ref → Array2D<bool>
 static Array2D<bool> h5ReadMask2D(hid_t file_id, const hobj_ref_t& ref) {
-    hid_t obj_id = H5Rdereference(file_id, H5P_DEFAULT, H5R_OBJECT, &ref);
+    hid_t obj_id = H5Rdereference_compat(file_id, &ref);
     if (obj_id < 0) return {};
 
     hid_t space = H5Dget_space(obj_id);
