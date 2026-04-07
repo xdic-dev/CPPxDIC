@@ -1156,27 +1156,27 @@ bool MatWriter::writeDIC2DPairResults(const std::string& filename,
     
     // Add scalar fields
     matvar_t* diffnorm_var = Mat_VarCreate("cutoff_diffnorm", MAT_C_DOUBLE, MAT_T_DOUBLE,
-                                          2, scalar_dims, &results.ncorrInfo.cutoff_diffnorm, 0);
+                                          2, scalar_dims, (void*)&results.ncorrInfo.cutoff_diffnorm, 0);
     Mat_VarSetStructFieldByName(ncorr_struct, "cutoff_diffnorm", 0, diffnorm_var);
     
     matvar_t* iteration_var = Mat_VarCreate("cutoff_iteration", MAT_C_INT32, MAT_T_INT32,
-                                           2, scalar_dims, &results.ncorrInfo.cutoff_iteration, 0);
+                                           2, scalar_dims, (void*)&results.ncorrInfo.cutoff_iteration, 0);
     Mat_VarSetStructFieldByName(ncorr_struct, "cutoff_iteration", 0, iteration_var);
     
     matvar_t* lenscoef_var = Mat_VarCreate("lenscoef", MAT_C_INT32, MAT_T_INT32,
-                                          2, scalar_dims, &results.ncorrInfo.lenscoef, 0);
+                                          2, scalar_dims, (void*)&results.ncorrInfo.lenscoef, 0);
     Mat_VarSetStructFieldByName(ncorr_struct, "lenscoef", 0, lenscoef_var);
     
     matvar_t* pixtounits_var = Mat_VarCreate("pixtounits", MAT_C_DOUBLE, MAT_T_DOUBLE,
-                                            2, scalar_dims, &results.ncorrInfo.pixtounits, 0);
+                                            2, scalar_dims, (void*)&results.ncorrInfo.pixtounits, 0);
     Mat_VarSetStructFieldByName(ncorr_struct, "pixtounits", 0, pixtounits_var);
     
     matvar_t* radius_var = Mat_VarCreate("radius", MAT_C_INT32, MAT_T_INT32,
-                                        2, scalar_dims, &results.ncorrInfo.radius, 0);
+                                        2, scalar_dims, (void*)&results.ncorrInfo.radius, 0);
     Mat_VarSetStructFieldByName(ncorr_struct, "radius", 0, radius_var);
     
     matvar_t* spacing_var = Mat_VarCreate("spacing", MAT_C_INT32, MAT_T_INT32,
-                                         2, scalar_dims, &results.ncorrInfo.spacing, 0);
+                                         2, scalar_dims, (void*)&results.ncorrInfo.spacing, 0);
     Mat_VarSetStructFieldByName(ncorr_struct, "spacing", 0, spacing_var);
     
     // Add stepanalysis struct
@@ -1201,7 +1201,7 @@ bool MatWriter::writeDIC2DPairResults(const std::string& filename,
     Mat_VarSetStructFieldByName(stepanalysis_struct, "auto", 0, auto_var);
     
     matvar_t* step_var = Mat_VarCreate("step", MAT_C_INT32, MAT_T_INT32,
-                                      2, scalar_dims, &results.ncorrInfo.stepanalysis.step, 0);
+                                      2, scalar_dims, (void*)&results.ncorrInfo.stepanalysis.step, 0);
     Mat_VarSetStructFieldByName(stepanalysis_struct, "step", 0, step_var);
     
     Mat_VarSetStructFieldByName(ncorr_struct, "stepanalysis", 0, stepanalysis_struct);
@@ -1212,7 +1212,7 @@ bool MatWriter::writeDIC2DPairResults(const std::string& filename,
     Mat_VarSetStructFieldByName(ncorr_struct, "subsettrunc", 0, subsettrunc_var);
     
     matvar_t* threads_var = Mat_VarCreate("total_threads", MAT_C_INT32, MAT_T_INT32,
-                                         2, scalar_dims, &results.ncorrInfo.total_threads, 0);
+                                         2, scalar_dims, (void*)&results.ncorrInfo.total_threads, 0);
     Mat_VarSetStructFieldByName(ncorr_struct, "total_threads", 0, threads_var);
     
     // Add string fields
