@@ -30,6 +30,19 @@ From: ubuntu:22.04
     # System packages
     # =========================================================================
     export DEBIAN_FRONTEND=noninteractive
+    # Packages installed:
+    #   build-essential, cmake, g++, git, pkg-config  - build tools
+    #   libopencv-dev                                  - OpenCV (core, imgproc, imgcodecs, highgui, videoio)
+    #   libfftw3-dev                                   - FFTW3
+    #   libmatio-dev                                   - MATIO (MATLAB .mat I/O)
+    #   libhdf5-dev                                    - HDF5 (required by matio for v7.3 format)
+    #   libcgal-dev                                    - CGAL (Delaunay triangulation)
+    #   libeigen3-dev                                  - Eigen3 (header-only linear algebra)
+    #   libsuitesparse-dev                             - SuiteSparse (spqr, cholmod, amd, colamd)
+    #   liblapack-dev, libblas-dev, libopenblas-dev    - BLAS / LAPACK
+    #   libomp-dev                                     - OpenMP
+    #   nlohmann-json3-dev                             - nlohmann/json (header-only JSON)
+    #   pthreads is included in libc (no extra package needed)
     apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         cmake \
@@ -38,29 +51,18 @@ From: ubuntu:22.04
         pkg-config \
         ca-certificates \
         wget \
-        # OpenCV
         libopencv-dev \
-        # FFTW3
         libfftw3-dev \
-        # MATIO (MATLAB .mat I/O)
         libmatio-dev \
-        # HDF5 (required by matio for v7.3 format)
         libhdf5-dev \
-        # CGAL (Delaunay triangulation)
         libcgal-dev \
-        # Eigen3 (header-only linear algebra)
         libeigen3-dev \
-        # SuiteSparse (spqr, cholmod, amd, colamd)
         libsuitesparse-dev \
-        # BLAS / LAPACK
         liblapack-dev \
         libblas-dev \
         libopenblas-dev \
-        # OpenMP
         libomp-dev \
-        # nlohmann/json (header-only JSON)
         nlohmann-json3-dev \
-        # Pthreads is included in libc
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
