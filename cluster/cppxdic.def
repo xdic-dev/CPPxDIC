@@ -86,8 +86,11 @@ From: ubuntu:22.04
     # =========================================================================
     # Clone and build CPPxDIC
     # =========================================================================
-    mkdir -p /opt/cppxdic/src
-    # Copy source from build context (see %files) — already placed in /opt/cppxdic/src
+    # Clean any stale build artifacts copied from the host
+    rm -rf /opt/cppxdic/src/build
+    rm -rf /opt/cppxdic/src/tests/build
+    rm -rf /opt/cppxdic/src/Tools/CppNCorr/lib
+    rm -f  /opt/cppxdic/src/compile_commands.json
     
     cd /opt/cppxdic/src
     mkdir -p build && cd build
@@ -95,8 +98,7 @@ From: ubuntu:22.04
     cmake .. \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/opt/cppxdic \
-        -DCMAKE_CXX_STANDARD=17 \
-        -DCMAKE_CXX_FLAGS="-O3 -DNDEBUG"
+        -DCMAKE_CXX_STANDARD=17
     
     make -j$(nproc)
     make install
