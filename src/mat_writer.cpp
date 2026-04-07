@@ -15,6 +15,9 @@
 
 namespace cppxdic {
 
+// Reusable 1x1 dims for Mat_VarCreate scalar calls (avoids compound literal temporaries)
+static size_t scalar_dims[2] = {1, 1};
+
 bool MatWriter::writeMatchingFile(const std::string& filename,
                                  const cv::Mat& ref_img,
                                  const cv::Mat& cur_img,
@@ -636,7 +639,7 @@ bool MatWriter::writeArrayVariable(mat_t* matfp,
     int rank = dims.size();
     
     matvar_t* matvar = Mat_VarCreate(varname.c_str(), class_type, data_type,
-                                     rank, dims.data(), (void*)data, 0);
+                                     rank, const_cast<size_t*>(dims.data()), (void*)data, 0);
     if (!matvar) {
         std::cerr << "Failed to create array variable: " << varname << std::endl;
         return false;
@@ -1153,27 +1156,27 @@ bool MatWriter::writeDIC2DPairResults(const std::string& filename,
     
     // Add scalar fields
     matvar_t* diffnorm_var = Mat_VarCreate("cutoff_diffnorm", MAT_C_DOUBLE, MAT_T_DOUBLE,
-                                          2, (size_t[]){1,1}, &results.ncorrInfo.cutoff_diffnorm, 0);
+                                          2, scalar_dims, &results.ncorrInfo.cutoff_diffnorm, 0);
     Mat_VarSetStructFieldByName(ncorr_struct, "cutoff_diffnorm", 0, diffnorm_var);
     
     matvar_t* iteration_var = Mat_VarCreate("cutoff_iteration", MAT_C_INT32, MAT_T_INT32,
-                                           2, (size_t[]){1,1}, &results.ncorrInfo.cutoff_iteration, 0);
+                                           2, scalar_dims, &results.ncorrInfo.cutoff_iteration, 0);
     Mat_VarSetStructFieldByName(ncorr_struct, "cutoff_iteration", 0, iteration_var);
     
     matvar_t* lenscoef_var = Mat_VarCreate("lenscoef", MAT_C_INT32, MAT_T_INT32,
-                                          2, (size_t[]){1,1}, &results.ncorrInfo.lenscoef, 0);
+                                          2, scalar_dims, &results.ncorrInfo.lenscoef, 0);
     Mat_VarSetStructFieldByName(ncorr_struct, "lenscoef", 0, lenscoef_var);
     
     matvar_t* pixtounits_var = Mat_VarCreate("pixtounits", MAT_C_DOUBLE, MAT_T_DOUBLE,
-                                            2, (size_t[]){1,1}, &results.ncorrInfo.pixtounits, 0);
+                                            2, scalar_dims, &results.ncorrInfo.pixtounits, 0);
     Mat_VarSetStructFieldByName(ncorr_struct, "pixtounits", 0, pixtounits_var);
     
     matvar_t* radius_var = Mat_VarCreate("radius", MAT_C_INT32, MAT_T_INT32,
-                                        2, (size_t[]){1,1}, &results.ncorrInfo.radius, 0);
+                                        2, scalar_dims, &results.ncorrInfo.radius, 0);
     Mat_VarSetStructFieldByName(ncorr_struct, "radius", 0, radius_var);
     
     matvar_t* spacing_var = Mat_VarCreate("spacing", MAT_C_INT32, MAT_T_INT32,
-                                         2, (size_t[]){1,1}, &results.ncorrInfo.spacing, 0);
+                                         2, scalar_dims, &results.ncorrInfo.spacing, 0);
     Mat_VarSetStructFieldByName(ncorr_struct, "spacing", 0, spacing_var);
     
     // Add stepanalysis struct
@@ -1182,7 +1185,7 @@ bool MatWriter::writeDIC2DPairResults(const std::string& filename,
     
     int enabled_int = results.ncorrInfo.stepanalysis.enabled ? 1 : 0;
     matvar_t* enabled_var = Mat_VarCreate("enabled", MAT_C_INT32, MAT_T_INT32,
-                                         2, (size_t[]){1,1}, &enabled_int, 0);
+                                         2, scalar_dims, &enabled_int, 0);
     Mat_VarSetStructFieldByName(stepanalysis_struct, "enabled", 0, enabled_var);
     
     if (!results.ncorrInfo.stepanalysis.type.empty()) {
@@ -1194,22 +1197,22 @@ bool MatWriter::writeDIC2DPairResults(const std::string& filename,
     
     int auto_int = results.ncorrInfo.stepanalysis.auto_update ? 1 : 0;
     matvar_t* auto_var = Mat_VarCreate("auto", MAT_C_INT32, MAT_T_INT32,
-                                      2, (size_t[]){1,1}, &auto_int, 0);
+                                      2, scalar_dims, &auto_int, 0);
     Mat_VarSetStructFieldByName(stepanalysis_struct, "auto", 0, auto_var);
     
     matvar_t* step_var = Mat_VarCreate("step", MAT_C_INT32, MAT_T_INT32,
-                                      2, (size_t[]){1,1}, &results.ncorrInfo.stepanalysis.step, 0);
+                                      2, scalar_dims, &results.ncorrInfo.stepanalysis.step, 0);
     Mat_VarSetStructFieldByName(stepanalysis_struct, "step", 0, step_var);
     
     Mat_VarSetStructFieldByName(ncorr_struct, "stepanalysis", 0, stepanalysis_struct);
     
     int subsettrunc_int = results.ncorrInfo.subsettrunc ? 1 : 0;
     matvar_t* subsettrunc_var = Mat_VarCreate("subsettrunc", MAT_C_INT32, MAT_T_INT32,
-                                             2, (size_t[]){1,1}, &subsettrunc_int, 0);
+                                             2, scalar_dims, &subsettrunc_int, 0);
     Mat_VarSetStructFieldByName(ncorr_struct, "subsettrunc", 0, subsettrunc_var);
     
     matvar_t* threads_var = Mat_VarCreate("total_threads", MAT_C_INT32, MAT_T_INT32,
-                                         2, (size_t[]){1,1}, &results.ncorrInfo.total_threads, 0);
+                                         2, scalar_dims, &results.ncorrInfo.total_threads, 0);
     Mat_VarSetStructFieldByName(ncorr_struct, "total_threads", 0, threads_var);
     
     // Add string fields
@@ -2312,17 +2315,17 @@ bool MatWriter::writeDIC2Dinfo(mat_t* matfp,
         // Write scalar fields (MATLAB stores as 1×1 double)
         double ncamref_dbl = static_cast<double>(dic2d.nCamRef);
         matvar_t* ncamref_var = Mat_VarCreate("nCamRef", MAT_C_DOUBLE, MAT_T_DOUBLE,
-                                             2, (size_t[]){1,1}, &ncamref_dbl, 0);
+                                             2, scalar_dims, &ncamref_dbl, 0);
         Mat_VarSetStructFieldByName(dic2d_struct, "nCamRef", 0, ncamref_var);
         
         double ncamdef_dbl = static_cast<double>(dic2d.nCamDef);
         matvar_t* ncamdef_var = Mat_VarCreate("nCamDef", MAT_C_DOUBLE, MAT_T_DOUBLE,
-                                             2, (size_t[]){1,1}, &ncamdef_dbl, 0);
+                                             2, scalar_dims, &ncamdef_dbl, 0);
         Mat_VarSetStructFieldByName(dic2d_struct, "nCamDef", 0, ncamdef_var);
         
         double nimages_dbl = static_cast<double>(dic2d.nImages);
         matvar_t* nimages_var = Mat_VarCreate("nImages", MAT_C_DOUBLE, MAT_T_DOUBLE,
-                                             2, (size_t[]){1,1}, &nimages_dbl, 0);
+                                             2, scalar_dims, &nimages_dbl, 0);
         Mat_VarSetStructFieldByName(dic2d_struct, "nImages", 0, nimages_var);
 
         if (!dic2d.pairOrder.empty()) {
@@ -2335,7 +2338,7 @@ bool MatWriter::writeDIC2Dinfo(mat_t* matfp,
 
         double pair_forced_dbl = dic2d.pairForced ? 1.0 : 0.0;
         matvar_t* pair_forced_var = Mat_VarCreate("pairForced", MAT_C_DOUBLE, MAT_T_DOUBLE,
-                                                  2, (size_t[]){1,1}, &pair_forced_dbl, 0);
+                                                  2, scalar_dims, &pair_forced_dbl, 0);
         Mat_VarSetStructFieldByName(dic2d_struct, "pairForced", 0, pair_forced_var);
         
         // Write ROImask if available
@@ -2368,7 +2371,7 @@ bool MatWriter::writeDIC2Dinfo(mat_t* matfp,
         
         double enabled_dbl = dic2d.ncorrInfo.stepanalysis.enabled ? 1.0 : 0.0;
         matvar_t* enabled_var = Mat_VarCreate("enabled", MAT_C_DOUBLE, MAT_T_DOUBLE,
-                                             2, (size_t[]){1,1}, &enabled_dbl, 0);
+                                             2, scalar_dims, &enabled_dbl, 0);
         Mat_VarSetStructFieldByName(stepanalysis_struct, "enabled", 0, enabled_var);
         
         if (!dic2d.ncorrInfo.stepanalysis.type.empty()) {
@@ -2380,12 +2383,12 @@ bool MatWriter::writeDIC2Dinfo(mat_t* matfp,
         
         double auto_dbl = dic2d.ncorrInfo.stepanalysis.auto_update ? 1.0 : 0.0;
         matvar_t* auto_var = Mat_VarCreate("auto", MAT_C_DOUBLE, MAT_T_DOUBLE,
-                                          2, (size_t[]){1,1}, &auto_dbl, 0);
+                                          2, scalar_dims, &auto_dbl, 0);
         Mat_VarSetStructFieldByName(stepanalysis_struct, "auto", 0, auto_var);
         
         double step_dbl = static_cast<double>(dic2d.ncorrInfo.stepanalysis.step);
         matvar_t* step_var = Mat_VarCreate("step", MAT_C_DOUBLE, MAT_T_DOUBLE,
-                                          2, (size_t[]){1,1}, &step_dbl, 0);
+                                          2, scalar_dims, &step_dbl, 0);
         Mat_VarSetStructFieldByName(stepanalysis_struct, "step", 0, step_var);
         
         Mat_VarSetStructFieldByName(ncorr_struct, "stepanalysis", 0, stepanalysis_struct);
