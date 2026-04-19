@@ -1,0 +1,23 @@
+# Build artifacts
+build/
+tests/build/
+Tools/CppNCorr/lib/
+compile_commands.json
+*.o
+*.a
+*.sif
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Container / cluster outputs
+cluster/*.sif
+logs/
