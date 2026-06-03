@@ -31,7 +31,8 @@ DIC3Dcombined stitchPairsSimple(const std::vector<DIC3DpairResults>& all_pairs);
  * @return Stitched DIC3Dcombined structure with overlaps removed
  */
 DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3DpairResults>& all_pairs,
-                                    const std::vector<int>& pair_order);
+                                    const std::vector<int>& pair_order,
+                                    bool pair_forced = false);
 
 // ============================================================================
 // Helper functions for geometric stitching
@@ -71,7 +72,8 @@ std::pair<std::vector<bool>, std::vector<bool>> removeOverlapSurfaces(
     const std::vector<int>& faces2,
     const std::vector<Eigen::Vector3d>& vertices1,
     const std::vector<Eigen::Vector3d>& vertices2,
-    double min_gap);
+    double min_gap,
+    bool pair_forced = false);
 
 /**
  * Group boundary edges into connected components.

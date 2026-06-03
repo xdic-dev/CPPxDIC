@@ -1224,7 +1224,7 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     std::cout << std::endl;
                     std::cout << "  Pair forced metadata: " << (stitch_pair_forced ? "true" : "false")
                               << std::endl;
-                    stitched = stitchPairsGeometric(all_pairs, stitch_pair_order);
+                    stitched = stitchPairsGeometric(all_pairs, stitch_pair_order, stitch_pair_forced);
                     std::cout << "INFO - Geometric Stitching done!" << std::endl;
                 } else {
                     if (all_pairs.size() > 1) {
