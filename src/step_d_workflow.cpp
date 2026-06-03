@@ -1221,6 +1221,13 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
         config_.debug_mode
     );
     
+    // CRITICAL FIX: Override update_corrcoef to disable correlation-based reference updates.
+    // MATLAB ncorr uses fixed-step reference changes (step_ref_change=10), not correlation-based.
+    // The KEEP_MOST_POINTS preset sets update_corrcoef=0.5, which causes frequent ref updates
+    // when correlation drops, leading to ROI fragmentation and divergence around frame 60-70.
+    // Setting this to ncorr_cutoff_corrcoef (default 10.0) effectively disables correlation-based updates.
+    dic_input.update_corrcoef = config_.ncorr_cutoff_corrcoef;
+    
     // Run DIC analysis (returns Lagrangian perspective in pixels)
     ncorr::DIC_analysis_output dic_output_raw;
     
