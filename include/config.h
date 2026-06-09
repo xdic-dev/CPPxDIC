@@ -19,7 +19,7 @@ struct StepConfig {
     int spacing = 10;
     double cutoff_diffnorm = 1e-5;
     int cutoff_iteration = 100;
-    int total_threads = 6;
+    int total_threads = 64;
     bool high_strain_enabled = true;
     std::string seed_type = "seed";
     bool auto_update = true;
