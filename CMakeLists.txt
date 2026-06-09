@@ -40,6 +40,10 @@ add_executable(cppxdic
 # Find OpenCV (following ncorr pattern)
 find_package(OpenCV REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})
+# On Ubuntu/Debian, OpenCV may be in /usr/include/opencv4/
+if(EXISTS "/usr/include/opencv4")
+    include_directories("/usr/include/opencv4")
+endif()
 target_link_libraries(cppxdic ${OpenCV_LIBS})
 
 # Add ncorr library
