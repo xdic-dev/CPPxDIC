@@ -287,59 +287,421 @@ std::vector<double> computeEdgeLengths(const std::vector<int>& faces,
     return edge_lengths;
 }
 
+// ============================================================================
+// MATLAB-faithful overlap removal helpers
+// ============================================================================
+
+// Per-vertex area-weighted normal. Matches MATLAB patchNormal(F,V).
+// Each face's geometric normal (B-A)x(C-A) has magnitude == 2*area, so summing
+// over incident faces yields an area-weighted average; we then unit-normalize.
+static std::vector<Eigen::Vector3d> computeVertexNormals(
+    const std::vector<int>& faces,
+    const std::vector<Eigen::Vector3d>& vertices) {
+
+    std::vector<Eigen::Vector3d> normals(vertices.size(), Eigen::Vector3d::Zero());
+    size_t nF = faces.size() / 3;
+    for (size_t i = 0; i < nF; ++i) {
+        int v0 = faces[i*3], v1 = faces[i*3+1], v2 = faces[i*3+2];
+        if (v0 < 0 || v1 < 0 || v2 < 0) continue;
+        if (static_cast<size_t>(v0) >= vertices.size() ||
+            static_cast<size_t>(v1) >= vertices.size() ||
+            static_cast<size_t>(v2) >= vertices.size()) continue;
+        const auto& A = vertices[v0];
+        const auto& B = vertices[v1];
+        const auto& C = vertices[v2];
+        if (A.hasNaN() || B.hasNaN() || C.hasNaN()) continue;
+        Eigen::Vector3d n = (B - A).cross(C - A); // area-weighted
+        normals[v0] += n;
+        normals[v1] += n;
+        normals[v2] += n;
+    }
+    for (auto& n : normals) {
+        double nm = n.norm();
+        if (nm > 0.0) n /= nm;
+    }
+    return normals;
+}
+
+// Möller–Trumbore ray-triangle intersection. Two-sided triangle (no backface
+// culling); semi-infinite ray (t >= 0). Returns parametric t along D, or NaN.
+static double rayTriangleHit(const Eigen::Vector3d& O,
+                             const Eigen::Vector3d& D,
+                             const Eigen::Vector3d& A,
+                             const Eigen::Vector3d& B,
+                             const Eigen::Vector3d& C,
+                             double eps) {
+    Eigen::Vector3d E1 = B - A;
+    Eigen::Vector3d E2 = C - A;
+    Eigen::Vector3d P = D.cross(E2);
+    double det = E1.dot(P);
+    if (std::abs(det) < eps) return std::nan(""); // ray parallel to triangle
+    double inv_det = 1.0 / det;
+    Eigen::Vector3d T = O - A;
+    double u = T.dot(P) * inv_det;
+    if (u < 0.0 || u > 1.0) return std::nan("");
+    Eigen::Vector3d Q = T.cross(E1);
+    double v = D.dot(Q) * inv_det;
+    if (v < 0.0 || u + v > 1.0) return std::nan("");
+    double t = E2.dot(Q) * inv_det;
+    if (t < 0.0) return std::nan(""); // semi-infinite ray
+    return t;
+}
+
+// For each (origin, direction) pair, find closest hit point on the mesh.
+// Returns hit positions; NaN-filled Vector3d when no hit.
+// Matches MATLAB triSurfRaySetIntersect with optStruct.ray='ray', triangle='two sided'.
+static std::vector<Eigen::Vector3d> raySetTriangleIntersect(
+    const std::vector<Eigen::Vector3d>& origins,
+    const std::vector<Eigen::Vector3d>& dirs,
+    const std::vector<int>& faces,
+    const std::vector<Eigen::Vector3d>& vertices,
+    double eps = 1e-6) {
+
+    std::vector<Eigen::Vector3d> hits(origins.size(),
+                                      Eigen::Vector3d::Constant(std::nan("")));
+    size_t nF = faces.size() / 3;
+    for (size_t r = 0; r < origins.size(); ++r) {
+        const auto& O = origins[r];
+        const auto& D = dirs[r];
+        if (O.hasNaN() || D.hasNaN() || D.norm() < 1e-12) continue;
+        double best_t = std::numeric_limits<double>::infinity();
+        for (size_t i = 0; i < nF; ++i) {
+            int v0 = faces[i*3], v1 = faces[i*3+1], v2 = faces[i*3+2];
+            if (v0 < 0 || v1 < 0 || v2 < 0) continue;
+            if (static_cast<size_t>(v0) >= vertices.size() ||
+                static_cast<size_t>(v1) >= vertices.size() ||
+                static_cast<size_t>(v2) >= vertices.size()) continue;
+            const auto& A = vertices[v0];
+            const auto& B = vertices[v1];
+            const auto& C = vertices[v2];
+            if (A.hasNaN() || B.hasNaN() || C.hasNaN()) continue;
+            double t = rayTriangleHit(O, D, A, B, C, eps);
+            if (!std::isnan(t) && t < best_t) best_t = t;
+        }
+        if (std::isfinite(best_t)) hits[r] = O + best_t * D;
+    }
+    return hits;
+}
+
+// triSurfSetDist(F1,V1,F2,V2,'ray'): per-vertex ray-trace distance from V1
+// (along its outward normal) onto surface (F2,V2). NaN if no hit.
+static std::vector<double> computeRaySurfaceDistance(
+    const std::vector<Eigen::Vector3d>& V1,
+    const std::vector<Eigen::Vector3d>& N1,
+    const std::vector<int>& F2,
+    const std::vector<Eigen::Vector3d>& V2) {
+
+    auto hits = raySetTriangleIntersect(V1, N1, F2, V2, 1e-6);
+    std::vector<double> Q(V1.size(), std::nan(""));
+    for (size_t i = 0; i < V1.size(); ++i) {
+        if (!hits[i].hasNaN()) Q[i] = (V1[i] - hits[i]).norm();
+    }
+    return Q;
+}
+
+// Mean of finite triangle edge lengths (NaN-safe).
+static double meanFiniteEdgeLength(const std::vector<int>& faces,
+                                   const std::vector<Eigen::Vector3d>& vertices) {
+    auto el = computeEdgeLengths(faces, vertices);
+    double sum = 0.0;
+    size_t n = 0;
+    for (double e : el) { if (std::isfinite(e)) { sum += e; ++n; } }
+    return n ? sum / static_cast<double>(n) : 0.0;
+}
+
+// Filter face list by per-face keep mask (flat [v0,v1,v2, ...] in/out).
+static std::vector<int> applyFaceMask(const std::vector<int>& F,
+                                      const std::vector<bool>& CT) {
+    std::vector<int> out;
+    size_t nF = F.size() / 3;
+    out.reserve(F.size());
+    for (size_t i = 0; i < nF; ++i) {
+        if (CT[i]) {
+            out.push_back(F[i*3]);
+            out.push_back(F[i*3+1]);
+            out.push_back(F[i*3+2]);
+        }
+    }
+    return out;
+}
+
+// Mark every still-active face that references v_remove as removed (CT[i]=false).
+// Matches MATLAB: logicF1Remove = ~any(logicV1Remove(F1),2); CT1 = CT1 & logicF1Remove.
+static bool removeFacesContainingVertex(const std::vector<int>& F,
+                                        std::vector<bool>& CT,
+                                        int v_remove) {
+    size_t nF = F.size() / 3;
+    bool removed_any = false;
+    for (size_t i = 0; i < nF; ++i) {
+        if (!CT[i]) continue;
+        if (F[i*3] == v_remove || F[i*3+1] == v_remove || F[i*3+2] == v_remove) {
+            CT[i] = false;
+            removed_any = true;
+        }
+    }
+    return removed_any;
+}
+
+// ============================================================================
+// Faithful port of removeOverlapSurface_temp_2018_10_30.m
+//
+// Two phase iterative erosion:
+//   Phase 1: ray-trace boundary vertices along their normals onto the other
+//     surface. A boundary vertex is "overlapping" if it ray-hits the other
+//     surface within 2*meanEdgeLength. Each iteration removes ALL active faces
+//     containing the worst-quality boundary vertex (the one with the largest
+//     pre-computed ray distance Q). Removal happens on the surface whose worst
+//     Q is larger; if pair_forced is true, we always remove from surface 2.
+//   Phase 2: gap closure. Using Euclidean min-distance from each boundary
+//     vertex to the other boundary's vertices PLUS its edge midpoints and
+//     1/4 / 3/4 points (closer-than-vertex sampling), remove faces while any
+//     boundary vertex sits within min_gap of the other boundary.
+//
+// min_gap should be 0.4 * meanEdgeLength (MATLAB caller convention).
+// ============================================================================
 std::pair<std::vector<bool>, std::vector<bool>> removeOverlapSurfaces(
     const std::vector<int>& faces1,
     const std::vector<int>& faces2,
-    const std::vector<Eigen::Vector3d>& vertices1,
-    const std::vector<Eigen::Vector3d>& vertices2,
-    double min_gap) {
-    
-    size_t nFaces1 = faces1.size() / 3;
-    size_t nFaces2 = faces2.size() / 3;
-    
-    std::vector<bool> keep1(nFaces1, true);
-    std::vector<bool> keep2(nFaces2, true);
-    
-    // Compute face centroids
-    std::vector<Eigen::Vector3d> centroids1(nFaces1), centroids2(nFaces2);
-    
-    for (size_t i = 0; i < nFaces1; ++i) {
-        int v0 = faces1[i*3], v1 = faces1[i*3+1], v2 = faces1[i*3+2];
-        if (static_cast<size_t>(v0) < vertices1.size() && static_cast<size_t>(v1) < vertices1.size() && static_cast<size_t>(v2) < vertices1.size())
-            centroids1[i] = (vertices1[v0] + vertices1[v1] + vertices1[v2]) / 3.0;
-        else
-            centroids1[i] = Eigen::Vector3d::Constant(std::nan(""));
-    }
-    for (size_t i = 0; i < nFaces2; ++i) {
-        int v0 = faces2[i*3], v1 = faces2[i*3+1], v2 = faces2[i*3+2];
-        if (static_cast<size_t>(v0) < vertices2.size() && static_cast<size_t>(v1) < vertices2.size() && static_cast<size_t>(v2) < vertices2.size())
-            centroids2[i] = (vertices2[v0] + vertices2[v1] + vertices2[v2]) / 3.0;
-        else
-            centroids2[i] = Eigen::Vector3d::Constant(std::nan(""));
-    }
-    
-    // Check each face of surface 1 against surface 2
-    for (size_t i = 0; i < nFaces1; ++i) {
-        if (centroids1[i].hasNaN()) continue;
-        double min_dist = std::numeric_limits<double>::infinity();
-        for (size_t j = 0; j < nFaces2; ++j) {
-            if (centroids2[j].hasNaN()) continue;
-            min_dist = std::min(min_dist, (centroids1[i] - centroids2[j]).norm());
+    const std::vector<Eigen::Vector3d>& V1,
+    const std::vector<Eigen::Vector3d>& V2,
+    double min_gap,
+    bool pair_forced) {
+
+    const size_t nF1 = faces1.size() / 3;
+    const size_t nF2 = faces2.size() / 3;
+    std::vector<bool> CT1(nF1, true);
+    std::vector<bool> CT2(nF2, true);
+    if (nF1 == 0 || nF2 == 0) return {CT1, CT2};
+
+    // Per-vertex normals + quality measure Q (ray distance) — computed once on
+    // the original full meshes, matching MATLAB lines 22-25, 60-62.
+    auto N1 = computeVertexNormals(faces1, V1);
+    auto N2 = computeVertexNormals(faces2, V2);
+    auto Q1 = computeRaySurfaceDistance(V1, N1, faces2, V2);
+    auto Q2 = computeRaySurfaceDistance(V2, N2, faces1, V1);
+
+    const double meanEdge =
+        0.5 * (meanFiniteEdgeLength(faces1, V1) + meanFiniteEdgeLength(faces2, V2));
+    if (meanEdge <= 0.0) return {CT1, CT2};
+    const double rayCloseThresh = 2.0 * meanEdge;
+
+    std::vector<bool> logicNoHit1(V1.size(), false);
+    std::vector<bool> logicNoHit2(V2.size(), false);
+
+    // Safety bound: in the worst case each iteration removes one face.
+    const size_t maxIter = nF1 + nF2 + 16;
+    size_t removed_phase1_s1 = 0, removed_phase1_s2 = 0;
+    size_t removed_phase2_s1 = 0, removed_phase2_s2 = 0;
+
+    // ---- Phase 1: ray-based overlap removal ----
+    for (size_t iter = 0; iter < maxIter; ++iter) {
+        auto F1cur = applyFaceMask(faces1, CT1);
+        auto F2cur = applyFaceMask(faces2, CT2);
+        if (F1cur.empty() || F2cur.empty()) break;
+
+        auto Eb1 = computeMeshBoundary(F1cur, V1);
+        auto Eb2 = computeMeshBoundary(F2cur, V2);
+
+        // Boundary vertex sets (unique), excluding previously-no-hit vertices.
+        std::set<int> b1set, b2set;
+        for (int v : Eb1) b1set.insert(v);
+        for (int v : Eb2) b2set.insert(v);
+        std::vector<int> ib1, ib2;
+        ib1.reserve(b1set.size()); ib2.reserve(b2set.size());
+        for (int v : b1set)
+            if (static_cast<size_t>(v) < logicNoHit1.size() && !logicNoHit1[v])
+                ib1.push_back(v);
+        for (int v : b2set)
+            if (static_cast<size_t>(v) < logicNoHit2.size() && !logicNoHit2[v])
+                ib2.push_back(v);
+
+        if (ib1.empty() && ib2.empty()) break;
+
+        int worst_v1 = -1, first_close_v1 = -1;
+        int worst_v2 = -1, first_close_v2 = -1;
+        double worstQ1 = -std::numeric_limits<double>::infinity();
+        double worstQ2 = -std::numeric_limits<double>::infinity();
+
+        if (!ib1.empty()) {
+            std::vector<Eigen::Vector3d> O(ib1.size()), D(ib1.size());
+            for (size_t i = 0; i < ib1.size(); ++i) { O[i] = V1[ib1[i]]; D[i] = N1[ib1[i]]; }
+            auto trace = raySetTriangleIntersect(O, D, F2cur, V2, 1e-6);
+            for (size_t i = 0; i < ib1.size(); ++i) {
+                bool close = !trace[i].hasNaN() &&
+                             (V1[ib1[i]] - trace[i]).norm() < rayCloseThresh;
+                if (!close) {
+                    logicNoHit1[ib1[i]] = true;
+                } else {
+                    if (first_close_v1 < 0) first_close_v1 = ib1[i];
+                    double q = Q1[ib1[i]];
+                    if (std::isfinite(q) && q > worstQ1) { worstQ1 = q; worst_v1 = ib1[i]; }
+                }
+            }
         }
-        if (min_dist < min_gap) keep1[i] = false;
-    }
-    
-    for (size_t j = 0; j < nFaces2; ++j) {
-        if (centroids2[j].hasNaN()) continue;
-        double min_dist = std::numeric_limits<double>::infinity();
-        for (size_t i = 0; i < nFaces1; ++i) {
-            if (centroids1[i].hasNaN()) continue;
-            min_dist = std::min(min_dist, (centroids2[j] - centroids1[i]).norm());
+        if (!ib2.empty()) {
+            std::vector<Eigen::Vector3d> O(ib2.size()), D(ib2.size());
+            for (size_t i = 0; i < ib2.size(); ++i) { O[i] = V2[ib2[i]]; D[i] = N2[ib2[i]]; }
+            auto trace = raySetTriangleIntersect(O, D, F1cur, V1, 1e-6);
+            for (size_t i = 0; i < ib2.size(); ++i) {
+                bool close = !trace[i].hasNaN() &&
+                             (V2[ib2[i]] - trace[i]).norm() < rayCloseThresh;
+                if (!close) {
+                    logicNoHit2[ib2[i]] = true;
+                } else {
+                    if (first_close_v2 < 0) first_close_v2 = ib2[i];
+                    double q = Q2[ib2[i]];
+                    if (std::isfinite(q) && q > worstQ2) { worstQ2 = q; worst_v2 = ib2[i]; }
+                }
+            }
         }
-        if (min_dist < min_gap) keep2[j] = false;
+
+        bool any_close_1 = (first_close_v1 >= 0);
+        bool any_close_2 = (first_close_v2 >= 0);
+        if (!any_close_1 && !any_close_2) break;
+
+        // Pick which surface to erode this iteration.
+        bool remove_from_1;
+        if (any_close_1 && any_close_2) {
+            // pair_forced -> always favor removing from surface 2 (MATLAB convention)
+            remove_from_1 = (!pair_forced) && (worstQ1 > worstQ2);
+        } else {
+            remove_from_1 = any_close_1;
+        }
+
+        int v_remove = remove_from_1 ? (worst_v1 >= 0 ? worst_v1 : first_close_v1)
+                                     : (worst_v2 >= 0 ? worst_v2 : first_close_v2);
+        if (v_remove < 0) break;
+
+        bool ok = remove_from_1
+            ? removeFacesContainingVertex(faces1, CT1, v_remove)
+            : removeFacesContainingVertex(faces2, CT2, v_remove);
+        if (!ok) break;
+        if (remove_from_1) ++removed_phase1_s1; else ++removed_phase1_s2;
     }
-    
-    return {keep1, keep2};
+
+    // ---- Phase 2: gap closure ----
+    // Iteratively remove the worst boundary face while either boundary sits
+    // within min_gap of the other (Euclidean distance to vertices + edge
+    // midpoints + 1/4 / 3/4 points). pair_forced is NOT considered in phase 2
+    // (matches MATLAB line 324: `if worstQ1>worstQ2` without pair_forced guard).
+    {
+        auto F1cur = applyFaceMask(faces1, CT1);
+        auto F2cur = applyFaceMask(faces2, CT2);
+        if (F1cur.empty() || F2cur.empty()) {
+            // Nothing to do in phase 2.
+        } else {
+            for (size_t iter = 0; iter < maxIter; ++iter) {
+                F1cur = applyFaceMask(faces1, CT1);
+                F2cur = applyFaceMask(faces2, CT2);
+                if (F1cur.empty() || F2cur.empty()) break;
+
+                auto Eb1 = computeMeshBoundary(F1cur, V1);
+                auto Eb2 = computeMeshBoundary(F2cur, V2);
+                if (Eb1.empty() || Eb2.empty()) break;
+
+                std::set<int> b1set, b2set;
+                for (int v : Eb1) b1set.insert(v);
+                for (int v : Eb2) b2set.insert(v);
+                std::vector<int> ib1(b1set.begin(), b1set.end());
+                std::vector<int> ib2(b2set.begin(), b2set.end());
+
+                // Build extended target sets (boundary verts + edge midpoints + 1/4,3/4).
+                std::vector<Eigen::Vector3d> tgt1, tgt2;
+                tgt1.reserve(ib1.size() + (Eb1.size() / 2) * 3);
+                tgt2.reserve(ib2.size() + (Eb2.size() / 2) * 3);
+                for (int v : ib1) tgt1.push_back(V1[v]);
+                for (int v : ib2) tgt2.push_back(V2[v]);
+                size_t nEb1 = Eb1.size() / 2, nEb2 = Eb2.size() / 2;
+                for (size_t i = 0; i < nEb1; ++i) {
+                    int a = Eb1[i*2], b = Eb1[i*2+1];
+                    if (static_cast<size_t>(a) >= V1.size() ||
+                        static_cast<size_t>(b) >= V1.size()) continue;
+                    const auto& A = V1[a]; const auto& B = V1[b];
+                    if (A.hasNaN() || B.hasNaN()) continue;
+                    tgt1.push_back(0.5  * (A + B));
+                    tgt1.push_back(0.25 * A + 0.75 * B);
+                    tgt1.push_back(0.75 * A + 0.25 * B);
+                }
+                for (size_t i = 0; i < nEb2; ++i) {
+                    int a = Eb2[i*2], b = Eb2[i*2+1];
+                    if (static_cast<size_t>(a) >= V2.size() ||
+                        static_cast<size_t>(b) >= V2.size()) continue;
+                    const auto& A = V2[a]; const auto& B = V2[b];
+                    if (A.hasNaN() || B.hasNaN()) continue;
+                    tgt2.push_back(0.5  * (A + B));
+                    tgt2.push_back(0.25 * A + 0.75 * B);
+                    tgt2.push_back(0.75 * A + 0.25 * B);
+                }
+
+                int worst_v1 = -1, first_close_v1 = -1;
+                int worst_v2 = -1, first_close_v2 = -1;
+                double worstQ1 = -std::numeric_limits<double>::infinity();
+                double worstQ2 = -std::numeric_limits<double>::infinity();
+                size_t close1 = 0, close2 = 0;
+
+                for (int v : ib1) {
+                    const auto& P = V1[v];
+                    if (P.hasNaN()) continue;
+                    double dmin = std::numeric_limits<double>::infinity();
+                    for (const auto& p : tgt2) {
+                        if (p.hasNaN()) continue;
+                        double d = (P - p).norm();
+                        if (d < dmin) dmin = d;
+                    }
+                    if (dmin < min_gap) {
+                        ++close1;
+                        if (first_close_v1 < 0) first_close_v1 = v;
+                        double q = Q1[v];
+                        if (std::isfinite(q) && q > worstQ1) { worstQ1 = q; worst_v1 = v; }
+                    }
+                }
+                for (int v : ib2) {
+                    const auto& P = V2[v];
+                    if (P.hasNaN()) continue;
+                    double dmin = std::numeric_limits<double>::infinity();
+                    for (const auto& p : tgt1) {
+                        if (p.hasNaN()) continue;
+                        double d = (P - p).norm();
+                        if (d < dmin) dmin = d;
+                    }
+                    if (dmin < min_gap) {
+                        ++close2;
+                        if (first_close_v2 < 0) first_close_v2 = v;
+                        double q = Q2[v];
+                        if (std::isfinite(q) && q > worstQ2) { worstQ2 = q; worst_v2 = v; }
+                    }
+                }
+
+                if (close1 == 0 && close2 == 0) break;
+
+                bool remove_from_1;
+                if (close1 > 0 && close2 > 0) {
+                    remove_from_1 = (worstQ1 > worstQ2);
+                } else {
+                    remove_from_1 = (close1 > 0);
+                }
+
+                int v_remove = remove_from_1
+                    ? (worst_v1 >= 0 ? worst_v1 : first_close_v1)
+                    : (worst_v2 >= 0 ? worst_v2 : first_close_v2);
+                if (v_remove < 0) break;
+
+                bool ok = remove_from_1
+                    ? removeFacesContainingVertex(faces1, CT1, v_remove)
+                    : removeFacesContainingVertex(faces2, CT2, v_remove);
+                if (!ok) break;
+                if (remove_from_1) ++removed_phase2_s1; else ++removed_phase2_s2;
+            }
+        }
+    }
+
+    std::cout << "    removeOverlapSurfaces: phase1 removed " << removed_phase1_s1
+              << " faces from S1, " << removed_phase1_s2 << " from S2;"
+              << " phase2 removed " << removed_phase2_s1 << " from S1, "
+              << removed_phase2_s2 << " from S2 (meanEdge=" << meanEdge
+              << ", minGap=" << min_gap << ")" << std::endl;
+
+    return {CT1, CT2};
 }
 
 // Group boundary edges into connected components (matches MATLAB tesgroup)
@@ -533,7 +895,8 @@ static std::vector<T> filterByMask(const std::vector<T>& data, const std::vector
 // ============================================================================
 
 DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3DpairResults>& all_pairs,
-                                    const std::vector<int>& pair_order) {
+                                    const std::vector<int>& pair_order,
+                                    bool pair_forced) {
     if (all_pairs.empty()) {
         return DIC3Dcombined();
     }
@@ -547,6 +910,7 @@ DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3DpairResults>& all_pair
     std::cout << "  Stitching order: ";
     for (int idx : pair_order) std::cout << idx << " ";
     std::cout << std::endl;
+    std::cout << "  pair_forced=" << (pair_forced ? "true" : "false") << std::endl;
     
     size_t first_idx = pair_order[0] - 1;
     if (first_idx >= all_pairs.size()) {
@@ -639,9 +1003,12 @@ DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3DpairResults>& all_pair
         if (cnt > 0) meanEdge /= cnt;
         
         double minGap = 0.4 * meanEdge;
-        double minDistValue = 5.0 * minGap;
+        double minDistValue = 5.0 * minGap;  // used later for boundary zipping
         
-        auto [keep1, keep2] = removeOverlapSurfaces(cur_faces, next_faces, V1, V2, minDistValue);
+        // MATLAB-faithful overlap removal: iterative ray-tracing erosion in phase 1,
+        // gap closure with min_gap in phase 2. Pass minGap (NOT minDistValue).
+        auto [keep1, keep2] = removeOverlapSurfaces(
+            cur_faces, next_faces, V1, V2, minGap, pair_forced);
         
         size_t rem1 = std::count(keep1.begin(), keep1.end(), false);
         size_t rem2 = std::count(keep2.begin(), keep2.end(), false);

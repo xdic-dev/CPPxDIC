@@ -138,31 +138,29 @@ SeedPoint ROIManager::loadOrCreateSeed(const BaseParameters& params,
     }
 }
 
-int compute_and_round(int pos, int subset_spacing, double offset, bool divide = false) {
-    double value = static_cast<double>(subset_spacing + 1);
-    if (divide && value != 0.0) {
-        return static_cast<int>(std::round((pos + offset) / value));
-    } else {
-        return static_cast<int>(std::round((pos + offset) * value));
-    }
-}
-
-std::vector<int> divide_and_round(const std::vector<int>& pixel_coords, int subset_spacing, double offset = -1.0) {
-    return {compute_and_round(pixel_coords[0], subset_spacing, offset, true), compute_and_round(pixel_coords[1], subset_spacing, offset, true)};
-}
-
-std::vector<int> multiply_and_round(const std::vector<int>& pixel_coords, int subset_spacing, double offset = -1.0) {
-    return {compute_and_round(pixel_coords[0], subset_spacing, offset, false), compute_and_round(pixel_coords[1], subset_spacing, offset, false)};
-}
-
+// Convert pixel coordinates to subset coordinates (reduced grid indices)
+// MATLAB equivalent: round((pos-1)/(spacing+1)+1) for 1-indexed
+// C++ equivalent: round(pos/(spacing+1)) for 0-indexed
+// spacing+1 = scalefactor (the stride between subset points)
 std::vector<int> ROIManager::mapPixel2Subset(const std::vector<int>& pixel_coords,
                                                int subset_spacing) {
-    return divide_and_round(pixel_coords, subset_spacing);
+    double scalefactor = static_cast<double>(subset_spacing + 1);
+    return {
+        static_cast<int>(std::round(pixel_coords[0] / scalefactor)),
+        static_cast<int>(std::round(pixel_coords[1] / scalefactor))
+    };
 }
 
+// Convert subset coordinates to pixel coordinates
+// MATLAB equivalent: (pos-1)*(spacing+1)+1 for 1-indexed
+// C++ equivalent: pos*(spacing+1) for 0-indexed
 std::vector<int> ROIManager::mapSubset2Pixel(const std::vector<int>& subset_coords,
                                                int subset_spacing) {
-    return multiply_and_round(subset_coords, subset_spacing);
+    double scalefactor = static_cast<double>(subset_spacing + 1);
+    return {
+        static_cast<int>(std::round(subset_coords[0] * scalefactor)),
+        static_cast<int>(std::round(subset_coords[1] * scalefactor))
+    };
 }
 
 std::vector<int> ROIManager::mapPointCoordinate(const std::vector<int>& point_sw,
@@ -187,7 +185,11 @@ std::vector<int> ROIManager::mapPointCoordinate(const std::vector<int>& point_sw
     std::cout << "DEBUG - u: " << u << ", v: " << v << std::endl;
 
     // Add displacement to original point (in subset world coordinates)
-    return {compute_and_round(point_sw[0], 0, u), compute_and_round(point_sw[1], 0, v)};
+    // point_sw is in subset coordinates, u/v are displacements in reduced grid units
+    return {
+        static_cast<int>(std::round(point_sw[0] + u)),
+        static_cast<int>(std::round(point_sw[1] + v))
+    };
 }
 
 bool ROIManager::loadMatchingResults(const std::string& matching_file,

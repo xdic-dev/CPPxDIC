@@ -1221,28 +1221,45 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
         config_.debug_mode
     );
     
+    // CRITICAL FIX: Override update_corrcoef to disable correlation-based reference updates.
+    // MATLAB ncorr uses fixed-step reference changes (step_ref_change=10), not correlation-based.
+    // The KEEP_MOST_POINTS preset sets update_corrcoef=0.5, which causes frequent ref updates
+    // when correlation drops, leading to ROI fragmentation and divergence around frame 60-70.
+    // Setting this to ncorr_cutoff_corrcoef (default 10.0) effectively disables correlation-based updates.
+    dic_input.update_corrcoef = config_.ncorr_cutoff_corrcoef;
+    
     // Run DIC analysis (returns Lagrangian perspective in pixels)
     ncorr::DIC_analysis_output dic_output_raw;
     
     if (go_parallel) {
-        std::cout << "  Using parallel DIC processing..." << std::endl;
-        
+        std::cout << "  Using parallel DIC processing"
+                  << (config_.ncorr_use_exact_matlab ? " (exact_matlab_*)" : " (matlab_*)")
+                  << "..." << std::endl;
+
         // Create seed parameters from the seed point
         std::vector<ncorr::SeedParams> seeds;
         seeds.push_back(ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1]));
-        
+
         // Create parallel input structure
         ncorr::DIC_analysis_parallel_input dic_parallel_input(dic_input, seeds);
-        
+
         // Run parallel DIC analysis
-        dic_output_raw = ncorr::matlab_DIC_analysis_parallel(dic_parallel_input);
+        dic_output_raw = config_.ncorr_use_exact_matlab
+            ? ncorr::exact_matlab_DIC_analysis_parallel(dic_parallel_input)
+            : ncorr::matlab_DIC_analysis_parallel(dic_parallel_input);
     } else {
-        std::cout << "  Using Matlab-style sequential DIC processing..." << std::endl;
-        dic_output_raw = ncorr::matlab_DIC_analysis_sequential(
-            dic_input,
-            {ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1])},
-            false
-        );
+        std::cout << "  Using Matlab-style sequential DIC processing"
+                  << (config_.ncorr_use_exact_matlab ? " (exact_matlab_*)" : " (matlab_*)")
+                  << "..." << std::endl;
+        dic_output_raw = config_.ncorr_use_exact_matlab
+            ? ncorr::exact_matlab_DIC_analysis_sequential(
+                dic_input,
+                {ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1])},
+                false)
+            : ncorr::matlab_DIC_analysis_sequential(
+                dic_input,
+                {ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1])},
+                false);
     }
     
     // Post-process with both perspectives
