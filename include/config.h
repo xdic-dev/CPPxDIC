@@ -19,7 +19,7 @@ struct StepConfig {
     int spacing = 10;
     double cutoff_diffnorm = 1e-5;
     int cutoff_iteration = 100;
-    int total_threads = 1;
+    int total_threads = 6;
     bool high_strain_enabled = true;
     std::string seed_type = "seed";
     bool auto_update = true;
@@ -149,6 +149,7 @@ public:
     double ncorr_cutoff_max_diffnorm = 1e-5;                   // Max diff norm cutoff
     double ncorr_cutoff_max_corrcoef = 10.0;                   // Max corr coef cutoff
     int ncorr_threads = 4;                                      // Number of threads
+    bool ncorr_use_exact_matlab = false;                         // Use exact_matlab_DIC_analysis_* (mirrors MATLAB ncorr_alg_addanalysis chain composition) instead of matlab_DIC_analysis_* (which has a chain-induced jump at the first segment boundary).
     
     // Visualization: VTK export options
     std::string vtk_format = "ascii";    // VTK format: ascii|binary

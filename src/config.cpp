@@ -383,6 +383,8 @@ bool Config::loadFromNcorrParamsFile(const std::string& filepath) {
             ncorr_cutoff_max_diffnorm = std::stod(value);
         } else if (!(value = parseConfigValue(line, "cutoff_max_corrcoef")).empty()) {
             ncorr_cutoff_max_corrcoef = std::stod(value);
+        } else if (!(value = parseConfigValue(line, "use_exact_matlab")).empty()) {
+            ncorr_use_exact_matlab = parseBool(value);
         }
     }
     

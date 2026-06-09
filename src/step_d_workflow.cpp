@@ -1232,24 +1232,34 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     ncorr::DIC_analysis_output dic_output_raw;
     
     if (go_parallel) {
-        std::cout << "  Using parallel DIC processing..." << std::endl;
-        
+        std::cout << "  Using parallel DIC processing"
+                  << (config_.ncorr_use_exact_matlab ? " (exact_matlab_*)" : " (matlab_*)")
+                  << "..." << std::endl;
+
         // Create seed parameters from the seed point
         std::vector<ncorr::SeedParams> seeds;
         seeds.push_back(ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1]));
-        
+
         // Create parallel input structure
         ncorr::DIC_analysis_parallel_input dic_parallel_input(dic_input, seeds);
-        
+
         // Run parallel DIC analysis
-        dic_output_raw = ncorr::matlab_DIC_analysis_parallel(dic_parallel_input);
+        dic_output_raw = config_.ncorr_use_exact_matlab
+            ? ncorr::exact_matlab_DIC_analysis_parallel(dic_parallel_input)
+            : ncorr::matlab_DIC_analysis_parallel(dic_parallel_input);
     } else {
-        std::cout << "  Using Matlab-style sequential DIC processing..." << std::endl;
-        dic_output_raw = ncorr::matlab_DIC_analysis_sequential(
-            dic_input,
-            {ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1])},
-            false
-        );
+        std::cout << "  Using Matlab-style sequential DIC processing"
+                  << (config_.ncorr_use_exact_matlab ? " (exact_matlab_*)" : " (matlab_*)")
+                  << "..." << std::endl;
+        dic_output_raw = config_.ncorr_use_exact_matlab
+            ? ncorr::exact_matlab_DIC_analysis_sequential(
+                dic_input,
+                {ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1])},
+                false)
+            : ncorr::matlab_DIC_analysis_sequential(
+                dic_input,
+                {ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1])},
+                false);
     }
     
     // Post-process with both perspectives
