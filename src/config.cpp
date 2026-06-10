@@ -52,16 +52,16 @@ std::string Config::parseConfigValue(const std::string& line, const std::string&
     if (eq_pos == std::string::npos) return "";
     
     std::string line_key = line.substr(0, eq_pos);
-    // Trim whitespace from key
-    line_key.erase(0, line_key.find_first_not_of(" \t"));
-    line_key.erase(line_key.find_last_not_of(" \t") + 1);
+    // Trim whitespace from key (including \r for CRLF line endings on Linux)
+    line_key.erase(0, line_key.find_first_not_of(" \t\r"));
+    line_key.erase(line_key.find_last_not_of(" \t\r") + 1);
     
     if (line_key != key) return "";
     
     std::string value = line.substr(eq_pos + 1);
-    // Trim whitespace from value
-    value.erase(0, value.find_first_not_of(" \t"));
-    value.erase(value.find_last_not_of(" \t") + 1);
+    // Trim whitespace from value (including \r for CRLF line endings on Linux)
+    value.erase(0, value.find_first_not_of(" \t\r"));
+    value.erase(value.find_last_not_of(" \t\r") + 1);
     
     return value;
 }
@@ -139,8 +139,9 @@ bool Config::loadFromDicParamsFile(const std::string& filepath) {
         // Skip empty lines and comments
         if (line.empty() || line[0] == '#') continue;
         
-        // Remove leading/trailing whitespace
-        line.erase(0, line.find_first_not_of(" \t"));
+        // Remove leading/trailing whitespace (including \r for CRLF line endings on Linux)
+        line.erase(0, line.find_first_not_of(" \t\r"));
+        line.erase(line.find_last_not_of(" \t\r") + 1);
         if (line.empty() || line[0] == '#') continue;
         
         // Parse each parameter

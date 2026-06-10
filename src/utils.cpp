@@ -20,6 +20,8 @@
 
 bool Utils::dicCheck(const Config& config) {
     std::cout << "Checking data and protocol..." << std::endl;
+    std::cout << "  [dicCheck] dic_path:  [" << config.dic_path  << "]" << std::endl;
+    std::cout << "  [dicCheck] data_path: [" << config.data_path << "]" << std::endl;
     
     bool success = true;
     
@@ -1123,8 +1125,9 @@ std::string Utils::buildOutputCachePath(const cppxdic::BaseParameters& parameter
 
 std::string Utils::likeRoiOrSeedPath(const std::string& path, const std::string_view& prefix, const std::string& reftrial, const std::string& phase, int stereopair, const std::string& extension) {
     std::ostringstream oss;
-    oss << path << "/" << prefix
-        << reftrial << "_" << phase << "_pair" << stereopair << extension;
+    oss << path;
+    if (path.empty() || path.back() != '/') oss << '/';
+    oss << prefix << reftrial << "_" << phase << "_pair" << stereopair << extension;
     
     return oss.str(); 
 }

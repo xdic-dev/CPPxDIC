@@ -124,6 +124,9 @@ int main(int argc, char* argv[]) {
         std::cout << "Show visualization: " << config.showvisu 
                   << ", Debug mode: " << config.debug_mode 
                   << ", Automatic process: " << config.automatic_process << std::endl;
+        std::cout << "base_path: [" << config.base_path << "]" << std::endl;
+        std::cout << "data_path: [" << config.data_path << "]" << std::endl;
+        std::cout << "dic_path:  [" << config.dic_path  << "]" << std::endl;
         std::cout << std::endl;
         
         // Checking
