@@ -36,8 +36,10 @@ void Config::updateVariables() {
 }
 
 void Config::setDefaultPaths() {
-    // Set base path to current working directory or a reasonable default
-    if (std::filesystem::exists(base_path)) return;
+    // Only fill in base_path if it has not been set by a param file or CLI override.
+    // We do NOT check filesystem existence here: a user-supplied path must be
+    // trusted as-is so the override hierarchy stays consistent (file/CLI > default).
+    if (!base_path.empty()) return;
     try {
         base_path = std::filesystem::current_path().string();
     } catch (const std::exception& e) {
@@ -59,6 +61,14 @@ std::string Config::parseConfigValue(const std::string& line, const std::string&
     if (line_key != key) return "";
     
     std::string value = line.substr(eq_pos + 1);
+    // Strip inline comments: only when '#' is preceded by whitespace, so values
+    // that legitimately contain '#' (rare) aren't truncated mid-token.
+    for (size_t i = 1; i < value.size(); ++i) {
+        if (value[i] == '#' && (value[i-1] == ' ' || value[i-1] == '\t')) {
+            value.erase(i);
+            break;
+        }
+    }
     // Trim whitespace from value (including \r for CRLF line endings on Linux)
     value.erase(0, value.find_first_not_of(" \t\r"));
     value.erase(value.find_last_not_of(" \t\r") + 1);
@@ -161,9 +171,9 @@ bool Config::loadFromDicParamsFile(const std::string& filepath) {
         else if (!(value = parseConfigValue(line, "base_path")).empty()) {
             base_path = value;
         } else if (!(value = parseConfigValue(line, "data_path")).empty()) {
-            if (!value.empty()) data_path = value;
+            data_path = value;
         } else if (!(value = parseConfigValue(line, "dic_path")).empty()) {
-            if (!value.empty()) dic_path = value;
+            dic_path = value;
         }
         // Processing flags
         else if (!(value = parseConfigValue(line, "im_filter_mode")).empty()) {
@@ -343,7 +353,9 @@ bool Config::loadFromNcorrParamsFile(const std::string& filepath) {
         // Skip empty lines and comments
         if (line.empty() || line[0] == '#') continue;
         
-        line.erase(0, line.find_first_not_of(" \t"));
+        // Remove leading/trailing whitespace (including \r for CRLF line endings on Linux)
+        line.erase(0, line.find_first_not_of(" \t\r"));
+        line.erase(line.find_last_not_of(" \t\r") + 1);
         if (line.empty() || line[0] == '#') continue;
         
         std::string value;
@@ -414,7 +426,9 @@ bool Config::loadFromVisualizationParamsFile(const std::string& filepath) {
         // Skip empty lines and comments
         if (line.empty() || line[0] == '#') continue;
         
-        line.erase(0, line.find_first_not_of(" \t"));
+        // Remove leading/trailing whitespace (including \r for CRLF line endings on Linux)
+        line.erase(0, line.find_first_not_of(" \t\r"));
+        line.erase(line.find_last_not_of(" \t\r") + 1);
         if (line.empty() || line[0] == '#') continue;
         
         std::string value;
@@ -422,6 +436,10 @@ bool Config::loadFromVisualizationParamsFile(const std::string& filepath) {
         // Visualization settings
         if (!(value = parseConfigValue(line, "showvisu")).empty()) {
             showvisu = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "savevisu")).empty()) {
+            savevisu = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "savevisu_format")).empty()) {
+            savevisu_format = value;
         } else if (!(value = parseConfigValue(line, "mapLogic")).empty()) {
             mapLogic = parseBool(value);
         } else if (!(value = parseConfigValue(line, "plotopt")).empty()) {

@@ -39,7 +39,10 @@ public:
     double vid_sample_freq = 50.0;       // image sampling frequency (Hz)
     
     // Path definitions
-    std::string base_path = "/Users/jaoga/devlab/MultiDIC";
+    // Empty by default: resolved to current working directory in updateVariables()
+    // if not set explicitly via param file or CLI. This avoids any silent override
+    // of a user-supplied path.
+    std::string base_path;
     std::string data_path;               // location of the video files and protocol files
     std::string dic_path;                // location of the output data from DIC
     
@@ -67,7 +70,9 @@ public:
     int frame_jump = 1;
     
     // Visualization settings (equivalent to MATLAB optStructPlot)
-    bool showvisu = false;               // Boolean for visualization
+    bool showvisu = false;               // Boolean for visualization (interactive)
+    bool savevisu = true;                // Save visualization to disk (headless-friendly)
+    std::string savevisu_format = "png"; // Format for saved visualizations: png|jpg|pdf
     bool debug_mode = true;             // Debug mode flag
     
     // Plot map settings
