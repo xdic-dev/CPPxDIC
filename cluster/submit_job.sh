@@ -127,12 +127,25 @@ fi
 
 # Set OpenMP threads to match SLURM allocation
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
-export OMP_PROC_BIND=close
+# Spread threads across cores/sockets to avoid piling onto a single L3/NUMA node.
+# 'close' was packing the outer parallel-for onto one socket, which serialized
+# memory bandwidth and killed scaling on multi-frame DIC.
+export OMP_PROC_BIND=spread
 export OMP_PLACES=cores
+# Disable nested OpenMP: the per-frame DIC kernels (RG-DIC, add_with_rois)
+# already use #pragma omp parallel internally. With the outer per-frame loop
+# running N threads, nested would oversubscribe N*N threads -> contention.
+# Keep a single active level so the outer parallel-for owns the cores.
+export OMP_NESTED=false
+export OMP_MAX_ACTIVE_LEVELS=1
+# Optional: if you suspect dynamic adjustment is hurting, pin it off.
+export OMP_DYNAMIC=false
 
 echo ""
 echo "Running: apptainer run ${BIND_OPTS} ${SIF_IMAGE} ${CPPXDIC_ARGS}"
 echo "OMP_NUM_THREADS=${OMP_NUM_THREADS}"
+echo "OMP_PROC_BIND=${OMP_PROC_BIND}  OMP_PLACES=${OMP_PLACES}"
+echo "OMP_NESTED=${OMP_NESTED}  OMP_MAX_ACTIVE_LEVELS=${OMP_MAX_ACTIVE_LEVELS}"
 echo "=============================================="
 echo ""
 
@@ -146,6 +159,9 @@ apptainer run \
     --env OMP_NUM_THREADS=${OMP_NUM_THREADS} \
     --env OMP_PROC_BIND=${OMP_PROC_BIND} \
     --env OMP_PLACES=${OMP_PLACES} \
+    --env OMP_NESTED=${OMP_NESTED} \
+    --env OMP_MAX_ACTIVE_LEVELS=${OMP_MAX_ACTIVE_LEVELS} \
+    --env OMP_DYNAMIC=${OMP_DYNAMIC} \
     ${BIND_OPTS} \
     "${SIF_IMAGE}" \
     ${CPPXDIC_ARGS}

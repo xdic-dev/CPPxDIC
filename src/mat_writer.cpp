@@ -18,6 +18,14 @@ namespace cppxdic {
 // Reusable 1x1 dims for Mat_VarCreate scalar calls (avoids compound literal temporaries)
 static size_t scalar_dims[2] = {1, 1};
 
+// Create an empty MATLAB char ('') variable. matio + HDF5 (v7.3) segfaults
+// when a struct field or cell element is left NULL during Mat_VarWrite, so
+// we use this as a safe placeholder for "empty string" fields like `path`.
+static matvar_t* createEmptyCharVar(const char* name = nullptr) {
+    size_t dims[2] = {0, 0};
+    return Mat_VarCreate(name, MAT_C_CHAR, MAT_T_UINT8, 2, dims, nullptr, 0);
+}
+
 bool MatWriter::writeMatchingFile(const std::string& filename,
                                  const cv::Mat& ref_img,
                                  const cv::Mat& cur_img,
@@ -318,7 +326,8 @@ bool MatWriter::writeMultiFrameNcorrFile(const std::string& filename,
     // Create path cell array (empty for all frames)
     matvar_t* path_cell = Mat_VarCreate("path", MAT_C_CELL, MAT_T_CELL, 2, cell_dims.data(), nullptr, 0);
     for (size_t i = 0; i < n_frames; ++i) {
-        Mat_VarSetCell(path_cell, i, nullptr);  // Empty path
+        // matio HDF5 writer segfaults on NULL cells; store an empty char ''
+        Mat_VarSetCell(path_cell, i, createEmptyCharVar());
     }
     addFieldToStruct(current_save, "path", path_cell, 0);
     
@@ -343,8 +352,8 @@ bool MatWriter::writeMultiFrameNcorrFile(const std::string& filename,
                                           (void*)type_str.c_str(), 0);
     addFieldToStruct(reference_save, "type", ref_type_var, 0);
     
-    // Add empty path to reference_save
-    addFieldToStruct(reference_save, "path", nullptr, 0);
+    // Add empty path to reference_save (matio NULL fields segfault on HDF5 write)
+    addFieldToStruct(reference_save, "path", createEmptyCharVar("path"), 0);
     
     // ===== CREATE DATA_DIC_SAVE STRUCT =====
     // Format dispinfo
