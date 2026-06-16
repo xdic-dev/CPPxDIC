@@ -1,7 +1,13 @@
 build
 build_tests
+build_newver
 .cache
 docs/*.md
+# Exceptions: the curated guides committed on the newversion branch are kept under
+# version control (force-added). The blanket docs/*.md ignore is for generated reports.
+!docs/quickstart.md
+!docs/developer_guide.md
+!docs/user_guide.md
 tests/bin/
 tests/examples/
 reports/

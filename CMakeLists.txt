@@ -352,3 +352,18 @@ if(BUILD_SINGLEDIC)
     target_include_directories(singledic PRIVATE include)
     target_compile_options(singledic PRIVATE -Wall -Wextra -O2)
 endif()
+
+# ----------------------------------------------------------------------------
+# Tests (Section 5b)
+# In-tree assertion harness + CTest (no GoogleTest / Catch2). Built only when:
+#   - BUILD_TESTING is ON (default ON), and
+#   - CPPxDIC is the *top-level* project (so adding CPPxDIC as a subdirectory, or a
+#     normal production build that opts out, never pulls in test targets).
+# Run with:  cmake -DBUILD_TESTING=ON .. && cmake --build . && ctest --output-on-failure
+# ----------------------------------------------------------------------------
+option(BUILD_TESTING "Build the CPPxDIC test suite" ON)
+if(BUILD_TESTING AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    message(STATUS "BUILD_TESTING=ON - configuring CPPxDIC test suite (ctest)")
+    enable_testing()
+    add_subdirectory(tests/cppxdic_suite)
+endif()
