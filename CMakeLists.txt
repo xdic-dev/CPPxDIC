@@ -271,3 +271,35 @@ else()
     message(FATAL_ERROR "nlohmann/json library not found. Please install it using your package manager.")
   endif()
 endif()
+
+# ----------------------------------------------------------------------------
+# Optional target: proxyncorr (Section 2a)
+# Thin pass-through driver around CppNCorr's DIC engine for quick validation.
+# Promoted from Tools/CppNCorr/test/src/proxyncorr.cpp into apps/proxyncorr/.
+# Build with: cmake -DBUILD_PROXYNCORR=ON ..   (default OFF; not part of default build)
+# ----------------------------------------------------------------------------
+option(BUILD_PROXYNCORR "Build the proxyncorr pass-through DIC driver" OFF)
+if(BUILD_PROXYNCORR)
+    message(STATUS "BUILD_PROXYNCORR=ON - building proxyncorr target")
+    add_executable(proxyncorr apps/proxyncorr/main.cpp)
+    target_include_directories(proxyncorr PRIVATE include Tools/CppNCorr/include)
+    target_link_libraries(proxyncorr ncorr ${OpenCV_LIBS}
+        ${OPENCV_LIBRARY1} ${OPENCV_LIBRARY2} ${OPENCV_LIBRARY3}
+        ${OPENCV_LIBRARY4} ${OPENCV_LIBRARY5}
+        ${FFTW_LIBRARY} ${MATIO_LIBRARY}
+        ${SUITESPARSE_LIBRARY1} ${SUITESPARSE_LIBRARY2} ${SUITESPARSE_LIBRARY3}
+        ${SUITESPARSE_LIBRARY4} ${SUITESPARSE_LIBRARY5}
+        ${LAPACK_LIBRARY} ${BLAS_LIBRARY} ${CMAKE_THREAD_LIBS_INIT})
+    if(FFTW_INCLUDE_DIR)
+        target_include_directories(proxyncorr PRIVATE ${FFTW_INCLUDE_DIR})
+    endif()
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(proxyncorr OpenMP::OpenMP_CXX)
+    endif()
+    if(TARGET nlohmann_json::nlohmann_json)
+        target_link_libraries(proxyncorr nlohmann_json::nlohmann_json)
+    elseif(NLOHMANN_JSON_INCLUDE_DIRS)
+        target_include_directories(proxyncorr PRIVATE ${NLOHMANN_JSON_INCLUDE_DIRS})
+    endif()
+    target_compile_options(proxyncorr PRIVATE -Wall -Wextra -O2)
+endif()
