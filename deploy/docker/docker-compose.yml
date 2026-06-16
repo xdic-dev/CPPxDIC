@@ -1,0 +1,38 @@
+# =============================================================================
+# Docker Compose for CPPxDIC
+#
+# Usage:
+#   1. Copy docker/configs/*.txt and edit for your setup
+#   2. Set environment variables (or edit .env / this file):
+#        DATA_DIR=/path/to/input/data
+#        OUTPUT_DIR=/path/to/output
+#        CONFIG_DIR=./configs        (default)
+#   3. Run:
+#        docker compose -f docker/docker-compose.yml up
+#
+#   Override subject/reftrial:
+#        docker compose -f docker/docker-compose.yml run cppxdic \
+#          --dic-params /configs/dic_params.txt --subject S10 --reftrial 3
+# =============================================================================
+
+services:
+  cppxdic:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    image: cppxdic:latest
+    volumes:
+      - ${CONFIG_DIR:-./configs}:/configs:ro
+      - ${DATA_DIR:-./_data}:/data:ro
+      - ${OUTPUT_DIR:-./_output}:/output
+    environment:
+      - OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
+      - OMP_PROC_BIND=close
+      - OMP_PLACES=cores
+    command:
+      - --dic-params
+      - /configs/dic_params.txt
+      - --ncorr-params
+      - /configs/ncorr_params.txt
+      - --viz-params
+      - /configs/visualization_params.txt

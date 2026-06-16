@@ -52,9 +52,16 @@ for the new modes).
 - `docs/quickstart.md`, `docs/developer_guide.md`, `docs/user_guide.md`.
 
 ### Section 7 — deploy
-- `deploy/` with a multi-stage **Dockerfile** (camera-pairs `cppxdic`), a **SLURM** batch
-  script, the moved `build.sh` (via `git mv`), and a `README.md` (per-script cluster targets +
-  Docker tag convention).
+- Organised the project's real container/HPC assets under `deploy/`:
+  - `deploy/docker/` — multi-stage **Dockerfile** (builds the camera-pairs `cppxdic`),
+    `docker-compose.yml`, `run.sh` helper, and template `configs/`.
+  - `deploy/cluster/` — Singularity/Apptainer **`cppxdic.def`**, **SLURM** `submit_job.sh`
+    (binds `OMP_NUM_THREADS` to `--cpus-per-task`, `OMP_PROC_BIND=spread`), `monitor_job.sh`,
+    and template `configs/`.
+  - `deploy/build.sh` (local build, moved via `git mv`), `deploy/build_for_clusters.sh`
+    (HPC cheat-sheet), and an umbrella `deploy/README.md` documenting both paths, the SLURM
+    target (+ PBS/LSF porting note), and the Docker image-tag convention.
+  - Internal path references were updated for the new `deploy/` location.
 
 ### Section 8 — CI/CD
 - `.github/workflows/ci.yml` (push + PR to `main`/`newversion`): `build`, `test`, `lint` jobs;
@@ -98,7 +105,7 @@ for the new modes).
 2. **Camera-pairs safety:** confirm the new test wiring and modes are gated/default-OFF and the
    `cppxdic` target's sources/deps are unchanged.
 3. **Docs:** `docs/quickstart.md`, `docs/developer_guide.md`, `docs/user_guide.md`.
-4. **Deploy:** `deploy/Dockerfile`, `deploy/slurm_cppxdic.sbatch`, `deploy/README.md`.
+4. **Deploy:** `deploy/README.md` (umbrella), `deploy/docker/` (Dockerfile, compose, run.sh, configs), `deploy/cluster/` (Singularity `cppxdic.def`, SLURM `submit_job.sh`/`monitor_job.sh`, configs), `deploy/build_for_clusters.sh`.
 5. **CI:** `.github/workflows/ci.yml` (note the documented SKIP rationale) + `.clang-format`.
 6. **Known bug:** the SKIP reasons in `tests/cppxdic_suite/unit/test_temporal_filter.cpp`.
 

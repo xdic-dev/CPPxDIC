@@ -1,0 +1,98 @@
+# =============================================================================
+# DIC Parameters for HPC Cluster Runs
+# Copy and edit this file for each experiment. The container reads it at
+# runtime via bind-mount — no rebuild needed.
+#
+# IMPORTANT: Paths must use the CONTAINER mount points:
+#   /data    -> your host DATA_DIR
+#   /output  -> your host OUTPUT_DIR
+# =============================================================================
+
+# --- Paths (container mount points) ---
+base_path = /data
+data_path = /data
+dic_path = /output
+
+# --- Subject / experiment ---
+subject_id = S09
+phase_id = loading
+material_id = 2
+ref_trial_id = 5
+
+# --- Frictional conditions ---
+frictional_conditions = glass,coating,coating_oil
+nfcond_set = 5
+spddxlcond_set = 0.04,0.08
+calib_folder_set = 2
+
+# --- Sampling ---
+robot_sample_freq = 1000.0
+vid_sample_freq = 50.0
+num_pair = 2
+
+# --- Frames ---
+idx_frame_start = 1
+idx_frame_end = 150
+frame_jump = 1
+
+# --- Processing flags ---
+im_filter_mode = false
+automatic_process = true
+parallel_processing = false
+debug_mode = false
+
+# --- Step D (2D DIC) ---
+step_d_analysis_type = regular
+step_d_radius = 40
+step_d_spacing = 10
+step_d_cutoff_diffnorm = 1e-5
+step_d_cutoff_iteration = 100
+step_d_total_threads = 1
+step_d_high_strain_enabled = true
+step_d_seed_type = seed
+step_d_auto_update = true
+step_d_step_ref_change = 10
+step_d_initial_seed = 
+step_d_replacebadcorr = false
+
+# --- Step E (3D Reconstruction) ---
+step_e_analysis_type = regular
+step_e_radius = 60
+step_e_spacing = 10
+step_e_cutoff_diffnorm = 1e-5
+step_e_cutoff_iteration = 100
+step_e_total_threads = 1
+step_e_high_strain_enabled = true
+step_e_seed_type = seed
+step_e_auto_update = true
+step_e_step_ref_change = 10
+step_e_initial_seed = 
+step_e_distortion_removal = false
+
+# --- Step F (Deformation) ---
+step_f_analysis_type = regular
+step_f_radius = 40
+step_f_spacing = 10
+step_f_cutoff_diffnorm = 1e-5
+step_f_cutoff_iteration = 100
+step_f_total_threads = 1
+step_f_high_strain_enabled = true
+step_f_seed_type = seed
+step_f_auto_update = true
+step_f_step_ref_change = 10
+step_f_initial_seed = 
+step_f_temporal_filtering = true
+step_f_freq_filt = 10.0
+step_f_compute_rbm = false
+
+# --- Camera pairs ---
+camera_pairs = 1,2;4,3
+
+# --- Units & Calibration ---
+units_per_pixel = 0.2
+subregion_radius = 20
+limit_grayscale = 70
+
+# --- Output ---
+fileversion = v2
+data_format = mat
