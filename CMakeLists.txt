@@ -60,6 +60,11 @@ endif()
 message(STATUS "xDIC mode: ${XDIC_MODE} (define ${XDIC_MODE_DEFINE})")
 target_compile_definitions(cppxdic PRIVATE ${XDIC_MODE_DEFINE})
 
+# Mirrored-camera mode skeleton (Section 2d): compiled only for XDIC_MODE=mirrored.
+if(XDIC_MODE STREQUAL "mirrored")
+    target_sources(cppxdic PRIVATE src/xdic/mirrored/mirrored_mode.cpp)
+endif()
+
 # Find OpenCV (following ncorr pattern)
 find_package(OpenCV REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})
