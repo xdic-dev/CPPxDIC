@@ -14,7 +14,7 @@ CPPXDIC is a C++ equivalent of the Matlab xDIC library for fingertip 3D reconstr
 
 - **CMake** (>= 3.16)
 - **OpenCV** (for image processing)
-- **C++20 compatible compiler** (GCC 10+, Clang 12+, MSVC 2019+)
+- **C++17 compatible compiler** (GCC 10+, Clang 12+, MSVC 2019+)
 - **ncorr C++ library** (included in the project)
 
 ## Building the Project
@@ -63,7 +63,7 @@ If CMake configuration fails, you can build manually:
 
 ```bash
 # Compile manually
-g++ -std=c++20 -O2 -Wall -Wextra \
+g++ -std=c++17 -O2 -Wall -Wextra \
     -Iinclude -I../ncorr_2D_cpp-master/include \
     src/*.cpp \
     -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -lopencv_highgui \
@@ -180,8 +180,9 @@ CPPXDIC offers several performance advantages over the Matlab version:
    - Ensure ncorr is built: `ls ../ncorr_2D_cpp-master/lib/libncorr.a`
    - Check include path: `ls ../ncorr_2D_cpp-master/include/ncorr.h`
 
-3. **C++20 not supported**:
-   - Use a newer compiler or change to C++17 in CMakeLists.txt
+3. **C++17 not supported**:
+   - Use a newer compiler (GCC 10+, Clang 12+, MSVC 2019+); the project requires
+     C++17 for `std::filesystem` support (set in `CMakeLists.txt`).
 
 ### Debug Mode
 
