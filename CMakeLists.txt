@@ -65,6 +65,13 @@ if(XDIC_MODE STREQUAL "mirrored")
     target_sources(cppxdic PRIVATE src/xdic/mirrored/mirrored_mode.cpp)
 endif()
 
+# Multi-camera mode placeholder (Section 2e): added only for XDIC_MODE=multi, where its
+# `#error` guard intentionally stops the build (mode not yet implemented). Never compiled
+# in the default camerapairs build.
+if(XDIC_MODE STREQUAL "multi")
+    target_sources(cppxdic PRIVATE src/xdic/multi/multi_mode.cpp)
+endif()
+
 # Find OpenCV (following ncorr pattern)
 find_package(OpenCV REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})
