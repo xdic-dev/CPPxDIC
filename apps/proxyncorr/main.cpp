@@ -15,21 +15,37 @@
  * Build: configure with `-DBUILD_PROXYNCORR=ON` (default OFF). The target is NOT built as
  * part of the default `cppxdic` build.
  *
- * @par TODO - what "fully implemented" means
- *  - In-memory hand-off: accept frames as in-memory buffers (cv::Mat / Image2D vectors)
- *    handed in by the CPPXDIC pipeline instead of re-reading PNGs from disk, and return the
- *    displacement/strain fields as in-memory structures (Disp2D / Strain2D) rather than only
- *    serialising to disk. This removes the file round-trip when used as a library call.
+ * @par In-memory hand-off (IMPLEMENTED)
+ *  The `--in-memory` flag selects an in-memory pass-through path that does NOT round-trip
+ *  frames through the file-based `Image2D`/`DIC_analysis` pipeline. Instead it loads each
+ *  frame with OpenCV into an owning `cv::Mat`, wraps it as an `ncorr::ImageBuffer` (a thin,
+ *  non-owning view over the raw pixel bytes), and drives `ncorr::NcorrSession`
+ *  (`Tools/CppNCorr/include/ncorr/session.h`): `set_reference()` once, optional `set_roi()`,
+ *  then `process_frame()` per deformed frame. Each call returns a `ncorr::DICResult` holding
+ *  the native Lagrangian displacement fields (u/v in pixels, plus per-point corrcoef) on the
+ *  reduced analysis grid, NaN outside the ROI. The fields are consumed directly as plain
+ *  `std::vector<double>` and dumped per-frame as lightweight JSON (no `.bin`/video/strain
+ *  serialisation in this path). This removes the disk round-trip when proxyncorr is used as
+ *  a library-style call. The default (no flag) behaviour is unchanged: the full file-based
+ *  DIC + strain + video pipeline below.
+ *
+ * @par TODO - remaining follow-ups
  *  - Expose a callable C++ API (e.g.
  *    `proxyncorr::run(const ProxyConfig&, const std::vector<Image2D>&) -> ProxyResult`)
- *    so xDIC modes can invoke the DIC engine programmatically.
+ *    so xDIC modes can invoke the DIC engine programmatically. The `--in-memory` path here
+ *    is the building block: it already drives the engine from in-memory buffers.
  *  - Map CPPXDIC's `ncorr_params.txt` / Config fields onto ProxyConfig so a single config
  *    source drives both the full pipeline and the proxy.
  *  - Replace the `system("mkdir -p ...")` calls with std::filesystem::create_directories.
  */
 
 #include "ncorr.h"
+#include "ncorr/session.h"
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 #include <fstream>
+#include <sstream>
+#include <cmath>
 #include <iostream>
 #include <iomanip>
 #include <nlohmann/json.hpp>
@@ -87,6 +103,10 @@ struct ProxyConfig {
     bool save_json = true;
     bool save_binary = true;
     bool save_videos = true;
+
+    // In-memory pass-through path: load frames with OpenCV and drive
+    // ncorr::NcorrSession instead of the file-based DIC/strain/video pipeline.
+    bool in_memory = false;
 };
 
 // ============================================================================
@@ -413,6 +433,149 @@ ProxyConfig parse_config_file(const std::string& config_path) {
 }
 
 // ============================================================================
+// In-memory pass-through path (ncorr::NcorrSession)
+// ============================================================================
+//
+// Loads frames with OpenCV into owning cv::Mats, wraps each as a thin
+// ncorr::ImageBuffer view, and drives ncorr::NcorrSession directly. No frames
+// are written to or re-read from disk for the DIC itself; only the resulting
+// displacement fields are dumped per-frame as lightweight JSON.
+
+// Load an image from disk into an owning, contiguous 8-bit cv::Mat.
+// Returns BGR (3-channel) for colour inputs and single-channel for grayscale,
+// matching the interleaved layout ncorr::ImageBuffer expects.
+static cv::Mat load_mat(const std::string& path) {
+    cv::Mat img = cv::imread(path, cv::IMREAD_UNCHANGED);
+    if (img.empty()) {
+        throw std::runtime_error("Cannot load image: " + path);
+    }
+    // Normalise to 8-bit depth; ncorr::ImageBuffer assumes 8-bit samples.
+    if (img.depth() != CV_8U) {
+        cv::Mat tmp;
+        img.convertTo(tmp, CV_8U);
+        img = tmp;
+    }
+    // Drop alpha (4-channel) down to BGR so channels match the documented
+    // 1 = grayscale / 3 = BGR contract.
+    if (img.channels() == 4) {
+        cv::Mat tmp;
+        cv::cvtColor(img, tmp, cv::COLOR_BGRA2BGR);
+        img = tmp;
+    }
+    // Guarantee contiguous storage so ImageBuffer's flat-row-major view is valid.
+    if (!img.isContinuous()) {
+        img = img.clone();
+    }
+    return img;
+}
+
+// Wrap an owning cv::Mat as a non-owning ncorr::ImageBuffer view. The Mat must
+// outlive every use of the returned buffer.
+static ncorr::ImageBuffer as_buffer(const cv::Mat& m) {
+    return ncorr::ImageBuffer(m.ptr<std::uint8_t>(0), m.cols, m.rows, m.channels());
+}
+
+// Serialise a single DICResult to lightweight per-frame JSON. The displacement
+// fields are emitted as flat row-major arrays (length width*height), matching
+// the DICResult contract; NaN (out-of-ROI) is encoded as JSON null.
+static json dic_result_to_json(const ncorr::DICResult& r, int frame_index,
+                               const std::string& frame_path) {
+    auto field_to_json = [](const std::vector<double>& v) {
+        json arr = json::array();
+        for (double x : v) {
+            if (std::isnan(x)) arr.push_back(nullptr);
+            else arr.push_back(x);
+        }
+        return arr;
+    };
+
+    json j;
+    j["frame_index"] = frame_index;
+    j["frame_path"] = frame_path;
+    j["valid"] = r.valid;
+    j["message"] = r.message;
+    j["width"] = r.width;
+    j["height"] = r.height;
+    j["u"] = field_to_json(r.u);
+    j["v"] = field_to_json(r.v);
+    j["corrcoef"] = field_to_json(r.corrcoef);
+    return j;
+}
+
+// Drive the in-memory NcorrSession path end to end and dump per-frame JSON.
+// Returns 0 on success, non-zero if any frame failed to process.
+static int run_in_memory(const ProxyConfig& config,
+                         const std::string& roi_path,
+                         const std::string& ref_path,
+                         const std::vector<std::string>& frame_paths) {
+    std::cout << "\n[IN-MEMORY MODE] Driving ncorr::NcorrSession (no disk round-trip)\n"
+              << std::endl;
+
+    ncorr::SessionConfig scfg;
+    scfg.scalefactor      = config.scalefactor;
+    scfg.subregion_radius = config.subregion_radius;
+    scfg.strain_radius    = config.strain_radius;
+    scfg.num_threads      = config.num_threads;
+    scfg.debug            = config.debug;
+
+    ncorr::NcorrSession session(scfg);
+
+    // Reference frame. Keep the owning Mat alive for the whole session.
+    cv::Mat ref_mat = load_mat(ref_path);
+    session.set_reference(as_buffer(ref_mat));
+    std::cout << "Reference set: " << ref_path
+              << " (" << ref_mat.cols << "x" << ref_mat.rows
+              << ", " << ref_mat.channels() << "ch)" << std::endl;
+
+    // Optional ROI mask (same geometry as the reference).
+    cv::Mat roi_mat;  // declared here so it outlives set_roi()
+    if (!roi_path.empty() && file_exists(roi_path)) {
+        roi_mat = load_mat(roi_path);
+        session.set_roi(as_buffer(roi_mat));
+        std::cout << "ROI mask set: " << roi_path << std::endl;
+    } else {
+        std::cout << "No ROI mask; analysing full frame." << std::endl;
+    }
+
+    system(("mkdir -p " + config.output_dir + "/in_memory").c_str());
+
+    int failures = 0;
+    int frame_index = 0;
+    for (const auto& path : frame_paths) {
+        if (path == ref_path) continue;  // skip self if ref is also a frame
+
+        cv::Mat def_mat = load_mat(path);
+        ncorr::DICResult result = session.process_frame(as_buffer(def_mat));
+
+        if (result.valid) {
+            std::cout << "  [frame " << frame_index << "] " << path
+                      << " -> " << result.width << "x" << result.height
+                      << " disp field" << std::endl;
+        } else {
+            std::cerr << "  [frame " << frame_index << "] " << path
+                      << " FAILED: " << result.message << std::endl;
+            ++failures;
+        }
+
+        if (config.save_json) {
+            json j = dic_result_to_json(result, frame_index, path);
+            std::ostringstream fname;
+            fname << config.output_dir << "/in_memory/frame_"
+                  << std::setw(4) << std::setfill('0') << frame_index << ".json";
+            std::ofstream out(fname.str());
+            out << std::setw(2) << j << std::endl;
+        }
+        ++frame_index;
+    }
+
+    std::cout << "\n[IN-MEMORY MODE] Processed " << frame_index << " frame(s), "
+              << failures << " failure(s). Displacement JSON in: "
+              << config.output_dir << "/in_memory" << std::endl;
+
+    return failures == 0 ? 0 : 1;
+}
+
+// ============================================================================
 // Usage and help
 // ============================================================================
 void print_usage(const char* prog_name) {
@@ -443,6 +606,9 @@ void print_usage(const char* prog_name) {
               << "  --no-json                  Disable JSON output\n"
               << "  --no-binary                Disable binary output\n"
               << "  --no-videos                Disable video output\n"
+              << "  --in-memory                Use the in-memory ncorr::NcorrSession path\n"
+              << "                             (loads frames with OpenCV, no disk round-trip;\n"
+              << "                             dumps per-frame u/v/corrcoef JSON)\n"
               << "  --debug                    Enable debug mode\n"
               << "  -h, --help                 Show this help message\n\n"
               << "CONFIG FILE FORMAT (config.txt):\n"
@@ -503,6 +669,7 @@ int main(int argc, char* argv[]) {
         {"no-json",         no_argument,       0, 1003},
         {"no-binary",       no_argument,       0, 1004},
         {"no-videos",       no_argument,       0, 1005},
+        {"in-memory",       no_argument,       0, 1009},
         {"debug",           no_argument,       0, 1006},
         {"help",            no_argument,       0, 'h'},
         {0, 0, 0, 0}
@@ -554,6 +721,7 @@ int main(int argc, char* argv[]) {
             case 1003: config.save_json = false; break;
             case 1004: config.save_binary = false; break;
             case 1005: config.save_videos = false; break;
+            case 1009: config.in_memory = true; break;
             case 1006: config.debug = true; break;
             case 'h':
                 print_usage(argv[0]);
@@ -652,7 +820,18 @@ int main(int argc, char* argv[]) {
     std::cout << "Strain subregion: " << config.strain_subregion_type << " (r=" << config.strain_radius << ")" << std::endl;
     std::cout << "Alpha: " << config.alpha << ", FPS: " << config.fps << std::endl;
     std::cout << "=====================\n" << std::endl;
-    
+
+    // In-memory pass-through path: drive ncorr::NcorrSession directly and skip
+    // the file-based DIC/strain/video pipeline entirely.
+    if (config.in_memory) {
+        try {
+            return run_in_memory(config, roi_path, ref_path, frame_paths);
+        } catch (const std::exception& e) {
+            std::cerr << "Error during in-memory analysis: " << e.what() << std::endl;
+            return 1;
+        }
+    }
+
     // Initialize DIC and strain structures
     DIC_analysis_input DIC_input;
     DIC_analysis_output DIC_output;
@@ -697,12 +876,13 @@ int main(int argc, char* argv[]) {
                     std::cout << " (pre-optimized, skipping optimization step)";
                 }
                 std::cout << "..." << std::endl;
-                
-                DIC_analysis_parallel_input parallel_input(DIC_input, config.seeds_by_region, config.seeds_are_optimized);
-                DIC_output = DIC_analysis_sequential(parallel_input);
+
+                // Use the unambiguous 3-arg overload (the 1-arg form is ambiguous
+                // because DIC_analysis_parallel_input converts to DIC_analysis_input).
+                DIC_output = DIC_analysis_sequential(DIC_input, config.seeds_by_region, config.seeds_are_optimized);
             } else {
                 std::cout << "[SEQUENTIAL MODE] Performing DIC analysis with auto-generated seeds..." << std::endl;
-                DIC_output = DIC_analysis_sequential(DIC_input);
+                DIC_output = DIC_analysis_sequential(DIC_input, {}, false);
             }
         } else if (effective_mode == "parallel") {
             if (has_seeds) {
