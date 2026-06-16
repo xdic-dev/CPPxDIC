@@ -252,6 +252,28 @@ static bool ensure_dir(const std::string& path) {
     } catch (...) { return false; }
 }
 
+// ============================================================================
+// Video ingestion (Section 3a)
+// ----------------------------------------------------------------------------
+// CPPXDIC ingests one .mp4 file per camera (port of MATLAB import_raw_vid.m).
+//
+// Expected container / codec:
+//   - Container : MP4 (.mp4). Files are matched by the regex naming convention
+//                 <subject>_<material>_speckles_<trial:3 digits>_*_cam_<id>.mp4
+//                 e.g. S09_coating_speckles_007_545_050_trial005_cam_1.mp4
+//   - Codec     : any codec OpenCV's VideoCapture can decode via the system FFmpeg
+//                 backend (H.264/AVC is the tested codec). If VideoCapture cannot
+//                 open the file, importRawVid logs an error and returns false.
+//   - Pixels    : speckle videos are stored as RGB; to match MATLAB's iloc(:,:,1)
+//                 we extract ONLY the Red channel (BGR index 2 in OpenCV) as the
+//                 grayscale frame. Single-channel inputs are used as-is.
+//   - Frames    : 1-based frame indices (MATLAB convention); frameStart is clamped
+//                 to >= 1 and frameEnd to <= min(frame_count of both cameras).
+//
+// Frames are decoded to per-camera PNGs under
+//   <dic_path>/<subject>/<material>/tmp_frames/T<trial>/pair<n>/cam<id>/ ,
+// which the DIC engine then consumes.
+// ============================================================================
 static std::string find_video_file(const std::string& video_dir,
                                    const std::string& subject,
                                    const std::string& material,
