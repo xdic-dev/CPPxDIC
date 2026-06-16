@@ -205,6 +205,21 @@ public:
     bool loadFromDicParamsFile(const std::string& filepath = "dic_params.txt");
     bool loadFromNcorrParamsFile(const std::string& filepath = "ncorr_params.txt");
     bool loadFromVisualizationParamsFile(const std::string& filepath = "visualization_params.txt");
+
+    /**
+     * @brief Load a single unified config file (the middle tier of the override chain).
+     *
+     * Implements the config-file tier of the three-tier override chain
+     * (CLI args > config file > compiled defaults). The file uses the same INI-style
+     * `key = value` format as dic_params.txt / ncorr_params.txt / visualization_params.txt
+     * (see config/default.cfg). All DIC, NCorr and visualization keys may appear in one file;
+     * unknown keys are ignored. Values override the compiled defaults; any field absent from
+     * the file keeps its compiled default.
+     *
+     * @param filepath Path to the unified config file (e.g. config/default.cfg).
+     * @return true if the file existed and was read, false otherwise.
+     */
+    bool loadFromConfigFile(const std::string& filepath = "config/default.cfg");
     
     // Command-line override methods
     void overrideSubject(const std::string& subject);

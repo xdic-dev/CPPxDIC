@@ -27,6 +27,7 @@ void print_usage(const char* prog_name) {
               << "OPTIONS:\n"
               << "  -s, --subject <id>         Override subject ID (e.g., S09)\n"
               << "  -r, --reftrial <num>       Override reference trial number\n"
+              << "  -C, --config <file>        Unified config file (default: config/default.cfg)\n"
               << "  -d, --dic-params <file>    DIC parameters file (default: dic_params.txt)\n"
               << "  -n, --ncorr-params <file>  NCorr parameters file (default: ncorr_params.txt)\n"
               << "  -v, --viz-params <file>    Visualization parameters file (default: visualization_params.txt)\n"
@@ -46,26 +47,31 @@ int main(int argc, char* argv[]) {
     // Command-line argument parsing
     std::string subject_override = "";
     int reftrial_override = -1;
+    std::string config_file = "config/default.cfg";
     std::string dic_params_file = "dic_params.txt";
     std::string ncorr_params_file = "ncorr_params.txt";
     std::string viz_params_file = "visualization_params.txt";
-    
+
     static struct option long_options[] = {
         {"subject",      required_argument, 0, 's'},
         {"reftrial",     required_argument, 0, 'r'},
+        {"config",       required_argument, 0, 'C'},
         {"dic-params",   required_argument, 0, 'd'},
         {"ncorr-params", required_argument, 0, 'n'},
         {"viz-params",   required_argument, 0, 'v'},
         {"help",         no_argument,       0, 'h'},
         {0, 0, 0, 0}
     };
-    
+
     int opt;
     int option_index = 0;
-    while ((opt = getopt_long(argc, argv, "s:r:d:n:v:h", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "s:r:C:d:n:v:h", long_options, &option_index)) != -1) {
         switch (opt) {
             case 's':
                 subject_override = optarg;
+                break;
+            case 'C':
+                config_file = optarg;
                 break;
             case 'r':
                 reftrial_override = std::stoi(optarg);
@@ -89,22 +95,26 @@ int main(int argc, char* argv[]) {
     }
     
     try {
-        // Load configurations with hierarchy:
-        // 1. Load default values (from class initialization)
+        // Three-tier override chain (lowest -> highest priority):
+        //   1. Compiled defaults  (Config member initializers)
+        //   2. Config file(s)     (unified config/default.cfg, then specific param files)
+        //   3. CLI arguments      (override everything)
+        //
+        // Tier 1: compiled defaults (from class initialization)
         Config config;
-        
-        // 2. Load DIC params file if it exists
+
         std::cout << "Loading configuration files..." << std::endl;
         std::cout << "------------------------------" << std::endl;
+
+        // Tier 2a: unified config file (broadest config-file source)
+        config.loadFromConfigFile(config_file);
+
+        // Tier 2b: specific param files override the unified file where present
         config.loadFromDicParamsFile(dic_params_file);
-        
-        // 3. Override with NCorr params if it exists
         config.loadFromNcorrParamsFile(ncorr_params_file);
-        
-        // 4. Load visualization params if it exists
         config.loadFromVisualizationParamsFile(viz_params_file);
-        
-        // 5. Apply command-line overrides (highest priority)
+
+        // Tier 3: command-line overrides (highest priority)
         if (!subject_override.empty()) {
             config.overrideSubject(subject_override);
         }

@@ -555,6 +555,23 @@ bool Config::loadFromVisualizationParamsFile(const std::string& filepath) {
     return true;
 }
 
+// Load a single unified config file (config-file tier of the override chain).
+// Reuses the three existing per-file loaders; each only reacts to its own keys, so a
+// unified file containing any mix of DIC / NCorr / visualization keys is parsed correctly.
+bool Config::loadFromConfigFile(const std::string& filepath) {
+    if (!std::filesystem::exists(filepath)) {
+        std::cout << "Config file not found: " << filepath
+                  << ", using compiled defaults / per-file params" << std::endl;
+        return false;
+    }
+    std::cout << "Loading unified config file: " << filepath << std::endl;
+    // Order does not matter: the loaders key on disjoint parameter names.
+    loadFromDicParamsFile(filepath);
+    loadFromNcorrParamsFile(filepath);
+    loadFromVisualizationParamsFile(filepath);
+    return true;
+}
+
 // Override subject from command line
 void Config::overrideSubject(const std::string& subject) {
     subject_id = subject;
