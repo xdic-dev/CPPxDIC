@@ -303,3 +303,16 @@ if(BUILD_PROXYNCORR)
     endif()
     target_compile_options(proxyncorr PRIVATE -Wall -Wextra -O2)
 endif()
+
+# ----------------------------------------------------------------------------
+# Optional target: singledic (Section 2b) - STUB
+# Single-camera 2D DIC (no stereo / no 3D reconstruction). See apps/singledic/.
+# Build with: cmake -DBUILD_SINGLEDIC=ON ..  (default OFF; not part of default build)
+# ----------------------------------------------------------------------------
+option(BUILD_SINGLEDIC "Build the singledic single-camera DIC stub" OFF)
+if(BUILD_SINGLEDIC)
+    message(STATUS "BUILD_SINGLEDIC=ON - building singledic stub target")
+    add_executable(singledic apps/singledic/main.cpp)
+    target_include_directories(singledic PRIVATE include)
+    target_compile_options(singledic PRIVATE -Wall -Wextra -O2)
+endif()
