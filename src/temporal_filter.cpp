@@ -151,24 +151,30 @@ butterLowPass(int order, double wn) {
         // Numerator (all zeros at z=-1 for low-pass)
         b = {k, 4*k, 6*k, 4*k, k};
         
-        // Denominator (from poles)
-        // Simplified computation for 4th order
+        // Denominator (from poles): A(z) = prod_i (z - zp_i)
         a.resize(5);
-        a[0] = 1.0;
-        
-        // Multiply out (z - pole_i) terms
+
+        // Multiply out (z - pole_i) terms. After the loop, poly[i] holds the
+        // coefficient of z^i, so poly[4] == 1 (leading) and poly[0] is the
+        // constant term.
         std::vector<std::complex<double>> poly(5, 0.0);
         poly[0] = 1.0;
-        
+
         for (const auto& zp : z_poles) {
             for (int i = 4; i >= 1; --i) {
                 poly[i] = poly[i-1] - zp * poly[i];
             }
             poly[0] = -zp * poly[0];
         }
-        
+
+        // The difference-equation form used by filter()/filtfilt() expects the
+        // coefficients in DESCENDING powers of z (equivalently ascending powers
+        // of z^-1), with a[0] the leading coefficient used for normalization.
+        // poly[] is in ascending powers of z, so reverse it. Forgetting this
+        // reversal leaves a[0] = (small) constant term and a recursion that is
+        // not normalized -> the filter diverges (the original DC-instability bug).
         for (int i = 0; i < 5; ++i) {
-            a[i] = poly[i].real();
+            a[i] = poly[4 - i].real();
         }
     } else {
         // Fallback: simple 2nd order filter
@@ -182,41 +188,84 @@ butterLowPass(int order, double wn) {
     return {b, a};
 }
 
+namespace {
+
+// Direct-Form-II-transposed IIR filtering with an explicit initial state `z`
+// (length max(nb,na)-1). `b`/`a` are in descending powers of z with a[0] the
+// leading coefficient. This is the building block scipy/MATLAB use for `lfilter`
+// and lets filtfilt() inject the steady-state initial conditions that keep a
+// constant (DC) input from producing a startup transient.
+std::vector<double> filterDF2T(
+    const std::vector<double>& b,
+    const std::vector<double>& a,
+    const std::vector<double>& x,
+    std::vector<double> z
+) {
+    const size_t n = x.size();
+    const size_t order = std::max(b.size(), a.size()) - 1;
+
+    // Normalize coefficients by a[0] and right-pad to length order+1.
+    const double a0 = a[0];
+    std::vector<double> bn(order + 1, 0.0), an(order + 1, 0.0);
+    for (size_t i = 0; i < b.size(); ++i) bn[i] = b[i] / a0;
+    for (size_t i = 0; i < a.size(); ++i) an[i] = a[i] / a0;
+
+    z.resize(order, 0.0);
+
+    std::vector<double> y(n, 0.0);
+    for (size_t i = 0; i < n; ++i) {
+        const double xi = x[i];
+        const double yi = bn[0] * xi + z[0];
+        for (size_t j = 0; j + 1 < order; ++j) {
+            z[j] = bn[j + 1] * xi + z[j + 1] - an[j + 1] * yi;
+        }
+        if (order > 0) {
+            z[order - 1] = bn[order] * xi - an[order] * yi;
+        }
+        y[i] = yi;
+    }
+    return y;
+}
+
+// Steady-state initial conditions for a step input, scaled later by the first
+// sample. Mirrors scipy.signal.lfilter_zi: solving (I - A) zi = B for the
+// transposed companion form, expressed via the closed-form cumulative sums.
+std::vector<double> lfilterZi(
+    const std::vector<double>& b_in,
+    const std::vector<double>& a_in
+) {
+    const size_t order = std::max(b_in.size(), a_in.size()) - 1;
+    const double a0 = a_in[0];
+    std::vector<double> b(order + 1, 0.0), a(order + 1, 0.0);
+    for (size_t i = 0; i < b_in.size(); ++i) b[i] = b_in[i] / a0;
+    for (size_t i = 0; i < a_in.size(); ++i) a[i] = a_in[i] / a0;
+
+    std::vector<double> zi(order, 0.0);
+    if (order == 0) return zi;
+
+    double a_sum = 0.0, b_minus = 0.0;
+    for (size_t k = 0; k <= order; ++k) a_sum += a[k];          // sum(a)
+    for (size_t k = 1; k <= order; ++k) b_minus += b[k] - a[k] * b[0];
+    zi[0] = b_minus / a_sum;
+
+    double asum = 1.0, csum = 0.0;
+    for (size_t k = 1; k < order; ++k) {
+        asum += a[k];
+        csum += b[k] - a[k] * b[0];
+        zi[k] = asum * zi[0] - csum;
+    }
+    return zi;
+}
+
+} // namespace
+
 std::vector<double> filter(
     const std::vector<double>& b,
     const std::vector<double>& a,
     const std::vector<double>& x
 ) {
-    size_t n = x.size();
-    size_t nb = b.size();
-    size_t na = a.size();
-    
-    std::vector<double> y(n, 0.0);
-    
-    // Normalize by a[0]
-    double a0 = a[0];
-    
-    for (size_t i = 0; i < n; ++i) {
-        double sum = 0.0;
-        
-        // FIR part (numerator)
-        for (size_t j = 0; j < nb; ++j) {
-            if (i >= j) {
-                sum += b[j] * x[i - j];
-            }
-        }
-        
-        // IIR part (denominator)
-        for (size_t j = 1; j < na; ++j) {
-            if (i >= j) {
-                sum -= a[j] * y[i - j];
-            }
-        }
-        
-        y[i] = sum / a0;
-    }
-    
-    return y;
+    // Zero initial state.
+    return filterDF2T(b, a, x, {});
 }
 
 std::vector<double> filtfilt(
@@ -225,19 +274,26 @@ std::vector<double> filtfilt(
     const std::vector<double>& x
 ) {
     if (x.empty()) return x;
-    
-    // Forward filter
-    std::vector<double> y_forward = filter(b, a, x);
-    
-    // Reverse the signal
+
+    // Steady-state initial conditions, scaled by the first/last sample of each
+    // pass. Without this, even a constant input leaves a large boundary
+    // transient (DC gain is met only asymptotically), so smoothing of a
+    // near-constant displacement series would be visibly wrong.
+    const std::vector<double> zi = lfilterZi(b, a);
+
+    // Forward pass.
+    std::vector<double> zi_fwd = zi;
+    for (auto& v : zi_fwd) v *= x.front();
+    std::vector<double> y_forward = filterDF2T(b, a, x, zi_fwd);
+
+    // Reverse, backward pass.
     std::vector<double> y_reversed(y_forward.rbegin(), y_forward.rend());
-    
-    // Backward filter
-    std::vector<double> y_backward = filter(b, a, y_reversed);
-    
-    // Reverse back
+    std::vector<double> zi_bwd = zi;
+    for (auto& v : zi_bwd) v *= y_reversed.front();
+    std::vector<double> y_backward = filterDF2T(b, a, y_reversed, zi_bwd);
+
+    // Reverse back to restore original time order.
     std::vector<double> y(y_backward.rbegin(), y_backward.rend());
-    
     return y;
 }
 

@@ -7,40 +7,59 @@
  *  - DC + high-frequency component: the high-frequency component is attenuated, DC retained.
  *  - very short series do not crash and are returned with the same shape.
  *
- * KNOWN-BUG STATUS: while writing these tests, production filterTime() was found to be
- * numerically unstable for *every* signal length tested (n = 16..256): even a pure DC input
- * diverges to ~1e+24..1e+162 instead of returning the constant. The instability is in
- * detail::filtfilt / detail::butterLowPass (initial-condition / coefficient handling), not
- * in the test. Fixing it touches production math that feeds the camerapairs step-F
- * deformation path, so it is intentionally out of scope for this test-only change and is
- * tracked separately. The two affected invariants are registered as SKIPPED with this
- * documented reason, so the suite stays green and the gap is explicit. The no-crash / shape
- * invariant (which passes) is asserted normally as a live regression guard.
+ * FIXED: the production filtfilt/butterLowPass instability has been corrected
+ * (butterLowPass emitted the denominator coefficients in reversed order, and filtfilt
+ * used zero initial conditions). butterLowPass now produces normalized descending-power
+ * coefficients and filtfilt injects MATLAB/scipy-style steady-state initial conditions,
+ * so a constant (DC) input is preserved and high frequencies are attenuated. The two
+ * invariants below are asserted as live regression guards.
  */
 
 #include "../framework/test_harness.h"
 #include "temporal_filter.h"
 
+#include <cmath>
 #include <vector>
 
 using cppxdic::filterTime;
 
 TEST(temporal_filter, constant_signal_preserved) {
-    SKIP_TEST(
-        "filterTime() is numerically unstable (diverges on a constant input across all "
-        "tested lengths) - production filtfilt/butterLowPass bug, tracked separately");
-    // Intended assertion (re-enable once the production filter is fixed):
-    //   std::vector<std::vector<double>> data(1, std::vector<double>(64, 5.0));
-    //   auto out = filterTime(data, 5.0, 50.0);
-    //   for (double v : out[0]) CHECK_NEAR(v, 5.0, 1e-3);
+    // A zero-phase Butterworth low-pass has DC gain == 1, so a constant input
+    // must be returned unchanged (this used to diverge to ~1e+24).
+    std::vector<std::vector<double>> data(1, std::vector<double>(64, 5.0));
+    auto out = filterTime(data, 5.0, 50.0);
+    CHECK_EQ(out.size(), static_cast<size_t>(1));
+    CHECK_EQ(out[0].size(), static_cast<size_t>(64));
+    for (double v : out[0]) CHECK_NEAR(v, 5.0, 1e-3);
 }
 
 TEST(temporal_filter, high_freq_attenuated_dc_retained) {
-    SKIP_TEST(
-        "filterTime() diverges (see constant_signal_preserved) - cannot assert frequency "
-        "response until the production filtfilt/butterLowPass bug is fixed");
-    // Intended assertion (re-enable once the production filter is fixed):
-    //   DC + 20 Hz sine at fs=50 -> filtered ripple amplitude << input, mean preserved.
+    // DC + 20 Hz sine at fs=50 (cutoff 5 Hz): the 20 Hz component sits well above
+    // the cutoff, so it must be strongly attenuated while the DC offset is retained.
+    const size_t n = 128;
+    const double fs = 50.0, f_hi = 20.0, dc = 3.0, amp = 1.0;
+    std::vector<std::vector<double>> data(1, std::vector<double>(n));
+    for (size_t i = 0; i < n; ++i) {
+        data[0][i] = dc + amp * std::sin(2.0 * M_PI * f_hi * static_cast<double>(i) / fs);
+    }
+
+    auto out = filterTime(data, 5.0, 50.0);
+    CHECK_EQ(out[0].size(), n);
+
+    // Mean (DC offset) preserved.
+    double mean = 0.0;
+    for (double v : out[0]) mean += v;
+    mean /= static_cast<double>(n);
+    CHECK_NEAR(mean, dc, 1e-2);
+
+    // High-frequency ripple strongly attenuated: look at the interior to avoid
+    // any residual edge effects, and require the residual amplitude to be a
+    // small fraction of the input amplitude.
+    double max_dev = 0.0;
+    for (size_t i = 16; i + 16 < n; ++i) {
+        max_dev = std::max(max_dev, std::fabs(out[0][i] - dc));
+    }
+    CHECK_TRUE(max_dev < 0.2 * amp);
 }
 
 TEST(temporal_filter, very_short_series_no_crash) {
