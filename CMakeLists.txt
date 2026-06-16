@@ -37,6 +37,29 @@ add_executable(cppxdic
     src/matlab_functions.cpp
 )
 
+# ----------------------------------------------------------------------------
+# xDIC reconstruction mode selection (Section 2c)
+# Choose the reconstruction mode at configure time. Only `camerapairs` is fully
+# implemented; `mirrored` and `multi` are stubs gated behind this flag so that
+# the working pipeline is never restructured to add them.
+#   cmake -DXDIC_MODE=camerapairs ..   (default)
+#   cmake -DXDIC_MODE=mirrored ..
+#   cmake -DXDIC_MODE=multi ..
+# ----------------------------------------------------------------------------
+set(XDIC_MODE "camerapairs" CACHE STRING "xDIC reconstruction mode: camerapairs|mirrored|multi")
+set_property(CACHE XDIC_MODE PROPERTY STRINGS camerapairs mirrored multi)
+if(XDIC_MODE STREQUAL "camerapairs")
+    set(XDIC_MODE_DEFINE XDIC_MODE_CAMERAPAIRS)
+elseif(XDIC_MODE STREQUAL "mirrored")
+    set(XDIC_MODE_DEFINE XDIC_MODE_MIRRORED)
+elseif(XDIC_MODE STREQUAL "multi")
+    set(XDIC_MODE_DEFINE XDIC_MODE_MULTI)
+else()
+    message(FATAL_ERROR "Invalid XDIC_MODE='${XDIC_MODE}'. Use camerapairs|mirrored|multi.")
+endif()
+message(STATUS "xDIC mode: ${XDIC_MODE} (define ${XDIC_MODE_DEFINE})")
+target_compile_definitions(cppxdic PRIVATE ${XDIC_MODE_DEFINE})
+
 # Find OpenCV (following ncorr pattern)
 find_package(OpenCV REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})

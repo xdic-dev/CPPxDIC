@@ -13,6 +13,12 @@
 #include "config.h"
 #include "dic_analysis.h"
 #include "utils.h"
+#include "xdic/xdic_mode.h"
+
+// Mode-specific dispatch headers (stubs for non-default modes).
+#if defined(XDIC_MODE_MIRRORED)
+#include "xdic/mirrored/mirrored_mode.h"
+#endif
 
 // Print usage information
 void print_usage(const char* prog_name) {
@@ -109,6 +115,9 @@ int main(int argc, char* argv[]) {
         // Update derived variables
         config.updateVariables();
         std::cout << std::endl;
+
+        // Announce the compile-time reconstruction mode (Section 2c).
+        std::cout << "xDIC reconstruction mode: " << xdic::active_mode_name() << std::endl;
         
         // Print final parameters
         std::cout << "Final Configuration:" << std::endl;
@@ -126,24 +135,39 @@ int main(int argc, char* argv[]) {
                   << ", Automatic process: " << config.automatic_process << std::endl;
         std::cout << std::endl;
         
+#if defined(XDIC_MODE_CAMERAPAIRS)
+        // ---- Camera-pairs mode: the only fully-implemented reconstruction path. ----
         // Checking
         std::cout << "Checking the data and protocol..." << std::endl;
         if (!Utils::dicCheck(config)) {
             std::cerr << "Data and protocol check failed!" << std::endl;
             return 1;
         }
-        
+
         // Call analysis function
         DicAnalysis dicAnalysis(config);
         bool success = dicAnalysis.run();
-        
+
         if (success) {
             std::cout << "Analysis completed successfully!" << std::endl;
         } else {
             std::cerr << "Analysis failed!" << std::endl;
             return 1;
         }
-        
+#elif defined(XDIC_MODE_MIRRORED)
+        // ---- Mirrored-camera mode: STUB (Section 2d). ----
+        if (!xdic::mirrored::run(config)) {
+            std::cerr << "Mirrored mode failed." << std::endl;
+            return 1;
+        }
+#elif defined(XDIC_MODE_MULTI)
+        // ---- Multi-camera mode: STUB (Section 2e). ----
+        // The multi-mode placeholder intentionally fails to compile (see
+        // src/xdic/multi/multi_mode.cpp), so this branch is only reachable when that
+        // translation unit is added to the build under XDIC_MODE=multi.
+        #error "xdic multi-camera mode is not implemented"
+#endif
+
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
         return 1;
