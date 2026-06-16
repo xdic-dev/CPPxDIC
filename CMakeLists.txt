@@ -35,6 +35,7 @@ add_executable(cppxdic
     src/visualization.cpp
     src/data_serializer.cpp
     src/matlab_functions.cpp
+    src/input/image_folder_reader.cpp
 )
 
 # ----------------------------------------------------------------------------
