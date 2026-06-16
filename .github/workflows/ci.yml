@@ -1,0 +1,112 @@
+# =============================================================================
+# CPPxDIC CI — build, test, lint.
+#
+# Triggers on push and PR to `main` and `newversion`. Kept fast: no GPU, no dataset
+# downloads. The heavy DIC/3D dependencies (OpenCV, CGAL, matio, HDF5, SuiteSparse, …)
+# are apt-installed in the build/test jobs. The CppNCorr / MultiDIC submodules MUST be
+# checked out (submodules: recursive) because cppxdic compiles CppNCorr in-tree.
+# =============================================================================
+name: CI
+
+on:
+  push:
+    branches: [main, newversion]
+  pull_request:
+    branches: [main, newversion]
+
+# Shared dependency-install step is duplicated per job (composite actions avoided to keep
+# this single-file and reviewable). Ubuntu 24.04 package names.
+env:
+  APT_DEPS: >-
+    build-essential cmake pkg-config
+    libopencv-dev libcgal-dev libeigen3-dev libmatio-dev libhdf5-dev
+    libfftw3-dev libsuitesparse-dev liblapack-dev libblas-dev
+    nlohmann-json3-dev libomp-dev
+
+jobs:
+  build:
+    name: build (camera-pairs, GCC, ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive   # CppNCorr is compiled in-tree
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ${{ env.APT_DEPS }}
+      - name: Configure (camera-pairs, tests off)
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DXDIC_MODE=camerapairs
+          -DBUILD_TESTING=OFF
+      - name: Build cppxdic
+        run: cmake --build build -j"$(nproc)" --target cppxdic
+        # NOTE: cppxdic links the concurrently-developed CppNCorr submodule. If the build
+        # fails inside Tools/CppNCorr/, that is a submodule issue, not a CPPxDIC regression.
+
+  test:
+    name: test (unit + integration on ohtcfrp via ctest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ${{ env.APT_DEPS }}
+      - name: Configure with tests
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DXDIC_MODE=camerapairs
+          -DBUILD_TESTING=ON
+      - name: Build test suite
+        # Build only the cppxdic_core test library + test executables (not the full cppxdic
+        # binary) so the test job stays fast and is independent of the heavy main target.
+        run: >-
+          cmake --build build -j"$(nproc)" --target
+          test_config test_xdic_mode test_image_folder_reader test_delaunay
+          test_temporal_filter test_face_isotropy test_surface_stitching
+          test_it3_ohtcfrp_fixture test_integration_skipped test_e2e_ohtcfrp
+      - name: Run ctest (unit + integration + 2D e2e)
+        working-directory: build
+        run: ctest --output-on-failure
+        # SKIPPED-IN-CI rationale:
+        #   - Stereo 3D integration tests (IT-1,2,4,5,6,7) and the full stereo pipeline
+        #     (E2E-2) are registered as SKIPPED inside the suite: they need a multi-camera
+        #     calibration + video dataset that is too large for CI and not present in-repo.
+        #   - E2E-1 runs here: it is the 2D-path regression guard on the lightweight ohtcfrp
+        #     example (frame discovery/decode + golden statistics with tolerance bands).
+        #   - Two filterTime() invariants are SKIPPED (known production instability, tracked
+        #     separately). Skips keep the suite green while gaps stay explicit.
+
+  lint:
+    name: lint (clang-format --dry-run on changed files)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need history to diff against the base branch
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang-format
+      - name: clang-format changed C/C++ files
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.pull_request.base.sha }}"
+          if [ -z "${BASE}" ]; then
+            BASE="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
+          fi
+          echo "Diffing against ${BASE}"
+          # Only our own sources — never the submodules under Tools/.
+          FILES=$(git diff --name-only --diff-filter=ACMR "${BASE}" HEAD \
+                    | grep -E '\.(c|cc|cpp|cxx|h|hpp|hxx)$' \
+                    | grep -v '^Tools/' || true)
+          if [ -z "${FILES}" ]; then
+            echo "No changed C/C++ files to lint."
+            exit 0
+          fi
+          echo "Linting:"; echo "${FILES}"
+          clang-format --dry-run --Werror ${FILES}
