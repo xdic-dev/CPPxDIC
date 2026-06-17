@@ -430,3 +430,15 @@ if(BUILD_TESTING AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     enable_testing()
     add_subdirectory(tests/cppxdic_suite)
 endif()
+
+# ----------------------------------------------------------------------------
+# Optional additive apps (OFF by default), gated by their own BUILD_* options.
+# These reuse the library variables / imported targets configured above and do
+# NOT modify the cppxdic target.
+# ----------------------------------------------------------------------------
+option(BUILD_XDIC_STEPSABC
+       "Build the xdic_stepsABC tool (MASK+Seed setup and StepC DLT calibration)" OFF)
+if(BUILD_XDIC_STEPSABC)
+    message(STATUS "Building additive target: xdic_stepsABC")
+    add_subdirectory(apps/xdic_stepsABC)
+endif()
