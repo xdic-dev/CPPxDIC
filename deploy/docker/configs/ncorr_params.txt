@@ -1,0 +1,23 @@
+# =============================================================================
+# NCorr Parameters for HPC Cluster Runs
+# These override DIC params where applicable.
+# =============================================================================
+
+units_per_pixel = 0.2
+radius = 20
+debug = false
+threads = 4
+maxCorrCoeff = 1.0
+scalefactor = 1
+interp = cubic
+subregion = round
+dic_config = KEEP_MOST_POINTS
+cutoff_corrcoef = 10.0
+roi_update_mode = union
+accumulation_mode = additive
+save_disps_steps = false
+perspective_interp = false
+units = mm
+seeds_are_optimized = false
+cutoff_max_diffnorm = 1e-5
+cutoff_max_corrcoef = 1.0

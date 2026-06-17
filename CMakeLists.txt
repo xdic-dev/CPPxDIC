@@ -35,7 +35,43 @@ add_executable(cppxdic
     src/visualization.cpp
     src/data_serializer.cpp
     src/matlab_functions.cpp
+    src/input/image_folder_reader.cpp
 )
+
+# ----------------------------------------------------------------------------
+# xDIC reconstruction mode selection (Section 2c)
+# Choose the reconstruction mode at configure time. Only `camerapairs` is fully
+# implemented; `mirrored` and `multi` are stubs gated behind this flag so that
+# the working pipeline is never restructured to add them.
+#   cmake -DXDIC_MODE=camerapairs ..   (default)
+#   cmake -DXDIC_MODE=mirrored ..
+#   cmake -DXDIC_MODE=multi ..
+# ----------------------------------------------------------------------------
+set(XDIC_MODE "camerapairs" CACHE STRING "xDIC reconstruction mode: camerapairs|mirrored|multi")
+set_property(CACHE XDIC_MODE PROPERTY STRINGS camerapairs mirrored multi)
+if(XDIC_MODE STREQUAL "camerapairs")
+    set(XDIC_MODE_DEFINE XDIC_MODE_CAMERAPAIRS)
+elseif(XDIC_MODE STREQUAL "mirrored")
+    set(XDIC_MODE_DEFINE XDIC_MODE_MIRRORED)
+elseif(XDIC_MODE STREQUAL "multi")
+    set(XDIC_MODE_DEFINE XDIC_MODE_MULTI)
+else()
+    message(FATAL_ERROR "Invalid XDIC_MODE='${XDIC_MODE}'. Use camerapairs|mirrored|multi.")
+endif()
+message(STATUS "xDIC mode: ${XDIC_MODE} (define ${XDIC_MODE_DEFINE})")
+target_compile_definitions(cppxdic PRIVATE ${XDIC_MODE_DEFINE})
+
+# Mirrored-camera mode skeleton (Section 2d): compiled only for XDIC_MODE=mirrored.
+if(XDIC_MODE STREQUAL "mirrored")
+    target_sources(cppxdic PRIVATE src/xdic/mirrored/mirrored_mode.cpp)
+endif()
+
+# Multi-camera mode placeholder (Section 2e): added only for XDIC_MODE=multi, where its
+# `#error` guard intentionally stops the build (mode not yet implemented). Never compiled
+# in the default camerapairs build.
+if(XDIC_MODE STREQUAL "multi")
+    target_sources(cppxdic PRIVATE src/xdic/multi/multi_mode.cpp)
+endif()
 
 # Find OpenCV (following ncorr pattern)
 find_package(OpenCV REQUIRED)
@@ -270,4 +306,127 @@ else()
   else()
     message(FATAL_ERROR "nlohmann/json library not found. Please install it using your package manager.")
   endif()
+endif()
+
+# ----------------------------------------------------------------------------
+# Optional target: proxyncorr (Section 2a)
+# Thin pass-through driver around CppNCorr's DIC engine for quick validation.
+# Promoted from Tools/CppNCorr/test/src/proxyncorr.cpp into apps/proxyncorr/.
+# Build with: cmake -DBUILD_PROXYNCORR=ON ..   (default OFF; not part of default build)
+# ----------------------------------------------------------------------------
+option(BUILD_PROXYNCORR "Build the proxyncorr pass-through DIC driver" OFF)
+if(BUILD_PROXYNCORR)
+    message(STATUS "BUILD_PROXYNCORR=ON - building proxyncorr target")
+    add_executable(proxyncorr apps/proxyncorr/main.cpp)
+    target_include_directories(proxyncorr PRIVATE include Tools/CppNCorr/include)
+    target_link_libraries(proxyncorr ncorr ${OpenCV_LIBS}
+        ${OPENCV_LIBRARY1} ${OPENCV_LIBRARY2} ${OPENCV_LIBRARY3}
+        ${OPENCV_LIBRARY4} ${OPENCV_LIBRARY5}
+        ${FFTW_LIBRARY} ${MATIO_LIBRARY}
+        ${SUITESPARSE_LIBRARY1} ${SUITESPARSE_LIBRARY2} ${SUITESPARSE_LIBRARY3}
+        ${SUITESPARSE_LIBRARY4} ${SUITESPARSE_LIBRARY5}
+        ${LAPACK_LIBRARY} ${BLAS_LIBRARY} ${CMAKE_THREAD_LIBS_INIT})
+    if(FFTW_INCLUDE_DIR)
+        target_include_directories(proxyncorr PRIVATE ${FFTW_INCLUDE_DIR})
+    endif()
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(proxyncorr OpenMP::OpenMP_CXX)
+    endif()
+    if(TARGET nlohmann_json::nlohmann_json)
+        target_link_libraries(proxyncorr nlohmann_json::nlohmann_json)
+    elseif(NLOHMANN_JSON_INCLUDE_DIRS)
+        target_include_directories(proxyncorr PRIVATE ${NLOHMANN_JSON_INCLUDE_DIRS})
+    endif()
+    target_compile_options(proxyncorr PRIVATE -Wall -Wextra -O2)
+endif()
+
+# ----------------------------------------------------------------------------
+# Optional target: singledic (Section 2b) - STUB
+# Single-camera 2D DIC (no stereo / no 3D reconstruction). See apps/singledic/.
+# Build with: cmake -DBUILD_SINGLEDIC=ON ..  (default OFF; not part of default build)
+# ----------------------------------------------------------------------------
+option(BUILD_SINGLEDIC "Build the singledic single-camera DIC driver" OFF)
+if(BUILD_SINGLEDIC)
+    message(STATUS "BUILD_SINGLEDIC=ON - building singledic target")
+    # singledic reuses the production pipeline sources (everything cppxdic links
+    # except src/main.cpp) plus its own driver + workflow, and links the same
+    # third-party deps as cppxdic. Default-OFF; not part of the default build.
+    add_executable(singledic
+        apps/singledic/main.cpp
+        src/singledic/single_dic_workflow.cpp
+        src/config.cpp
+        src/dic_analysis.cpp
+        src/dic_structures.cpp
+        src/utils.cpp
+        src/image_processor.cpp
+        src/roi_manager.cpp
+        src/mat_writer.cpp
+        src/step_d_workflow.cpp
+        src/strain_computation.cpp
+        src/mat_reader.cpp
+        src/delaunay_triangulation.cpp
+        src/surface_stitching.cpp
+        src/temporal_filter.cpp
+        src/face_isotropy.cpp
+        src/visualization.cpp
+        src/data_serializer.cpp
+        src/matlab_functions.cpp
+        src/input/image_folder_reader.cpp
+    )
+    target_include_directories(singledic PRIVATE include Tools/CppNCorr/include)
+    target_compile_definitions(singledic PRIVATE XDIC_MODE_CAMERAPAIRS)
+    target_link_libraries(singledic
+        ncorr
+        ${OpenCV_LIBS}
+        ${OPENCV_LIBRARY1} ${OPENCV_LIBRARY2} ${OPENCV_LIBRARY3} ${OPENCV_LIBRARY4} ${OPENCV_LIBRARY5}
+        ${FFTW_LIBRARY} ${MATIO_LIBRARY}
+        ${SUITESPARSE_LIBRARY1} ${SUITESPARSE_LIBRARY2} ${SUITESPARSE_LIBRARY3}
+        ${SUITESPARSE_LIBRARY4} ${SUITESPARSE_LIBRARY5}
+        ${LAPACK_LIBRARY} ${BLAS_LIBRARY} ${CMAKE_THREAD_LIBS_INIT}
+    )
+    if(MATIO_INCLUDE_DIR)
+        target_include_directories(singledic PRIVATE ${MATIO_INCLUDE_DIR})
+    endif()
+    if(HDF5_FOUND)
+        target_include_directories(singledic PRIVATE ${HDF5_INCLUDE_DIRS})
+        target_link_libraries(singledic ${HDF5_C_LIBRARIES})
+    endif()
+    if(TARGET CGAL::CGAL)
+        target_link_libraries(singledic CGAL::CGAL)
+    endif()
+    if(TARGET Eigen3::Eigen)
+        target_link_libraries(singledic Eigen3::Eigen)
+    endif()
+    if(DEFINED EIGEN3_INCLUDE_DIRS)
+        target_include_directories(singledic PRIVATE ${EIGEN3_INCLUDE_DIRS})
+    elseif(DEFINED EIGEN3_INCLUDE_DIR)
+        target_include_directories(singledic PRIVATE ${EIGEN3_INCLUDE_DIR})
+    endif()
+    if(FFTW_INCLUDE_DIR)
+        target_include_directories(singledic PRIVATE ${FFTW_INCLUDE_DIR})
+    endif()
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(singledic OpenMP::OpenMP_CXX)
+    endif()
+    if(TARGET nlohmann_json::nlohmann_json)
+        target_link_libraries(singledic nlohmann_json::nlohmann_json)
+    elseif(NLOHMANN_JSON_INCLUDE_DIRS)
+        target_include_directories(singledic PRIVATE ${NLOHMANN_JSON_INCLUDE_DIRS})
+    endif()
+    target_compile_options(singledic PRIVATE -Wall -Wextra -O2)
+endif()
+
+# ----------------------------------------------------------------------------
+# Tests (Section 5b)
+# In-tree assertion harness + CTest (no GoogleTest / Catch2). Built only when:
+#   - BUILD_TESTING is ON (default ON), and
+#   - CPPxDIC is the *top-level* project (so adding CPPxDIC as a subdirectory, or a
+#     normal production build that opts out, never pulls in test targets).
+# Run with:  cmake -DBUILD_TESTING=ON .. && cmake --build . && ctest --output-on-failure
+# ----------------------------------------------------------------------------
+option(BUILD_TESTING "Build the CPPxDIC test suite" ON)
+if(BUILD_TESTING AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    message(STATUS "BUILD_TESTING=ON - configuring CPPxDIC test suite (ctest)")
+    enable_testing()
+    add_subdirectory(tests/cppxdic_suite)
 endif()

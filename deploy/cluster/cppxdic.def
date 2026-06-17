@@ -1,0 +1,139 @@
+Bootstrap: docker
+From: ubuntu:22.04
+
+%labels
+    Author CPPxDIC Team
+    Version 1.0
+    Description Singularity/Apptainer container for CPPxDIC - C++ Digital Image Correlation
+
+%help
+    CPPxDIC container for HPC/SLURM clusters.
+    
+    Build:
+        apptainer build cppxdic.sif cppxdic.def
+    
+    Run (standalone):
+        apptainer run cppxdic.sif --dic-params /path/to/dic_params.txt
+    
+    Run (with SLURM):
+        See submit_job.sh
+
+%environment
+    export LC_ALL=C
+    export LANG=C
+    export PATH=/opt/cppxdic/bin:$PATH
+    export LD_LIBRARY_PATH=/usr/local/lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+    export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
+
+%post
+    # =========================================================================
+    # System packages
+    # =========================================================================
+    export DEBIAN_FRONTEND=noninteractive
+    # Packages installed:
+    #   build-essential, cmake, g++, git, pkg-config  - build tools
+    #   libopencv-dev                                  - OpenCV (core, imgproc, imgcodecs, highgui, videoio)
+    #   libfftw3-dev                                   - FFTW3
+    #   libmatio-dev                                   - MATIO (MATLAB .mat I/O)
+    #   libhdf5-dev                                    - HDF5 (required by matio for v7.3 format)
+    #   libcgal-dev                                    - CGAL (Delaunay triangulation)
+    #   libeigen3-dev                                  - Eigen3 (header-only linear algebra)
+    #   libsuitesparse-dev                             - SuiteSparse (spqr, cholmod, amd, colamd)
+    #   liblapack-dev, libblas-dev, libopenblas-dev    - BLAS / LAPACK
+    #   libomp-dev                                     - OpenMP
+    #   nlohmann-json3-dev                             - nlohmann/json (header-only JSON)
+    #   pthreads is included in libc (no extra package needed)
+    apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        g++ \
+        git \
+        pkg-config \
+        ca-certificates \
+        wget \
+        libopencv-dev \
+        libfftw3-dev \
+        libmatio-dev \
+        libhdf5-dev \
+        libcgal-dev \
+        libeigen3-dev \
+        libsuitesparse-dev \
+        liblapack-dev \
+        libblas-dev \
+        libopenblas-dev \
+        libomp-dev \
+        nlohmann-json3-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+    # =========================================================================
+    # Verify all critical libraries are present
+    # =========================================================================
+    echo "=== Verifying dependencies ==="
+    pkg-config --modversion opencv4   || echo "WARN: opencv4 pkg-config missing (may still work)"
+    dpkg -s libfftw3-dev              | grep Version
+    dpkg -s libmatio-dev              | grep Version
+    dpkg -s libhdf5-dev               | grep Version
+    dpkg -s libcgal-dev               | grep Version
+    dpkg -s libeigen3-dev             | grep Version
+    dpkg -s libsuitesparse-dev        | grep Version
+    dpkg -s liblapack-dev             | grep Version
+    dpkg -s libblas-dev               | grep Version
+    dpkg -s libomp-dev                | grep Version
+    dpkg -s nlohmann-json3-dev        | grep Version
+    echo "=== All dependencies verified ==="
+
+    # =========================================================================
+    # Clone and build CPPxDIC
+    # =========================================================================
+    # Clean any stale build artifacts copied from the host
+    rm -rf /opt/cppxdic/src/build
+    rm -rf /opt/cppxdic/src/tests/build
+    rm -rf /opt/cppxdic/src/Tools/CppNCorr/lib
+    rm -f  /opt/cppxdic/src/compile_commands.json
+    
+    cd /opt/cppxdic/src
+    mkdir -p build && cd build
+    
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/opt/cppxdic \
+        -DCMAKE_CXX_STANDARD=17
+    
+    make -j$(nproc)
+    make install
+    
+    # Also build tests (optional, useful for validation on cluster)
+    if [ -d /opt/cppxdic/src/tests ]; then
+        mkdir -p /opt/cppxdic/src/tests/build && cd /opt/cppxdic/src/tests/build
+        cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_STANDARD=17
+        make -j$(nproc) || echo "WARN: test build had errors (non-fatal)"
+    fi
+
+    # Cleanup build artifacts to reduce image size
+    rm -rf /opt/cppxdic/src/build
+    rm -rf /opt/cppxdic/src/tests/build
+
+%files
+    # Copy the entire project source into the container at build time
+    # Run: apptainer build cppxdic.sif cppxdic.def   from the CPPxDIC directory
+    . /opt/cppxdic/src
+
+%runscript
+    # Default entrypoint: run cppxdic with all arguments forwarded
+    exec /opt/cppxdic/bin/cppxdic "$@"
+
+%test
+    echo "=== Running container self-test ==="
+    # Verify binary exists and is executable
+    test -x /opt/cppxdic/bin/cppxdic || { echo "FAIL: cppxdic binary not found"; exit 1; }
+    
+    # Verify it can print help
+    /opt/cppxdic/bin/cppxdic --help || { echo "FAIL: cppxdic --help failed"; exit 1; }
+    
+    # Verify shared libraries resolve
+    ldd /opt/cppxdic/bin/cppxdic | grep "not found" && { echo "FAIL: missing shared libs"; exit 1; }
+    
+    echo "=== Self-test PASSED ==="

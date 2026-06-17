@@ -23,15 +23,15 @@ void Config::updateVariables() {
     if (dic_path.empty()) {
         dic_path = base_path + "/analysis";
     }
-    
+
     // Update material name from material_id
     if (material_id >= 1 && material_id <= static_cast<int>(frictional_conditions.size())) {
-        material = frictional_conditions[material_id - 1];  // Convert to 0-based index
+        material = frictional_conditions[material_id - 1]; // Convert to 0-based index
     } else {
         material = "unknown";
         std::cerr << "Warning: Invalid material_id " << material_id << std::endl;
     }
-    
+
     std::cout << "Variables updated. Material: " << material << std::endl;
 }
 
@@ -50,19 +50,19 @@ void Config::setDefaultPaths() {
 std::string Config::parseConfigValue(const std::string& line, const std::string& key) {
     size_t eq_pos = line.find('=');
     if (eq_pos == std::string::npos) return "";
-    
+
     std::string line_key = line.substr(0, eq_pos);
     // Trim whitespace from key
     line_key.erase(0, line_key.find_first_not_of(" \t"));
     line_key.erase(line_key.find_last_not_of(" \t") + 1);
-    
+
     if (line_key != key) return "";
-    
+
     std::string value = line.substr(eq_pos + 1);
     // Trim whitespace from value
     value.erase(0, value.find_first_not_of(" \t"));
     value.erase(value.find_last_not_of(" \t") + 1);
-    
+
     return value;
 }
 
@@ -125,27 +125,27 @@ bool Config::loadFromDicParamsFile(const std::string& filepath) {
         std::cout << "DIC params file not found: " << filepath << ", using defaults" << std::endl;
         return false;
     }
-    
+
     std::ifstream file(filepath);
     if (!file.is_open()) {
         std::cerr << "Warning: Could not open DIC params file: " << filepath << std::endl;
         return false;
     }
-    
+
     std::cout << "Loading DIC parameters from: " << filepath << std::endl;
-    
+
     std::string line;
     while (std::getline(file, line)) {
         // Skip empty lines and comments
         if (line.empty() || line[0] == '#') continue;
-        
+
         // Remove leading/trailing whitespace
         line.erase(0, line.find_first_not_of(" \t"));
         if (line.empty() || line[0] == '#') continue;
-        
+
         // Parse each parameter
         std::string value;
-        
+
         // Global parameters
         if (!(value = parseConfigValue(line, "frictional_conditions")).empty()) {
             frictional_conditions = parseStringList(value);
@@ -316,7 +316,7 @@ bool Config::loadFromDicParamsFile(const std::string& filepath) {
             step_f_compute_rbm = parseBool(value);
         }
     }
-    
+
     file.close();
     std::cout << "DIC parameters loaded from file" << std::endl;
     return true;
@@ -328,25 +328,25 @@ bool Config::loadFromNcorrParamsFile(const std::string& filepath) {
         std::cout << "NCorr params file not found: " << filepath << ", skipping" << std::endl;
         return false;
     }
-    
+
     std::ifstream file(filepath);
     if (!file.is_open()) {
         std::cerr << "Warning: Could not open NCorr params file: " << filepath << std::endl;
         return false;
     }
-    
+
     std::cout << "Loading NCorr parameters from: " << filepath << std::endl;
-    
+
     std::string line;
     while (std::getline(file, line)) {
         // Skip empty lines and comments
         if (line.empty() || line[0] == '#') continue;
-        
+
         line.erase(0, line.find_first_not_of(" \t"));
         if (line.empty() || line[0] == '#') continue;
-        
+
         std::string value;
-        
+
         if (!(value = parseConfigValue(line, "units_per_pixel")).empty()) {
             units_per_pixel = std::stod(value);
         } else if (!(value = parseConfigValue(line, "radius")).empty()) {
@@ -387,7 +387,7 @@ bool Config::loadFromNcorrParamsFile(const std::string& filepath) {
             ncorr_use_exact_matlab = parseBool(value);
         }
     }
-    
+
     file.close();
     std::cout << "NCorr parameters loaded from file" << std::endl;
     return true;
@@ -396,28 +396,29 @@ bool Config::loadFromNcorrParamsFile(const std::string& filepath) {
 // Load visualization parameters from file
 bool Config::loadFromVisualizationParamsFile(const std::string& filepath) {
     if (!std::filesystem::exists(filepath)) {
-        std::cout << "Visualization params file not found: " << filepath << ", using defaults" << std::endl;
+        std::cout << "Visualization params file not found: " << filepath << ", using defaults"
+                  << std::endl;
         return false;
     }
-    
+
     std::ifstream file(filepath);
     if (!file.is_open()) {
         std::cerr << "Warning: Could not open visualization params file: " << filepath << std::endl;
         return false;
     }
-    
+
     std::cout << "Loading visualization parameters from: " << filepath << std::endl;
-    
+
     std::string line;
     while (std::getline(file, line)) {
         // Skip empty lines and comments
         if (line.empty() || line[0] == '#') continue;
-        
+
         line.erase(0, line.find_first_not_of(" \t"));
         if (line.empty() || line[0] == '#') continue;
-        
+
         std::string value;
-        
+
         // Visualization settings
         if (!(value = parseConfigValue(line, "showvisu")).empty()) {
             showvisu = parseBool(value);
@@ -549,9 +550,26 @@ bool Config::loadFromVisualizationParamsFile(const std::string& filepath) {
             background_color = value;
         }
     }
-    
+
     file.close();
     std::cout << "Visualization parameters loaded from file" << std::endl;
+    return true;
+}
+
+// Load a single unified config file (config-file tier of the override chain).
+// Reuses the three existing per-file loaders; each only reacts to its own keys, so a
+// unified file containing any mix of DIC / NCorr / visualization keys is parsed correctly.
+bool Config::loadFromConfigFile(const std::string& filepath) {
+    if (!std::filesystem::exists(filepath)) {
+        std::cout << "Config file not found: " << filepath
+                  << ", using compiled defaults / per-file params" << std::endl;
+        return false;
+    }
+    std::cout << "Loading unified config file: " << filepath << std::endl;
+    // Order does not matter: the loaders key on disjoint parameter names.
+    loadFromDicParamsFile(filepath);
+    loadFromNcorrParamsFile(filepath);
+    loadFromVisualizationParamsFile(filepath);
     return true;
 }
 

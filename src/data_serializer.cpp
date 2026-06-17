@@ -231,7 +231,7 @@ bool BinarySerializer::loadDIC2DPairResults(const std::string& path, DIC2DPairRe
 // ============================================================================
 
 // Helper: serialize Points3D to JSON array
-static nlohmann::json points3dToJson(const Points3D& pts) {
+static nlohmann::json points3dToJson(const Point3DFrame& pts) {
     nlohmann::json j;
     j["x"] = pts.x;
     j["y"] = pts.y;
@@ -240,8 +240,8 @@ static nlohmann::json points3dToJson(const Points3D& pts) {
 }
 
 // Helper: deserialize Points3D from JSON
-static Points3D points3dFromJson(const nlohmann::json& j) {
-    Points3D pts;
+static Point3DFrame points3dFromJson(const nlohmann::json& j) {
+    Point3DFrame pts;
     pts.x = j["x"].get<std::vector<double>>();
     pts.y = j["y"].get<std::vector<double>>();
     pts.z = j["z"].get<std::vector<double>>();

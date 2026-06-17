@@ -1,0 +1,8 @@
+# =============================================================================
+# Visualization Parameters for HPC Cluster Runs
+# On headless clusters, keep showvisu=false to avoid X11 dependencies.
+# =============================================================================
+
+showvisu = false
+savevisu = true
+savevisu_format = png

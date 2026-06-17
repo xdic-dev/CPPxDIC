@@ -1,0 +1,16 @@
+# CPPxDIC clang-format configuration.
+# Based on Google style with a 100-column limit and 4-space indentation, matching the
+# predominant layout of the existing src/ and include/ code.
+---
+Language: Cpp
+BasedOnStyle: Google
+IndentWidth: 4
+ColumnLimit: 100
+AccessModifierOffset: -4
+PointerAlignment: Left
+DerivePointerAlignment: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: WithoutElse
+SortIncludes: false
+SpacesBeforeTrailingComments: 1
+...

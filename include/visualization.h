@@ -30,7 +30,7 @@ enum class ExportFormat {
  * Holds filtered and processed data ready for export
  */
 struct VisData {
-    std::vector<Points3D> Points3D;              // 3D points per frame
+    std::vector<Point3DFrame> Points3D;              // 3D points per frame
     std::vector<int> Faces;                       // Triangle faces (Nx3 flattened)
     std::vector<std::vector<double>> FaceColors; // Face colors per frame
     std::map<std::string, std::vector<std::vector<double>>> FaceScalars;  // Scalar fields per frame
