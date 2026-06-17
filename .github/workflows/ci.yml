@@ -13,6 +13,12 @@ on:
     branches: [main, newversion]
   pull_request:
     branches: [main, newversion]
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 # Shared dependency-install step is duplicated per job (composite actions avoided to keep
 # this single-file and reviewable). Ubuntu 24.04 package names.
@@ -123,3 +129,50 @@ jobs:
           fi
           echo "Linting:"; echo "${FILES}"
           "$CF" --dry-run --Werror ${FILES}
+
+  coverage:
+    name: coverage (gcov → Codecov)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Init CppNCorr submodule (compiled in-tree)
+        # See the build job: only CppNCorr is built; MultiDIC is unreachable in CI.
+        run: git submodule update --init Tools/CppNCorr
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ${{ env.APT_DEPS }} gcovr
+      - name: Configure (coverage instrumentation)
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Debug
+          -DXDIC_MODE=camerapairs
+          -DBUILD_TESTING=ON
+          -DCMAKE_CXX_FLAGS="--coverage -O0 -g"
+          -DCMAKE_C_FLAGS="--coverage -O0 -g"
+          -DCMAKE_EXE_LINKER_FLAGS="--coverage"
+      - name: Build test suite (instrumented)
+        run: >-
+          cmake --build build -j"$(nproc)" --target
+          test_config test_xdic_mode test_image_folder_reader test_delaunay
+          test_temporal_filter test_face_isotropy test_surface_stitching
+          test_it3_ohtcfrp_fixture test_integration_skipped test_e2e_ohtcfrp
+      - name: Run ctest
+        working-directory: build
+        run: ctest --output-on-failure || echo "ctest returned non-zero (continuing for coverage)"
+      - name: Generate coverage report (Cobertura XML)
+        run: >-
+          gcovr --root .
+          --exclude 'Tools/'
+          --exclude 'tests/'
+          --exclude 'build/'
+          --xml-pretty --output coverage.xml
+          --print-summary || true
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          name: cppxdic-coverage
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
