@@ -29,8 +29,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive   # CppNCorr is compiled in-tree
+      - name: Init CppNCorr submodule (compiled in-tree)
+        # Only CppNCorr is built. Tools/MultiDIC is a read-only MATLAB reference that
+        # lives in a separate private repo the CI runner cannot clone, so we do NOT
+        # recurse all submodules — that would fail the checkout. CppNCorr is under the
+        # same org and uses an https URL, so the persisted token can fetch it.
+        run: git submodule update --init --depth=1 Tools/CppNCorr
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -51,8 +55,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      - name: Init CppNCorr submodule (compiled in-tree)
+        # See the build job: only CppNCorr is built; MultiDIC is unreachable in CI.
+        run: git submodule update --init --depth=1 Tools/CppNCorr
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -90,8 +95,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # need history to diff against the base branch
-      - name: Install clang-format
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang-format
+      - name: Install clang-format (pinned)
+        # Pin the exact clang-format version so CI and local formatting never disagree
+        # (apt ships different majors across runners). The pip package provides the
+        # `clang-format` entry point on PATH.
+        run: python3 -m pip install --quiet "clang-format==18.1.8"
       - name: clang-format changed C/C++ files
         run: |
           set -euo pipefail
