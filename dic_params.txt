@@ -22,6 +22,8 @@ vid_sample_freq = 50.0
 # ============================================================================
 # PATH DEFINITIONS
 # ============================================================================
+# Important: avoid trailing spaces/tabs in path values, as they are treated as
+# part of the path string.
 
 # Base path for the project
 base_path = /Users/jaoga/devlab/MultiDIC

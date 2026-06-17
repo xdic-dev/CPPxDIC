@@ -9,6 +9,8 @@
 # ============================================================================
 # IMAGE AND ROI PATHS
 # ============================================================================
+# Important: avoid trailing spaces/tabs in path values, as they are treated as
+# part of the path string.
 
 # Folder containing the image frames (required)
 folder = images

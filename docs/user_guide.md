@@ -59,7 +59,8 @@ CLI flags are the **highest-priority** tier; they override config files and comp
 
 Set in `config/default.cfg` (or `dic_params.txt` / `ncorr_params.txt` /
 `visualization_params.txt`). Format: `key = value`, `#` comments, comma-separated lists,
-booleans `true/false`/`1/0`/`yes`. Key categories (every key mirrors a field in
+booleans `true/false`/`1/0`/`yes`. For path-like values, avoid trailing spaces/tabs after
+the value to prevent path lookup mismatches. Key categories (every key mirrors a field in
 `include/config.h`, documented inline in `config/default.cfg`):
 
 | Category | Representative keys |
