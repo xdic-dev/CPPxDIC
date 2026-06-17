@@ -9,15 +9,18 @@
 
 option(XDIC_STEPSABC_GUI "Build xdic_stepsABC with interactive OpenCV highgui support" ON)
 
+# Source paths are root-relative because this CMakeLists is pulled in via
+# add_subdirectory(apps/xdic_stepsABC); ${CMAKE_SOURCE_DIR} anchors them to the
+# repo root rather than this subdirectory.
 add_executable(xdic_stepsABC
-    apps/xdic_stepsABC/main.cpp
-    src/stepsABC/mask_seed_setup.cpp
-    src/stepsABC/stereo_calibration.cpp
+    ${CMAKE_SOURCE_DIR}/apps/xdic_stepsABC/main.cpp
+    ${CMAKE_SOURCE_DIR}/src/stepsABC/mask_seed_setup.cpp
+    ${CMAKE_SOURCE_DIR}/src/stepsABC/stereo_calibration.cpp
     # Reuse existing pipeline math/util code rather than duplicating it:
     #   - Utils::DLT11Calibration (DLT 11-parameter fit) lives in src/utils.cpp
     #   - Config is required by utils.cpp
-    src/utils.cpp
-    src/config.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils.cpp
+    ${CMAKE_SOURCE_DIR}/src/config.cpp
 )
 
 target_include_directories(xdic_stepsABC PRIVATE
