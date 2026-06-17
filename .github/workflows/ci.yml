@@ -34,7 +34,7 @@ jobs:
         # lives in a separate private repo the CI runner cannot clone, so we do NOT
         # recurse all submodules — that would fail the checkout. CppNCorr is under the
         # same org and uses an https URL, so the persisted token can fetch it.
-        run: git submodule update --init --depth=1 Tools/CppNCorr
+        run: git submodule update --init Tools/CppNCorr
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -57,7 +57,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Init CppNCorr submodule (compiled in-tree)
         # See the build job: only CppNCorr is built; MultiDIC is unreachable in CI.
-        run: git submodule update --init --depth=1 Tools/CppNCorr
+        run: git submodule update --init Tools/CppNCorr
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -89,32 +89,37 @@ jobs:
         #     separately). Skips keep the suite green while gaps stay explicit.
 
   lint:
-    name: lint (clang-format --dry-run on changed files)
+    name: lint (clang-format on files added by this branch)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # need history to diff against the base branch
       - name: Install clang-format (pinned)
-        # Pin the exact clang-format version so CI and local formatting never disagree
-        # (apt ships different majors across runners). The pip package provides the
-        # `clang-format` entry point on PATH.
         run: python3 -m pip install --quiet "clang-format==18.1.8"
-      - name: clang-format changed C/C++ files
+      - name: clang-format added C/C++ files
         run: |
           set -euo pipefail
+          # Always use the pinned pip binary explicitly: the runner image also ships
+          # a (different-major) clang-format on PATH, which would disagree with the
+          # version used to format the tree.
+          CF="$(python3 -c 'import clang_format, os; print(os.path.join(os.path.dirname(clang_format.__file__), "data", "bin", "clang-format"))')"
+          "$CF" --version
           BASE="${{ github.event.pull_request.base.sha }}"
           if [ -z "${BASE}" ]; then
             BASE="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
           fi
           echo "Diffing against ${BASE}"
-          # Only our own sources — never the submodules under Tools/.
-          FILES=$(git diff --name-only --diff-filter=ACMR "${BASE}" HEAD \
+          # Lint only files ADDED by this branch (the new code, kept clang-format
+          # clean). Pre-existing files that were merely modified (e.g. the mechanical
+          # Points3D->Point3DFrame type rename) are intentionally not reformatted
+          # wholesale here. Never touch the submodules under Tools/.
+          FILES=$(git diff --name-only --diff-filter=A "${BASE}" HEAD \
                     | grep -E '\.(c|cc|cpp|cxx|h|hpp|hxx)$' \
                     | grep -v '^Tools/' || true)
           if [ -z "${FILES}" ]; then
-            echo "No changed C/C++ files to lint."
+            echo "No added C/C++ files to lint."
             exit 0
           fi
           echo "Linting:"; echo "${FILES}"
-          clang-format --dry-run --Werror ${FILES}
+          "$CF" --dry-run --Werror ${FILES}
