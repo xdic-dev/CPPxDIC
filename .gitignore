@@ -2,6 +2,10 @@ build
 build_tests
 .cache
 docs/*.md
+# Keep the infrastructure setup walkthrough (tracked despite docs/*.md ignore).
+!docs/PROJECT_INFRA_SETUP.md
+# Doxygen-generated API docs output (built in CI, not committed).
+docs/doxygen/
 tests/bin/
 tests/examples/
 reports/

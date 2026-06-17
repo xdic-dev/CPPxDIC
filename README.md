@@ -1,5 +1,11 @@
 # CPPXDIC - C++ Digital Image Correlation Library
 
+[![CI](https://github.com/xdic-dev/CPPxDIC/actions/workflows/ci.yml/badge.svg)](https://github.com/xdic-dev/CPPxDIC/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/xdic-dev/CPPxDIC/branch/main/graph/badge.svg)](https://codecov.io/gh/xdic-dev/CPPxDIC)
+[![Docs](https://img.shields.io/badge/docs-Doxygen-blue)](https://xdic-dev.github.io/CPPxDIC/)
+[![Release](https://img.shields.io/github/v/release/xdic-dev/CPPxDIC?include_prereleases&sort=semver)](https://github.com/xdic-dev/CPPxDIC/releases)
+[![License](https://img.shields.io/github/license/xdic-dev/CPPxDIC)](https://github.com/xdic-dev/CPPxDIC/blob/main/LICENSE)
+
 CPPXDIC is a C++ equivalent of the Matlab xDIC library for fingertip 3D reconstruction using Digital Image Correlation (DIC). It uses the ncorr C++ library as its core DIC engine.
 
 ## Features
