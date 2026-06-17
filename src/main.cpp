@@ -12,7 +12,16 @@
 #include <getopt.h>
 #include "config.h"
 #include "dic_analysis.h"
+#include "trial_selection.h"
 #include "utils.h"
+
+// Long-option ids for trial-level selection flags (no short equivalents).
+enum {
+    OPT_TRIAL = 1000,
+    OPT_TRIALS,
+    OPT_TRIALS_FILE,
+    OPT_SUBJECT_TRIAL_CSV
+};
 
 // Print usage information
 void print_usage(const char* prog_name) {
@@ -25,9 +34,23 @@ void print_usage(const char* prog_name) {
               << "  -n, --ncorr-params <file>  NCorr parameters file (default: ncorr_params.txt)\n"
               << "  -v, --viz-params <file>    Visualization parameters file (default: visualization_params.txt)\n"
               << "  -h, --help                 Show this help message\n\n"
+              << "TRIAL-LEVEL RUN MODES (mutually exclusive; pick at most one):\n"
+              << "  (a) --trial <id>             Run a single trial.\n"
+              << "  (b) --trials <list>          Trial list (e.g. 7,12,25); with SLURM_ARRAY_TASK_ID\n"
+              << "      --trials-file <path>     set, the Nth (1-based) trial is run for this task.\n"
+              << "  (c) --subject-trial-csv <p>  subject_trial.csv (header subject,trial). With\n"
+              << "                               SLURM_ARRAY_TASK_ID set, the Nth data line selects\n"
+              << "                               both subject and trial for this task.\n"
+              << "  Without SLURM_ARRAY_TASK_ID, --trials/--trials-file run the whole list and\n"
+              << "  --subject-trial-csv runs every row (grouped per subject).\n\n"
               << "EXAMPLES:\n"
               << "  " << prog_name << " --subject S10 --reftrial 3\n"
               << "  " << prog_name << " -s S08 -r 5 -d custom_dic.txt\n"
+              << "  " << prog_name << " --subject S09 --trial 7\n"
+              << "  SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID " << prog_name
+              << " --subject S09 --trials 7,12,25\n"
+              << "  SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID " << prog_name
+              << " --subject-trial-csv subject_trial.csv\n"
               << std::endl;
 }
 
@@ -43,17 +66,27 @@ int main(int argc, char* argv[]) {
     std::string dic_params_file = "dic_params.txt";
     std::string ncorr_params_file = "ncorr_params.txt";
     std::string viz_params_file = "visualization_params.txt";
-    
+
+    // Trial-level run-mode selectors (empty/unset => default run()).
+    int single_trial = -1;
+    std::string trials_spec;       // --trials <list>
+    std::string trials_file;       // --trials-file <path>
+    std::string subject_trial_csv; // --subject-trial-csv <path>
+
     static struct option long_options[] = {
         {"subject",      required_argument, 0, 's'},
         {"reftrial",     required_argument, 0, 'r'},
         {"dic-params",   required_argument, 0, 'd'},
         {"ncorr-params", required_argument, 0, 'n'},
         {"viz-params",   required_argument, 0, 'v'},
+        {"trial",            required_argument, 0, OPT_TRIAL},
+        {"trials",           required_argument, 0, OPT_TRIALS},
+        {"trials-file",      required_argument, 0, OPT_TRIALS_FILE},
+        {"subject-trial-csv", required_argument, 0, OPT_SUBJECT_TRIAL_CSV},
         {"help",         no_argument,       0, 'h'},
         {0, 0, 0, 0}
     };
-    
+
     int opt;
     int option_index = 0;
     while ((opt = getopt_long(argc, argv, "s:r:d:n:v:h", long_options, &option_index)) != -1) {
@@ -73,6 +106,18 @@ int main(int argc, char* argv[]) {
             case 'v':
                 viz_params_file = optarg;
                 break;
+            case OPT_TRIAL:
+                single_trial = std::stoi(optarg);
+                break;
+            case OPT_TRIALS:
+                trials_spec = optarg;
+                break;
+            case OPT_TRIALS_FILE:
+                trials_file = optarg;
+                break;
+            case OPT_SUBJECT_TRIAL_CSV:
+                subject_trial_csv = optarg;
+                break;
             case 'h':
                 print_usage(argv[0]);
                 return 0;
@@ -81,7 +126,94 @@ int main(int argc, char* argv[]) {
                 return 1;
         }
     }
-    
+
+    // ---- Resolve trial-level run mode (Part 2) --------------------------------
+    // Exactly one of the four selectors may be used. They produce either an
+    // explicit list of trials to run (selected_trials), and possibly a
+    // CSV-driven subject override. If none is used, selected_trials stays empty
+    // and the default DicAnalysis::run() path is taken (unchanged behaviour).
+    std::vector<int> selected_trials;
+    {
+        int mode_count = (single_trial >= 0 ? 1 : 0) + (!trials_spec.empty() ? 1 : 0) +
+                         (!trials_file.empty() ? 1 : 0) + (!subject_trial_csv.empty() ? 1 : 0);
+        if (mode_count > 1) {
+            std::cerr << "Error: --trial, --trials, --trials-file and --subject-trial-csv "
+                         "are mutually exclusive."
+                      << std::endl;
+            return 1;
+        }
+
+        const int task_id = cppxdic::slurmArrayTaskId();
+        try {
+            if (single_trial >= 0) {
+                // (a) single trial
+                selected_trials = {single_trial};
+            } else if (!trials_spec.empty() || !trials_file.empty()) {
+                // (b) SLURM array over a list of trials
+                std::vector<int> trials = trials_file.empty()
+                                              ? cppxdic::parseTrialList(trials_spec)
+                                              : cppxdic::readTrialsFile(trials_file);
+                if (trials.empty()) {
+                    std::cerr << "Error: trial list is empty." << std::endl;
+                    return 1;
+                }
+                if (task_id >= 0) {
+                    if (task_id < 1 || static_cast<size_t>(task_id) > trials.size()) {
+                        std::cerr << "Error: SLURM_ARRAY_TASK_ID=" << task_id
+                                  << " out of range 1.." << trials.size() << std::endl;
+                        return 1;
+                    }
+                    selected_trials = {trials[task_id - 1]};
+                    std::cout << "[SLURM array] task " << task_id << " -> trial "
+                              << selected_trials.front() << std::endl;
+                } else {
+                    selected_trials = trials;  // no array: run the whole list
+                }
+            } else if (!subject_trial_csv.empty()) {
+                // (c) SLURM array over (subject, trial) pairs from CSV
+                std::vector<cppxdic::SubjectTrial> rows =
+                    cppxdic::readSubjectTrialCsv(subject_trial_csv);
+                if (rows.empty()) {
+                    std::cerr << "Error: subject_trial CSV has no data rows: "
+                              << subject_trial_csv << std::endl;
+                    return 1;
+                }
+                if (task_id >= 0) {
+                    if (task_id < 1 || static_cast<size_t>(task_id) > rows.size()) {
+                        std::cerr << "Error: SLURM_ARRAY_TASK_ID=" << task_id
+                                  << " out of range 1.." << rows.size() << std::endl;
+                        return 1;
+                    }
+                    const auto& row = rows[task_id - 1];
+                    subject_override = row.subject;  // CSV drives the subject
+                    selected_trials = {row.trial};
+                    std::cout << "[SLURM array] task " << task_id << " -> subject "
+                              << row.subject << ", trial " << row.trial << std::endl;
+                } else {
+                    // No array: process every row. Require all rows share one
+                    // subject so a single Config run is well defined; otherwise
+                    // ask the user to drive it via a SLURM array (or per-subject).
+                    const std::string& subj0 = rows.front().subject;
+                    for (const auto& row : rows) {
+                        if (row.subject != subj0) {
+                            std::cerr << "Error: subject_trial CSV spans multiple subjects ("
+                                      << subj0 << ", " << row.subject
+                                      << "). Use SLURM_ARRAY_TASK_ID to select a row, "
+                                         "or split the CSV per subject."
+                                      << std::endl;
+                            return 1;
+                        }
+                        selected_trials.push_back(row.trial);
+                    }
+                    subject_override = subj0;
+                }
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error resolving trial selection: " << e.what() << std::endl;
+            return 1;
+        }
+    }
+
     try {
         // Load configurations with hierarchy:
         // 1. Load default values (from class initialization)
@@ -133,9 +265,21 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         
-        // Call analysis function
+        // Call analysis function. If a trial-level run mode was selected, run
+        // the resolved trial list; otherwise use the default run() behaviour.
         DicAnalysis dicAnalysis(config);
-        bool success = dicAnalysis.run();
+        bool success;
+        if (!selected_trials.empty()) {
+            std::cout << "Running selected trials: [";
+            for (size_t i = 0; i < selected_trials.size(); ++i) {
+                std::cout << selected_trials[i];
+                if (i + 1 < selected_trials.size()) std::cout << ", ";
+            }
+            std::cout << "]" << std::endl;
+            success = dicAnalysis.run(selected_trials);
+        } else {
+            success = dicAnalysis.run();
+        }
         
         if (success) {
             std::cout << "Analysis completed successfully!" << std::endl;
