@@ -29,10 +29,10 @@ namespace stepsABC {
  * Result of a mask/seed setup operation.
  */
 struct MaskSeedResult {
-    cv::Mat mask;                          // uint8 ROI mask (0 outside, 255 inside)
-    std::vector<cv::Point> polygon;        // polygon vertices defining the mask (pixel coords)
-    std::vector<SeedPoint> seeds;          // one or more seed points (pixel world coords)
-    bool valid = false;                    // true when mask + at least one seed are set
+    cv::Mat mask;                   // uint8 ROI mask (0 outside, 255 inside)
+    std::vector<cv::Point> polygon; // polygon vertices defining the mask (pixel coords)
+    std::vector<SeedPoint> seeds;   // one or more seed points (pixel world coords)
+    bool valid = false;             // true when mask + at least one seed are set
 };
 
 /**
@@ -63,8 +63,7 @@ public:
      * @param error_message    Filled with a human readable message on failure.
      * @return MaskSeedResult (valid==false on cancel / unavailable GUI).
      */
-    static MaskSeedResult runGui(const cv::Mat& reference_image,
-                                 int num_seeds,
+    static MaskSeedResult runGui(const cv::Mat& reference_image, int num_seeds,
                                  std::string& error_message);
 
     /**
@@ -78,29 +77,25 @@ public:
      * @return MaskSeedResult (valid==false on error).
      */
     static MaskSeedResult loadFromFiles(const std::string& polygon_or_mask_path,
-                                        const std::string& seed_path,
-                                        const cv::Size& image_size,
+                                        const std::string& seed_path, const cv::Size& image_size,
                                         std::string& error_message);
 
     /**
      * Persist a result to disk. Writes <out_prefix>.poly, <out_prefix>_mask.png
      * and <out_prefix>.seed. Returns false (and sets error_message) on I/O error.
      */
-    static bool save(const MaskSeedResult& result,
-                     const std::string& out_prefix,
+    static bool save(const MaskSeedResult& result, const std::string& out_prefix,
                      std::string& error_message);
 
     /** Rasterise a polygon into an 8-bit (0/255) mask of the given size. */
-    static cv::Mat polygonToMask(const std::vector<cv::Point>& polygon,
-                                 const cv::Size& image_size);
+    static cv::Mat polygonToMask(const std::vector<cv::Point>& polygon, const cv::Size& image_size);
 
     /** Read a ".poly" polygon file. Returns empty vector on error. */
     static std::vector<cv::Point> readPolygonFile(const std::string& path,
                                                   std::string& error_message);
 
     /** Read a ".seed" file. Returns empty vector on error. */
-    static std::vector<SeedPoint> readSeedFile(const std::string& path,
-                                               std::string& error_message);
+    static std::vector<SeedPoint> readSeedFile(const std::string& path, std::string& error_message);
 
     /** Returns true if this binary was compiled with GUI support. */
     static bool guiAvailable();

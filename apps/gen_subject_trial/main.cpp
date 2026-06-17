@@ -84,15 +84,14 @@ int main(int argc, char* argv[]) {
     std::string ncorr_params_file = "ncorr_params.txt";
     std::string viz_params_file = "visualization_params.txt";
 
-    static struct option long_options[] = {
-        {"subjects", required_argument, 0, 'S'},
-        {"subjects-file", required_argument, 0, 'f'},
-        {"output", required_argument, 0, 'o'},
-        {"dic-params", required_argument, 0, 'd'},
-        {"ncorr-params", required_argument, 0, 'n'},
-        {"viz-params", required_argument, 0, 'v'},
-        {"help", no_argument, 0, 'h'},
-        {0, 0, 0, 0}};
+    static struct option long_options[] = {{"subjects", required_argument, 0, 'S'},
+                                           {"subjects-file", required_argument, 0, 'f'},
+                                           {"output", required_argument, 0, 'o'},
+                                           {"dic-params", required_argument, 0, 'd'},
+                                           {"ncorr-params", required_argument, 0, 'n'},
+                                           {"viz-params", required_argument, 0, 'v'},
+                                           {"help", no_argument, 0, 'h'},
+                                           {0, 0, 0, 0}};
 
     int opt;
     int option_index = 0;
@@ -173,8 +172,8 @@ int main(int argc, char* argv[]) {
         }
         out.close();
 
-        std::cout << "\nWrote " << total_rows << " (subject,trial) row(s) to "
-                  << output_path << std::endl;
+        std::cout << "\nWrote " << total_rows << " (subject,trial) row(s) to " << output_path
+                  << std::endl;
         std::cout << "SLURM array size for subject_trial mode: --array=1-" << total_rows
                   << std::endl;
         return 0;

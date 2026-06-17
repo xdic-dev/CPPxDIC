@@ -96,8 +96,7 @@ inline std::vector<SubjectTrial> readSubjectTrialCsv(const std::string& path) {
             header_skipped = true;
             std::string lower;
             for (char c : t)
-                lower.push_back(
-                    static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+                lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
             if (lower.rfind("subject", 0) == 0) continue;
         }
         std::stringstream ss(t);
@@ -124,6 +123,6 @@ inline int slurmArrayTaskId() {
     return std::stoi(std::string(env));
 }
 
-}  // namespace cppxdic
+} // namespace cppxdic
 
-#endif  // TRIAL_SELECTION_H
+#endif // TRIAL_SELECTION_H

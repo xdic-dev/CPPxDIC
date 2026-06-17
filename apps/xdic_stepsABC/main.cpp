@@ -43,11 +43,13 @@ void printUsage(const char* prog) {
         << "  --no-gui              Headless setup from files (default on cluster).\n"
         << "  -h, --help            Show this help.\n\n"
         << "mask-seed options:\n"
-        << "  --image <path>        Reference image (required for --gui; size source for --no-gui).\n"
+        << "  --image <path>        Reference image (required for --gui; size source for "
+           "--no-gui).\n"
         << "  --mask <path>         Mask polygon (.poly) or mask image (.png) for --no-gui input.\n"
         << "  --seed <path>         Seed file (.seed) for --no-gui input.\n"
         << "  --num-seeds <n>       Number of seed points to collect in GUI mode (default 1).\n"
-        << "  --out <prefix>        Output prefix; writes <prefix>.poly, <prefix>_mask.png, <prefix>.seed.\n\n"
+        << "  --out <prefix>        Output prefix; writes <prefix>.poly, <prefix>_mask.png, "
+           "<prefix>.seed.\n\n"
         << "gen-object options:\n"
         << "  --radius <mm>         Cylinder radius (default 30).\n"
         << "  --columns <n>         Dots around circumference (default 18).\n"
@@ -151,7 +153,8 @@ int runStepC(const std::string& object_path, int cam1, int cam2, const std::stri
         return 1;
     }
 
-    auto result = StereoCalibration::calibrateStereoPair(cam1, img1, cam2, img2, object_points, err);
+    auto result =
+        StereoCalibration::calibrateStereoPair(cam1, img1, cam2, img2, object_points, err);
     if (!result.valid) {
         std::cerr << "Error: StepC calibration failed: " << err << "\n";
         return 1;
@@ -177,11 +180,9 @@ int runStepC(const std::string& object_path, int cam1, int cam2, const std::stri
         }
         ofs << report.str();
         ofs << "# DLT parameters cam " << result.cam_first.camera_id << "\n";
-        for (double v : result.cam_first.L)
-            ofs << v << "\n";
+        for (double v : result.cam_first.L) ofs << v << "\n";
         ofs << "# DLT parameters cam " << result.cam_second.camera_id << "\n";
-        for (double v : result.cam_second.L)
-            ofs << v << "\n";
+        for (double v : result.cam_second.L) ofs << v << "\n";
         std::cout << "Wrote report -> " << result_out << "\n";
     }
     return 0;
@@ -211,64 +212,119 @@ int main(int argc, char* argv[]) {
     CylinderCalibSpec spec;
 
     enum {
-        OPT_GUI = 1000, OPT_NOGUI, OPT_IMAGE, OPT_MASK, OPT_SEED, OPT_NUMSEEDS, OPT_OUT,
-        OPT_RADIUS, OPT_COLUMNS, OPT_ROWS, OPT_DZ, OPT_OBJECT_OUT,
-        OPT_OBJECT, OPT_CAM1, OPT_CAM2, OPT_IMG1, OPT_IMG2, OPT_RESULT_OUT
+        OPT_GUI = 1000,
+        OPT_NOGUI,
+        OPT_IMAGE,
+        OPT_MASK,
+        OPT_SEED,
+        OPT_NUMSEEDS,
+        OPT_OUT,
+        OPT_RADIUS,
+        OPT_COLUMNS,
+        OPT_ROWS,
+        OPT_DZ,
+        OPT_OBJECT_OUT,
+        OPT_OBJECT,
+        OPT_CAM1,
+        OPT_CAM2,
+        OPT_IMG1,
+        OPT_IMG2,
+        OPT_RESULT_OUT
     };
 
-    static struct option long_options[] = {
-        {"gui", no_argument, 0, OPT_GUI},
-        {"no-gui", no_argument, 0, OPT_NOGUI},
-        {"image", required_argument, 0, OPT_IMAGE},
-        {"mask", required_argument, 0, OPT_MASK},
-        {"seed", required_argument, 0, OPT_SEED},
-        {"num-seeds", required_argument, 0, OPT_NUMSEEDS},
-        {"out", required_argument, 0, OPT_OUT},
-        {"radius", required_argument, 0, OPT_RADIUS},
-        {"columns", required_argument, 0, OPT_COLUMNS},
-        {"rows", required_argument, 0, OPT_ROWS},
-        {"dz", required_argument, 0, OPT_DZ},
-        {"object-out", required_argument, 0, OPT_OBJECT_OUT},
-        {"object", required_argument, 0, OPT_OBJECT},
-        {"cam1", required_argument, 0, OPT_CAM1},
-        {"cam2", required_argument, 0, OPT_CAM2},
-        {"img1", required_argument, 0, OPT_IMG1},
-        {"img2", required_argument, 0, OPT_IMG2},
-        {"result-out", required_argument, 0, OPT_RESULT_OUT},
-        {"help", no_argument, 0, 'h'},
-        {0, 0, 0, 0}};
+    static struct option long_options[] = {{"gui", no_argument, 0, OPT_GUI},
+                                           {"no-gui", no_argument, 0, OPT_NOGUI},
+                                           {"image", required_argument, 0, OPT_IMAGE},
+                                           {"mask", required_argument, 0, OPT_MASK},
+                                           {"seed", required_argument, 0, OPT_SEED},
+                                           {"num-seeds", required_argument, 0, OPT_NUMSEEDS},
+                                           {"out", required_argument, 0, OPT_OUT},
+                                           {"radius", required_argument, 0, OPT_RADIUS},
+                                           {"columns", required_argument, 0, OPT_COLUMNS},
+                                           {"rows", required_argument, 0, OPT_ROWS},
+                                           {"dz", required_argument, 0, OPT_DZ},
+                                           {"object-out", required_argument, 0, OPT_OBJECT_OUT},
+                                           {"object", required_argument, 0, OPT_OBJECT},
+                                           {"cam1", required_argument, 0, OPT_CAM1},
+                                           {"cam2", required_argument, 0, OPT_CAM2},
+                                           {"img1", required_argument, 0, OPT_IMG1},
+                                           {"img2", required_argument, 0, OPT_IMG2},
+                                           {"result-out", required_argument, 0, OPT_RESULT_OUT},
+                                           {"help", no_argument, 0, 'h'},
+                                           {0, 0, 0, 0}};
 
     // Parse options starting after the command argument.
     optind = 2;
     int opt;
     while ((opt = getopt_long(argc, argv, "h", long_options, nullptr)) != -1) {
         switch (opt) {
-            case OPT_GUI: gui = true; gui_set = true; break;
-            case OPT_NOGUI: gui = false; gui_set = true; break;
-            case OPT_IMAGE: image_path = optarg; break;
-            case OPT_MASK: mask_path = optarg; break;
-            case OPT_SEED: seed_path = optarg; break;
-            case OPT_NUMSEEDS: num_seeds = std::stoi(optarg); break;
-            case OPT_OUT: out_prefix = optarg; break;
-            case OPT_RADIUS: spec.radius = std::stod(optarg); break;
-            case OPT_COLUMNS: spec.num_columns = std::stoi(optarg); break;
-            case OPT_ROWS: spec.num_rows = std::stoi(optarg); break;
-            case OPT_DZ: spec.dz = std::stod(optarg); break;
-            case OPT_OBJECT_OUT: object_out = optarg; break;
-            case OPT_OBJECT: object_path = optarg; break;
-            case OPT_CAM1: cam1 = std::stoi(optarg); break;
-            case OPT_CAM2: cam2 = std::stoi(optarg); break;
-            case OPT_IMG1: img1_path = optarg; break;
-            case OPT_IMG2: img2_path = optarg; break;
-            case OPT_RESULT_OUT: result_out = optarg; break;
-            case 'h': printUsage(argv[0]); return 0;
-            default: printUsage(argv[0]); return 1;
+            case OPT_GUI:
+                gui = true;
+                gui_set = true;
+                break;
+            case OPT_NOGUI:
+                gui = false;
+                gui_set = true;
+                break;
+            case OPT_IMAGE:
+                image_path = optarg;
+                break;
+            case OPT_MASK:
+                mask_path = optarg;
+                break;
+            case OPT_SEED:
+                seed_path = optarg;
+                break;
+            case OPT_NUMSEEDS:
+                num_seeds = std::stoi(optarg);
+                break;
+            case OPT_OUT:
+                out_prefix = optarg;
+                break;
+            case OPT_RADIUS:
+                spec.radius = std::stod(optarg);
+                break;
+            case OPT_COLUMNS:
+                spec.num_columns = std::stoi(optarg);
+                break;
+            case OPT_ROWS:
+                spec.num_rows = std::stoi(optarg);
+                break;
+            case OPT_DZ:
+                spec.dz = std::stod(optarg);
+                break;
+            case OPT_OBJECT_OUT:
+                object_out = optarg;
+                break;
+            case OPT_OBJECT:
+                object_path = optarg;
+                break;
+            case OPT_CAM1:
+                cam1 = std::stoi(optarg);
+                break;
+            case OPT_CAM2:
+                cam2 = std::stoi(optarg);
+                break;
+            case OPT_IMG1:
+                img1_path = optarg;
+                break;
+            case OPT_IMG2:
+                img2_path = optarg;
+                break;
+            case OPT_RESULT_OUT:
+                result_out = optarg;
+                break;
+            case 'h':
+                printUsage(argv[0]);
+                return 0;
+            default:
+                printUsage(argv[0]);
+                return 1;
         }
     }
 
     // Default to headless when GUI support is not compiled in.
-    if (!gui_set)
-        gui = MaskSeedSetup::guiAvailable();
+    if (!gui_set) gui = MaskSeedSetup::guiAvailable();
 
     if (command == "mask-seed") {
         return runMaskSeed(gui, image_path, mask_path, seed_path, num_seeds, out_prefix);
