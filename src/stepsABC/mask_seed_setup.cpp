@@ -64,8 +64,7 @@ std::vector<cv::Point> MaskSeedSetup::readPolygonFile(const std::string& path,
     }
     std::string line;
     while (std::getline(ifs, line)) {
-        if (line.empty() || line[0] == '#')
-            continue;
+        if (line.empty() || line[0] == '#') continue;
         std::istringstream iss(line);
         double x, y;
         if (iss >> x >> y) {
@@ -85,8 +84,7 @@ std::vector<SeedPoint> MaskSeedSetup::readSeedFile(const std::string& path,
     }
     std::string line;
     while (std::getline(ifs, line)) {
-        if (line.empty() || line[0] == '#')
-            continue;
+        if (line.empty() || line[0] == '#') continue;
         std::istringstream iss(line);
         double x, y;
         if (iss >> x >> y) {
@@ -105,8 +103,7 @@ MaskSeedResult MaskSeedSetup::loadFromFiles(const std::string& polygon_or_mask_p
     // Decide whether the mask input is a polygon text file or a raster image by
     // extension. ".poly"/".txt" -> polygon, otherwise try to imread as a mask.
     std::string lower = polygon_or_mask_path;
-    for (auto& c : lower)
-        c = static_cast<char>(std::tolower(c));
+    for (auto& c : lower) c = static_cast<char>(std::tolower(c));
 
     bool as_polygon = (lower.size() >= 5 && lower.substr(lower.size() - 5) == ".poly") ||
                       (lower.size() >= 4 && lower.substr(lower.size() - 4) == ".txt");
@@ -131,8 +128,7 @@ MaskSeedResult MaskSeedSetup::loadFromFiles(const std::string& polygon_or_mask_p
 
     result.seeds = readSeedFile(seed_path, error_message);
     if (result.seeds.empty()) {
-        if (error_message.empty())
-            error_message = "No seed points found in: " + seed_path;
+        if (error_message.empty()) error_message = "No seed points found in: " + seed_path;
         return result;
     }
 
@@ -157,8 +153,7 @@ bool MaskSeedSetup::save(const MaskSeedResult& result, const std::string& out_pr
     for (const auto& s : result.seeds) {
         seed_pts.emplace_back(s.pw[0], s.pw[1]);
     }
-    if (!writePointFile(out_prefix + ".seed", "# xdic seed points v1", seed_pts,
-                        error_message)) {
+    if (!writePointFile(out_prefix + ".seed", "# xdic seed points v1", seed_pts, error_message)) {
         return false;
     }
 
@@ -180,9 +175,9 @@ bool MaskSeedSetup::save(const MaskSeedResult& result, const std::string& out_pr
 namespace {
 
 struct GuiState {
-    std::vector<cv::Point> polygon;   // mask vertices being drawn
-    std::vector<cv::Point> seeds;     // seed points being picked
-    bool collecting_polygon = true;   // phase: true=polygon, false=seeds
+    std::vector<cv::Point> polygon; // mask vertices being drawn
+    std::vector<cv::Point> seeds;   // seed points being picked
+    bool collecting_polygon = true; // phase: true=polygon, false=seeds
     cv::Point cursor{-1, -1};
 };
 
@@ -223,7 +218,7 @@ void onMouse(int event, int x, int y, int /*flags*/, void* userdata) {
         }
     } else if (event == cv::EVENT_RBUTTONDOWN) {
         if (st->collecting_polygon && st->polygon.size() >= 3) {
-            st->collecting_polygon = false;  // close polygon, move to seed phase
+            st->collecting_polygon = false; // close polygon, move to seed phase
         }
     }
 }
@@ -237,8 +232,7 @@ MaskSeedResult MaskSeedSetup::runGui(const cv::Mat& reference_image, int num_see
         error_message = "GUI setup: reference image is empty";
         return result;
     }
-    if (num_seeds < 1)
-        num_seeds = 1;
+    if (num_seeds < 1) num_seeds = 1;
 
     const std::string win = "xdic_stepsABC: MASK (L-click add, R-click close) then Seed";
     GuiState st;
@@ -247,7 +241,8 @@ MaskSeedResult MaskSeedSetup::runGui(const cv::Mat& reference_image, int num_see
 
     cv::Mat display;
     std::cout << "[gui] Draw mask polygon: left-click vertices, right-click to close.\n"
-              << "[gui] Then click " << num_seeds << " seed point(s). Keys: u=undo, "
+              << "[gui] Then click " << num_seeds
+              << " seed point(s). Keys: u=undo, "
                  "r=reset, ENTER=accept, ESC=cancel.\n";
 
     while (true) {
@@ -255,23 +250,22 @@ MaskSeedResult MaskSeedSetup::runGui(const cv::Mat& reference_image, int num_see
         cv::imshow(win, display);
         int key = cv::waitKey(20) & 0xFF;
 
-        if (key == 27) {  // ESC -> cancel
+        if (key == 27) { // ESC -> cancel
             error_message = "GUI setup cancelled by user";
             cv::destroyWindow(win);
             return result;
-        } else if (key == 'u') {  // undo last point of current phase
+        } else if (key == 'u') { // undo last point of current phase
             if (st.collecting_polygon && !st.polygon.empty())
                 st.polygon.pop_back();
             else if (!st.collecting_polygon && !st.seeds.empty())
                 st.seeds.pop_back();
-        } else if (key == 'r') {  // reset everything
+        } else if (key == 'r') { // reset everything
             st = GuiState();
-        } else if (key == 13 || key == 10) {  // ENTER
+        } else if (key == 13 || key == 10) { // ENTER
             if (st.collecting_polygon) {
-                if (st.polygon.size() >= 3)
-                    st.collecting_polygon = false;  // close polygon
+                if (st.polygon.size() >= 3) st.collecting_polygon = false; // close polygon
             } else if (static_cast<int>(st.seeds.size()) >= num_seeds) {
-                break;  // done
+                break; // done
             }
         }
     }

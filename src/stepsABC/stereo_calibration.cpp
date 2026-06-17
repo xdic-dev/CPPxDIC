@@ -38,9 +38,7 @@ std::vector<CalibPoint3D> StereoCalibration::generateCylindricalObject(
     double dtheta = 0.0;
     if (spec.num_columns > 0) {
         dtheta = spec.full_circle ? (two_pi / spec.num_columns)
-                                  : (spec.num_columns > 1
-                                         ? (two_pi / spec.num_columns)
-                                         : 0.0);
+                                  : (spec.num_columns > 1 ? (two_pi / spec.num_columns) : 0.0);
     }
     const double theta0 = spec.theta0_deg * M_PI / 180.0;
 
@@ -83,12 +81,10 @@ std::vector<CalibPoint3D> StereoCalibration::readObjectFile(const std::string& p
     }
     std::string line;
     while (std::getline(ifs, line)) {
-        if (line.empty() || line[0] == '#')
-            continue;
+        if (line.empty() || line[0] == '#') continue;
         std::istringstream iss(line);
         CalibPoint3D p;
-        if (iss >> p.x >> p.y >> p.z)
-            pts.push_back(p);
+        if (iss >> p.x >> p.y >> p.z) pts.push_back(p);
     }
     return pts;
 }
@@ -103,12 +99,10 @@ std::vector<CalibPoint2D> StereoCalibration::readImagePointsFile(const std::stri
     }
     std::string line;
     while (std::getline(ifs, line)) {
-        if (line.empty() || line[0] == '#')
-            continue;
+        if (line.empty() || line[0] == '#') continue;
         std::istringstream iss(line);
         CalibPoint2D p;
-        if (iss >> p.u >> p.v)
-            pts.push_back(p);
+        if (iss >> p.u >> p.v) pts.push_back(p);
     }
     return pts;
 }
@@ -145,12 +139,11 @@ CameraDLT StereoCalibration::calcDLTParameters(int camera_id,
 
     std::vector<double> L;
     if (!Utils::DLT11Calibration(P2.data(), P3.data(), N, L) || L.size() != 11) {
-        error_message = "calcDLTParameters: DLT11Calibration failed for camera " +
-                        std::to_string(camera_id);
+        error_message =
+            "calcDLTParameters: DLT11Calibration failed for camera " + std::to_string(camera_id);
         return cam;
     }
-    for (int i = 0; i < 11; ++i)
-        cam.L[i] = L[i];
+    for (int i = 0; i < 11; ++i) cam.L[i] = L[i];
 
     // RMS image-plane reprojection error.
     // u = (L1 X + L2 Y + L3 Z + L4) / (L9 X + L10 Y + L11 Z + 1)
@@ -161,8 +154,7 @@ CameraDLT StereoCalibration::calcDLTParameters(int camera_id,
         const double Y = object_points[i].y;
         const double Z = object_points[i].z;
         const double den = cam.L[8] * X + cam.L[9] * Y + cam.L[10] * Z + 1.0;
-        if (std::abs(den) < 1e-12)
-            continue;
+        if (std::abs(den) < 1e-12) continue;
         const double u = (cam.L[0] * X + cam.L[1] * Y + cam.L[2] * Z + cam.L[3]) / den;
         const double v = (cam.L[4] * X + cam.L[5] * Y + cam.L[6] * Z + cam.L[7]) / den;
         const double du = u - image_points[i].u;
@@ -213,10 +205,8 @@ ReconstructionError StereoCalibration::reconstructionError(
     ReconstructionError err;
     reconstructed_out.clear();
 
-    const size_t N =
-        std::min({img1.size(), img2.size(), object_points.size()});
-    if (N == 0)
-        return err;
+    const size_t N = std::min({img1.size(), img2.size(), object_points.size()});
+    if (N == 0) return err;
 
     reconstructed_out.reserve(N);
     err.per_point.reserve(N);
@@ -233,15 +223,13 @@ ReconstructionError StereoCalibration::reconstructionError(
         err.per_point.push_back(d);
         sum += d;
         sum_sq += d * d;
-        if (d > err.max)
-            err.max = d;
+        if (d > err.max) err.max = d;
     }
     const double n = static_cast<double>(N);
     err.mean = sum / n;
     err.rms = std::sqrt(sum_sq / n);
     double var = 0.0;
-    for (double d : err.per_point)
-        var += (d - err.mean) * (d - err.mean);
+    for (double d : err.per_point) var += (d - err.mean) * (d - err.mean);
     err.std = std::sqrt(var / n);
     return err;
 }
@@ -252,15 +240,11 @@ StereoCalibrationResult StereoCalibration::calibrateStereoPair(
     std::string& error_message) {
     StereoCalibrationResult result;
 
-    result.cam_first =
-        calcDLTParameters(cam_first_id, img_first, object_points, error_message);
-    if (!result.cam_first.valid)
-        return result;
+    result.cam_first = calcDLTParameters(cam_first_id, img_first, object_points, error_message);
+    if (!result.cam_first.valid) return result;
 
-    result.cam_second =
-        calcDLTParameters(cam_second_id, img_second, object_points, error_message);
-    if (!result.cam_second.valid)
-        return result;
+    result.cam_second = calcDLTParameters(cam_second_id, img_second, object_points, error_message);
+    if (!result.cam_second.valid) return result;
 
     result.recon_error = reconstructionError(result.cam_first, img_first, result.cam_second,
                                              img_second, object_points, result.reconstructed);
