@@ -25,7 +25,7 @@ DIC3DpairResults make_pair(const std::vector<Vector3d>& verts, const std::vector
     p.cameraPairInd = {1, 2};
     p.Faces = faces;
     p.FaceColors.assign(faces.size() / 3, 0.0);
-    Points3D pts;
+    Point3DFrame pts;
     for (const auto& v : verts) {
         pts.x.push_back(v.x());
         pts.y.push_back(v.y());
