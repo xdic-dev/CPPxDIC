@@ -442,3 +442,77 @@ if(BUILD_XDIC_STEPSABC)
     message(STATUS "Building additive target: xdic_stepsABC")
     add_subdirectory(apps/xdic_stepsABC)
 endif()
+
+# ----------------------------------------------------------------------------
+# gen_subject_trial tool: generates subject_trial.csv by reusing
+# DicAnalysis::searchTrialTarget(subject). Additive and OFF by default. Reuses
+# the full pipeline sources because it links DicAnalysis (matio for protocol
+# .mat parsing, etc.), mirroring how cppxdic is linked above.
+# ----------------------------------------------------------------------------
+option(BUILD_GEN_SUBJECT_TRIAL "Build the gen_subject_trial CSV generator" OFF)
+if(BUILD_GEN_SUBJECT_TRIAL)
+    message(STATUS "Building gen_subject_trial (subject_trial.csv generator)")
+    add_executable(gen_subject_trial
+        apps/gen_subject_trial/main.cpp
+        src/config.cpp
+        src/dic_analysis.cpp
+        src/dic_structures.cpp
+        src/utils.cpp
+        src/image_processor.cpp
+        src/roi_manager.cpp
+        src/mat_writer.cpp
+        src/step_d_workflow.cpp
+        src/strain_computation.cpp
+        src/mat_reader.cpp
+        src/delaunay_triangulation.cpp
+        src/surface_stitching.cpp
+        src/temporal_filter.cpp
+        src/face_isotropy.cpp
+        src/visualization.cpp
+        src/data_serializer.cpp
+        src/matlab_functions.cpp
+    )
+    target_include_directories(gen_subject_trial PRIVATE include Tools/CppNCorr/include)
+    target_link_libraries(gen_subject_trial
+        ncorr
+        ${OpenCV_LIBS}
+        ${OPENCV_LIBRARY1} ${OPENCV_LIBRARY2} ${OPENCV_LIBRARY3} ${OPENCV_LIBRARY4} ${OPENCV_LIBRARY5}
+        ${FFTW_LIBRARY}
+        ${MATIO_LIBRARY}
+        ${SUITESPARSE_LIBRARY1} ${SUITESPARSE_LIBRARY2} ${SUITESPARSE_LIBRARY3}
+        ${SUITESPARSE_LIBRARY4} ${SUITESPARSE_LIBRARY5}
+        ${LAPACK_LIBRARY} ${BLAS_LIBRARY}
+        ${CMAKE_THREAD_LIBS_INIT}
+    )
+    if(MATIO_INCLUDE_DIR)
+        target_include_directories(gen_subject_trial PRIVATE ${MATIO_INCLUDE_DIR})
+    endif()
+    if(FFTW_INCLUDE_DIR)
+        target_include_directories(gen_subject_trial PRIVATE ${FFTW_INCLUDE_DIR})
+    endif()
+    if(HDF5_FOUND)
+        target_include_directories(gen_subject_trial PRIVATE ${HDF5_INCLUDE_DIRS})
+        target_link_libraries(gen_subject_trial ${HDF5_C_LIBRARIES})
+    endif()
+    if(CGAL_FOUND)
+        target_link_libraries(gen_subject_trial CGAL::CGAL)
+    endif()
+    if(Eigen3_FOUND)
+        if(TARGET Eigen3::Eigen)
+            target_link_libraries(gen_subject_trial Eigen3::Eigen)
+        endif()
+        if(DEFINED EIGEN3_INCLUDE_DIRS)
+            target_include_directories(gen_subject_trial PRIVATE ${EIGEN3_INCLUDE_DIRS})
+        elseif(DEFINED EIGEN3_INCLUDE_DIR)
+            target_include_directories(gen_subject_trial PRIVATE ${EIGEN3_INCLUDE_DIR})
+        endif()
+    endif()
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(gen_subject_trial OpenMP::OpenMP_CXX)
+    endif()
+    if(nlohmann_json_FOUND)
+        target_link_libraries(gen_subject_trial nlohmann_json::nlohmann_json)
+    endif()
+    target_compile_options(gen_subject_trial PRIVATE -Wall -Wextra -O2)
+    install(TARGETS gen_subject_trial DESTINATION bin)
+endif()
