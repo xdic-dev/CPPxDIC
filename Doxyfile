@@ -1,0 +1,56 @@
+# Doxyfile for CPPxDIC
+# Generates HTML API documentation from include/ and src/.
+# Run locally with: doxygen Doxyfile   (output lands in docs/doxygen/html)
+
+#---------------------------------------------------------------------------
+# Project
+#---------------------------------------------------------------------------
+PROJECT_NAME           = "CPPxDIC"
+PROJECT_BRIEF          = "C++ Digital Image Correlation library for fingertip 3D reconstruction"
+OUTPUT_DIRECTORY       = docs/doxygen
+CREATE_SUBDIRS         = NO
+OPTIMIZE_OUTPUT_FOR_C  = NO
+BUILTIN_STL_SUPPORT    = YES
+
+#---------------------------------------------------------------------------
+# Input
+#---------------------------------------------------------------------------
+INPUT                  = include src README.md
+FILE_PATTERNS          = *.h *.hpp *.cpp *.cc
+RECURSIVE              = YES
+USE_MDFILE_AS_MAINPAGE = README.md
+
+# Exclude vendored submodules and build artifacts.
+EXCLUDE                = Tools build tests
+EXCLUDE_PATTERNS       = */build/* */Tools/* */tests/*
+
+#---------------------------------------------------------------------------
+# Build / extraction
+#---------------------------------------------------------------------------
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = YES
+JAVADOC_AUTOBRIEF      = YES
+MARKDOWN_SUPPORT       = YES
+AUTOLINK_SUPPORT       = YES
+SOURCE_BROWSER         = YES
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO
+
+#---------------------------------------------------------------------------
+# HTML output
+#---------------------------------------------------------------------------
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+GENERATE_LATEX         = NO
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+HTML_COLORSTYLE        = LIGHT
+
+#---------------------------------------------------------------------------
+# Diagrams (graphviz optional; safe defaults if dot is unavailable)
+#---------------------------------------------------------------------------
+HAVE_DOT               = NO
+CLASS_GRAPH            = YES
+COLLABORATION_GRAPH    = NO

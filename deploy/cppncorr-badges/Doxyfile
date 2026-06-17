@@ -1,0 +1,52 @@
+# Doxyfile for CppNCorr
+# Generates HTML API documentation from include/ and src/.
+# Run locally with: doxygen Doxyfile   (output lands in docs/doxygen/html)
+
+#---------------------------------------------------------------------------
+# Project
+#---------------------------------------------------------------------------
+PROJECT_NAME           = "CppNCorr"
+PROJECT_BRIEF          = "C++ ncorr Digital Image Correlation engine"
+OUTPUT_DIRECTORY       = docs/doxygen
+CREATE_SUBDIRS         = NO
+OPTIMIZE_OUTPUT_FOR_C  = NO
+BUILTIN_STL_SUPPORT    = YES
+
+#---------------------------------------------------------------------------
+# Input  (adjust if CppNCorr uses different source folders)
+#---------------------------------------------------------------------------
+INPUT                  = include src README.md
+FILE_PATTERNS          = *.h *.hpp *.cpp *.cc
+RECURSIVE              = YES
+USE_MDFILE_AS_MAINPAGE = README.md
+
+EXCLUDE                = build test tests
+EXCLUDE_PATTERNS       = */build/*
+
+#---------------------------------------------------------------------------
+# Build / extraction
+#---------------------------------------------------------------------------
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+JAVADOC_AUTOBRIEF      = YES
+MARKDOWN_SUPPORT       = YES
+SOURCE_BROWSER         = YES
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO
+
+#---------------------------------------------------------------------------
+# HTML output
+#---------------------------------------------------------------------------
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+GENERATE_LATEX         = NO
+GENERATE_TREEVIEW      = YES
+HTML_COLORSTYLE        = LIGHT
+
+#---------------------------------------------------------------------------
+# Diagrams
+#---------------------------------------------------------------------------
+HAVE_DOT               = NO
+CLASS_GRAPH            = YES
+COLLABORATION_GRAPH    = NO

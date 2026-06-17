@@ -1307,9 +1307,13 @@ bool DicAnalysis::setupNcorrAnalysis(const std::vector<std::string>& images,
 }
 
 bool DicAnalysis::run() {
-    // Search for trial targets (equivalent to search_trial2target)
-    std::vector<int> trial_target = {7};//{7, 12, 25};//#searchTrialTarget();
-    
+    // Default trial target (equivalent to search_trial2target).
+    // Trial-level drivers should call run(trial_target) with an explicit list.
+    std::vector<int> trial_target = {7};  //{7, 12, 25};//#searchTrialTarget();
+    return run(trial_target);
+}
+
+bool DicAnalysis::run(const std::vector<int>& trial_target) {
     std::cout << "Trial target set: [";
     for (size_t i = 0; i < trial_target.size(); ++i) {
         std::cout << trial_target[i];
@@ -1440,18 +1444,29 @@ bool DicAnalysis::run() {
 }
 
 std::vector<int> DicAnalysis::searchTrialTarget() {
+    // Preserve original behaviour: look up trials for the configured subject.
+    return searchTrialTarget(config_.subject_id);
+}
+
+std::vector<int> DicAnalysis::searchTrialTarget(const std::string& subject) {
     std::vector<int> trials;
 
+    // Work on a copy of the configuration with the requested subject so that
+    // arbitrary subjects can be queried without mutating config_.
+    Config cfg = config_;
+    cfg.overrideSubject(subject);
+    cfg.updateVariables();
+
     // Build protocol directory path
-    std::string protocol_dir = Utils::buildProtocolDir(config_, true, true, true, true);
+    std::string protocol_dir = Utils::buildProtocolDir(cfg, true, true, true, true);
 
     // Find protocol .mat file
     auto protos = Utils::findFiles(protocol_dir, "*.mat");
     if (protos.empty()) {
         std::cerr << "Protocol file not found in: " << protocol_dir << std::endl;
         // Fallback to reference + next
-        trials.push_back(config_.ref_trial_id);
-        trials.push_back(config_.ref_trial_id + 1);
+        trials.push_back(cfg.ref_trial_id);
+        trials.push_back(cfg.ref_trial_id + 1);
         return trials;
     }
 
@@ -1461,8 +1476,8 @@ std::vector<int> DicAnalysis::searchTrialTarget() {
     mat_t *matfp = Mat_Open(proto_file.c_str(), MAT_ACC_RDONLY);
     if (!matfp) {
         std::cerr << "Failed to open MAT file: " << proto_file << std::endl;
-        trials.push_back(config_.ref_trial_id);
-        trials.push_back(config_.ref_trial_id + 1);
+        trials.push_back(cfg.ref_trial_id);
+        trials.push_back(cfg.ref_trial_id + 1);
         return trials;
     }
 
@@ -1472,8 +1487,8 @@ std::vector<int> DicAnalysis::searchTrialTarget() {
         if (cond) Mat_VarFree(cond);
         Mat_Close(matfp);
         std::cerr << "Variable 'cond' not found or not a struct in: " << proto_file << std::endl;
-        trials.push_back(config_.ref_trial_id);
-        trials.push_back(config_.ref_trial_id + 1);
+        trials.push_back(cfg.ref_trial_id);
+        trials.push_back(cfg.ref_trial_id + 1);
         return trials;
     }
 
@@ -1484,8 +1499,8 @@ std::vector<int> DicAnalysis::searchTrialTarget() {
         if (cond) Mat_VarFree(cond);
         Mat_Close(matfp);
         std::cerr << "Fields 'titles' or 'table' missing or of wrong type in 'cond'" << std::endl;
-        trials.push_back(config_.ref_trial_id);
-        trials.push_back(config_.ref_trial_id + 1);
+        trials.push_back(cfg.ref_trial_id);
+        trials.push_back(cfg.ref_trial_id + 1);
         return trials;
     }
 
@@ -1519,8 +1534,8 @@ std::vector<int> DicAnalysis::searchTrialTarget() {
         if (cond) Mat_VarFree(cond);
         Mat_Close(matfp);
         std::cerr << "Required columns not found in titles (need 'dir','nf','spddxl')" << std::endl;
-        trials.push_back(config_.ref_trial_id);
-        trials.push_back(config_.ref_trial_id + 1);
+        trials.push_back(cfg.ref_trial_id);
+        trials.push_back(cfg.ref_trial_id + 1);
         return trials;
     }
 
@@ -1581,7 +1596,7 @@ std::vector<int> DicAnalysis::searchTrialTarget() {
     int subj_num = 0;
     {
         // extract digits from subject_id
-        for (char ch : config_.subject_id) {
+        for (char ch : cfg.subject_id) {
             if (std::isdigit(static_cast<unsigned char>(ch))) {
                 subj_num = subj_num * 10 + (ch - '0');
             }
@@ -1598,15 +1613,15 @@ std::vector<int> DicAnalysis::searchTrialTarget() {
 
     // Build trial indices 1..Ntrial (Matlab-style) based on filters
 
-    bool is_loading = (config_.phase_id == "loading");
+    bool is_loading = (cfg.phase_id == "loading");
     std::vector<int> trialnum;
     trialnum.reserve(ntrial);
     for (size_t i = 0; i < ntrial; ++i) trialnum.push_back(static_cast<int>(i + 1));
 
-    for (size_t ii = 0; ii < config_.nfcond_set.size(); ++ii) {
-        int nf_set = config_.nfcond_set[ii];
-        for (size_t jj = 0; jj < config_.spddxlcond_set.size(); ++jj) {
-            double spd_set = config_.spddxlcond_set[jj];
+    for (size_t ii = 0; ii < cfg.nfcond_set.size(); ++ii) {
+        int nf_set = cfg.nfcond_set[ii];
+        for (size_t jj = 0; jj < cfg.spddxlcond_set.size(); ++jj) {
+            double spd_set = cfg.spddxlcond_set[jj];
 
             for (size_t i = 0; i < ntrial; ++i) {
                 bool pass = true;

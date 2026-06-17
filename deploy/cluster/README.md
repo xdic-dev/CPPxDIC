@@ -6,6 +6,8 @@ This directory contains everything needed to build and run CPPxDIC on HPC cluste
 
 **Key principle**: The binary is baked into the container image once. Configuration files are bind-mounted from the host at runtime — you never need to rebuild the container to change parameters.
 
+> **Running at the trial level (SLURM arrays):** for `--trial` / `--trials` / `--subject-trial-csv` array runs and generating `subject_trial.csv`, see [`README_trial_arrays.md`](README_trial_arrays.md).
+
 ## Directory Structure
 
 ```
