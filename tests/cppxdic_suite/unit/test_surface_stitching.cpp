@@ -20,8 +20,7 @@ using namespace cppxdic;
 
 namespace {
 /// Build a trivial single-frame DIC3DpairResults with the given vertices and faces.
-DIC3DpairResults make_pair(const std::vector<Vector3d>& verts,
-                           const std::vector<int>& faces) {
+DIC3DpairResults make_pair(const std::vector<Vector3d>& verts, const std::vector<int>& faces) {
     DIC3DpairResults p;
     p.cameraPairInd = {1, 2};
     p.Faces = faces;

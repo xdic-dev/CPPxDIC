@@ -37,23 +37,23 @@ namespace singledic {
 
 /// One tracked frame's reduced-grid DIC result (Lagrangian, pixels).
 struct FrameResult {
-    int grid_width = 0;             ///< Displacement grid width (reduced).
-    int grid_height = 0;            ///< Displacement grid height (reduced).
-    std::vector<double> u;          ///< U displacement (px), row-major, NaN outside ROI.
-    std::vector<double> v;          ///< V displacement (px), row-major.
-    std::vector<double> corrcoef;   ///< Correlation coefficient, row-major.
-    bool valid = false;             ///< True if the frame correlated successfully.
+    int grid_width = 0;           ///< Displacement grid width (reduced).
+    int grid_height = 0;          ///< Displacement grid height (reduced).
+    std::vector<double> u;        ///< U displacement (px), row-major, NaN outside ROI.
+    std::vector<double> v;        ///< V displacement (px), row-major.
+    std::vector<double> corrcoef; ///< Correlation coefficient, row-major.
+    bool valid = false;           ///< True if the frame correlated successfully.
 };
 
 /// Full single-trial output: one reference + N tracked frames.
 struct SingleDicResult {
-    cv::Size image_size;                  ///< Reference frame pixel size.
-    cv::Mat roi_mask;                     ///< ROI used (CV_8U, non-zero = inside).
-    int subset_spacing = 1;               ///< Spacing used (grid factor = spacing+1).
-    std::vector<int> seed_pw;             ///< Seed point [x, y] in pixels.
-    std::vector<FrameResult> frames;      ///< Per-frame DIC results (index 0 = ref vs frame 1...).
-    bool ok = false;                      ///< Overall success.
-    std::string message;                  ///< Human-readable status.
+    cv::Size image_size;             ///< Reference frame pixel size.
+    cv::Mat roi_mask;                ///< ROI used (CV_8U, non-zero = inside).
+    int subset_spacing = 1;          ///< Spacing used (grid factor = spacing+1).
+    std::vector<int> seed_pw;        ///< Seed point [x, y] in pixels.
+    std::vector<FrameResult> frames; ///< Per-frame DIC results (index 0 = ref vs frame 1...).
+    bool ok = false;                 ///< Overall success.
+    std::string message;             ///< Human-readable status.
 };
 
 /**
@@ -96,10 +96,8 @@ private:
 
     /// Run the single tracking pass (reference frame vs all current frames)
     /// through ncorr::NcorrSession. Mirrors the ncorr_dic_rewrited() call.
-    bool track(const std::vector<cv::Mat>& frames,
-               const cv::Mat& roi_mask,
-               const std::vector<int>& seed_pw,
-               SingleDicResult& out) const;
+    bool track(const std::vector<cv::Mat>& frames, const cv::Mat& roi_mask,
+               const std::vector<int>& seed_pw, SingleDicResult& out) const;
 
     // --- output writers ----------------------------------------------------
 
@@ -112,6 +110,6 @@ private:
     bool writeMat(const SingleDicResult& res) const;
 };
 
-}  // namespace singledic
+} // namespace singledic
 
-#endif  // SINGLEDIC_SINGLE_DIC_WORKFLOW_H
+#endif // SINGLEDIC_SINGLE_DIC_WORKFLOW_H

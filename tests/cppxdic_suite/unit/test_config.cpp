@@ -75,7 +75,7 @@ TEST(config, load_config_file_overrides_and_preserves) {
         "\n"
         "subject_id = AAA\n"
         "idx_frame_start = 20\n"
-        "  num_pair = 3  \n"           // leading/trailing whitespace must be trimmed
+        "  num_pair = 3  \n" // leading/trailing whitespace must be trimmed
         "data_format = bin\n"
         "spddxlcond_set = 0.1, 0.2, 0.3\n"
         "nfcond_set = 7, 8\n";

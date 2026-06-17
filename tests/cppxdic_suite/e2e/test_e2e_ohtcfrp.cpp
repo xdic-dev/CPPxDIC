@@ -83,9 +83,8 @@ TEST(e2e1_ohtcfrp, two_d_path_regression_guard) {
     double mean_last = cv::mean(last)[0];
     CHECK_NEAR(mean_last, kGoldenMeanLast, kMeanTol);
 
-    std::cout << "    [golden] frames=" << frames.size()
-              << " dims=" << first.cols << "x" << first.rows
-              << " mean_first=" << mean_first << " mean_last=" << mean_last << "\n";
+    std::cout << "    [golden] frames=" << frames.size() << " dims=" << first.cols << "x"
+              << first.rows << " mean_first=" << mean_first << " mean_last=" << mean_last << "\n";
 }
 
 TEST(e2e2_full_stereo_pipeline, skipped_needs_stereo_dataset) {

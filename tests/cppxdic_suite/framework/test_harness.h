@@ -113,8 +113,8 @@ inline int run_all() {
             failed_names.push_back(full);
         }
     }
-    std::cout << "\n==== " << passed << " passed, " << failed << " failed, "
-              << skipped << " skipped ====\n";
+    std::cout << "\n==== " << passed << " passed, " << failed << " failed, " << skipped
+              << " skipped ====\n";
     for (const auto& n : failed_names) std::cout << "  FAILED: " << n << "\n";
     return failed == 0 ? 0 : 1;
 }
@@ -128,83 +128,81 @@ inline int run_all() {
 #define CPPXDIC_TEST_CAT2(a, b) a##b
 #define CPPXDIC_TEST_CAT(a, b) CPPXDIC_TEST_CAT2(a, b)
 
-#define TEST(group, name)                                                            \
-    static void CPPXDIC_TEST_CAT(cppxdic_test_fn_, __LINE__)(                         \
-        ::cppxdic::test::TestContext& _ctx);                                         \
-    static ::cppxdic::test::Registrar CPPXDIC_TEST_CAT(cppxdic_test_reg_, __LINE__)( \
-        #group, #name, &CPPXDIC_TEST_CAT(cppxdic_test_fn_, __LINE__));               \
-    static void CPPXDIC_TEST_CAT(cppxdic_test_fn_, __LINE__)(                         \
-        ::cppxdic::test::TestContext& _ctx)
+#define TEST(group, name)                                                                          \
+    static void CPPXDIC_TEST_CAT(cppxdic_test_fn_, __LINE__)(::cppxdic::test::TestContext & _ctx); \
+    static ::cppxdic::test::Registrar CPPXDIC_TEST_CAT(cppxdic_test_reg_, __LINE__)(               \
+        #group, #name, &CPPXDIC_TEST_CAT(cppxdic_test_fn_, __LINE__));                             \
+    static void CPPXDIC_TEST_CAT(cppxdic_test_fn_, __LINE__)(::cppxdic::test::TestContext & _ctx)
 
 // ----------------------------------------------------------------------------
 // Assertion macros (use _ctx provided by the TEST body)
 // ----------------------------------------------------------------------------
-#define CPPXDIC_REPORT_FAIL(msg_expr)                                                 \
-    do {                                                                              \
-        std::ostringstream _oss;                                                     \
-        _oss << msg_expr;                                                            \
-        std::cerr << "    assertion failed at " << __FILE__ << ":" << __LINE__       \
-                  << ": " << _oss.str() << "\n";                                     \
-        _ctx.failures++;                                                             \
+#define CPPXDIC_REPORT_FAIL(msg_expr)                                                  \
+    do {                                                                               \
+        std::ostringstream _oss;                                                       \
+        _oss << msg_expr;                                                              \
+        std::cerr << "    assertion failed at " << __FILE__ << ":" << __LINE__ << ": " \
+                  << _oss.str() << "\n";                                               \
+        _ctx.failures++;                                                               \
     } while (0)
 
-#define CHECK_TRUE(x)                                                                 \
-    do {                                                                              \
-        if (!(x)) CPPXDIC_REPORT_FAIL("CHECK_TRUE(" #x ")");                          \
+#define CHECK_TRUE(x)                                        \
+    do {                                                     \
+        if (!(x)) CPPXDIC_REPORT_FAIL("CHECK_TRUE(" #x ")"); \
     } while (0)
 
-#define CHECK_FALSE(x)                                                                \
-    do {                                                                              \
-        if (x) CPPXDIC_REPORT_FAIL("CHECK_FALSE(" #x ")");                            \
+#define CHECK_FALSE(x)                                     \
+    do {                                                   \
+        if (x) CPPXDIC_REPORT_FAIL("CHECK_FALSE(" #x ")"); \
     } while (0)
 
-#define CHECK_EQ(a, b)                                                                \
-    do {                                                                              \
-        auto _va = (a);                                                              \
-        auto _vb = (b);                                                              \
-        if (!(_va == _vb))                                                           \
-            CPPXDIC_REPORT_FAIL("CHECK_EQ(" #a ", " #b ") -> " << _va << " != "      \
-                                                               << _vb);              \
+#define CHECK_EQ(a, b)                                                                   \
+    do {                                                                                 \
+        auto _va = (a);                                                                  \
+        auto _vb = (b);                                                                  \
+        if (!(_va == _vb))                                                               \
+            CPPXDIC_REPORT_FAIL("CHECK_EQ(" #a ", " #b ") -> " << _va << " != " << _vb); \
     } while (0)
 
-#define CHECK_NE(a, b)                                                                \
-    do {                                                                              \
-        auto _va = (a);                                                              \
-        auto _vb = (b);                                                              \
-        if (!(_va != _vb))                                                           \
-            CPPXDIC_REPORT_FAIL("CHECK_NE(" #a ", " #b ") -> both " << _va);         \
+#define CHECK_NE(a, b)                                                                      \
+    do {                                                                                    \
+        auto _va = (a);                                                                     \
+        auto _vb = (b);                                                                     \
+        if (!(_va != _vb)) CPPXDIC_REPORT_FAIL("CHECK_NE(" #a ", " #b ") -> both " << _va); \
     } while (0)
 
-#define CHECK_NEAR(a, b, tol)                                                         \
-    do {                                                                              \
-        double _va = static_cast<double>(a);                                         \
-        double _vb = static_cast<double>(b);                                         \
-        double _t = static_cast<double>(tol);                                        \
-        if (std::fabs(_va - _vb) > _t)                                               \
-            CPPXDIC_REPORT_FAIL("CHECK_NEAR(" #a ", " #b ", " #tol ") -> |" << _va   \
-                                << " - " << _vb << "| > " << _t);                    \
+#define CHECK_NEAR(a, b, tol)                                                                      \
+    do {                                                                                           \
+        double _va = static_cast<double>(a);                                                       \
+        double _vb = static_cast<double>(b);                                                       \
+        double _t = static_cast<double>(tol);                                                      \
+        if (std::fabs(_va - _vb) > _t)                                                             \
+            CPPXDIC_REPORT_FAIL("CHECK_NEAR(" #a ", " #b ", " #tol ") -> |" << _va << " - " << _vb \
+                                                                            << "| > " << _t);      \
     } while (0)
 
-#define REQUIRE_TRUE(x)                                                               \
-    do {                                                                              \
-        if (!(x)) {                                                                  \
-            CPPXDIC_REPORT_FAIL("REQUIRE_TRUE(" #x ")");                              \
-            throw ::cppxdic::test::TestAbort{};                                      \
-        }                                                                            \
+#define REQUIRE_TRUE(x)                                  \
+    do {                                                 \
+        if (!(x)) {                                      \
+            CPPXDIC_REPORT_FAIL("REQUIRE_TRUE(" #x ")"); \
+            throw ::cppxdic::test::TestAbort{};          \
+        }                                                \
     } while (0)
 
-#define FAIL_TEST(msg)                                                                \
-    do {                                                                              \
-        CPPXDIC_REPORT_FAIL(msg);                                                    \
+#define FAIL_TEST(msg)            \
+    do {                          \
+        CPPXDIC_REPORT_FAIL(msg); \
     } while (0)
 
-#define SKIP_TEST(msg)                                                                \
-    do {                                                                              \
-        ::cppxdic::test::TestAbort _a;                                               \
-        _a.skipped = true;                                                           \
-        _a.message = (msg);                                                          \
-        throw _a;                                                                    \
+#define SKIP_TEST(msg)                 \
+    do {                               \
+        ::cppxdic::test::TestAbort _a; \
+        _a.skipped = true;             \
+        _a.message = (msg);            \
+        throw _a;                      \
     } while (0)
 
-#define TEST_MAIN()                                                                   \
-    int main() { return ::cppxdic::test::run_all(); }
+#define TEST_MAIN()                        \
+    int main() {                           \
+        return ::cppxdic::test::run_all(); \
+    }

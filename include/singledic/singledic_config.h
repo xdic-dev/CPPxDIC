@@ -50,28 +50,28 @@ public:
     Config base;
 
     // --- Single-camera identity (Vik: subject / bloc / trial) ---------------
-    std::string subject = "S01";       ///< Subject folder name (e.g. "S01").
-    std::string bloc = "bloc1";        ///< Bloc / block folder name.
-    std::string trial = "001";         ///< Current trial name (video stem).
-    std::string reftrial = "001";      ///< Reference trial name (shared per bloc).
+    std::string subject = "S01";  ///< Subject folder name (e.g. "S01").
+    std::string bloc = "bloc1";   ///< Bloc / block folder name.
+    std::string trial = "001";    ///< Current trial name (video stem).
+    std::string reftrial = "001"; ///< Reference trial name (shared per bloc).
 
     // --- Frame window & tracking (Vik: idx_frame_start/end, jump, dir) ------
-    int idx_frame_start = 1;           ///< First frame to analyse (1-based, MATLAB-style).
-    int idx_frame_end = 0;             ///< Last frame (0 = "to end of sequence").
-    int frame_jump = 1;                ///< Frame stride.
+    int idx_frame_start = 1; ///< First frame to analyse (1-based, MATLAB-style).
+    int idx_frame_end = 0;   ///< Last frame (0 = "to end of sequence").
+    int frame_jump = 1;      ///< Frame stride.
     /// Tracking direction: "forward" or "backward" (backward flips the sequence).
     std::string tracking_dir = "forward";
     /// ncorr_number tag (1/2) used to name outputs, mirroring forward/backward passes.
     int ncorr_number = 1;
 
     // --- Saturation bounds (Vik: LIMIT_GRAYSCALE_LOW / HIGH) -----------------
-    int limit_grayscale_low = 40;      ///< Lower saturation clamp (satur low).
-    int limit_grayscale_high = 140;    ///< Upper saturation clamp (satur high).
+    int limit_grayscale_low = 40;   ///< Lower saturation clamp (satur low).
+    int limit_grayscale_high = 140; ///< Upper saturation clamp (satur high).
 
     // --- Bandpass filter cutoffs (Vik: param_filt_im = [low, high]) ----------
-    bool filter_im_mode = false;       ///< Apply bandpass+normalise filtering before DIC.
-    int param_filt_low = 50;           ///< Bandpass low cutoff.
-    int param_filt_high = 200;         ///< Bandpass high cutoff.
+    bool filter_im_mode = false; ///< Apply bandpass+normalise filtering before DIC.
+    int param_filt_low = 50;     ///< Bandpass low cutoff.
+    int param_filt_high = 200;   ///< Bandpass high cutoff.
 
     // --- Step-D feature toggles ---------------------------------------------
     /// If true, run a matching-to-reference-trial pass before tracking (Vik
@@ -96,8 +96,7 @@ public:
 
     /// Root directory that holds per-subject video folders (default "<data>/vid").
     std::string vid_root() const {
-        return base.data_path.empty() ? std::string("vid")
-                                       : base.data_path + "/vid";
+        return base.data_path.empty() ? std::string("vid") : base.data_path + "/vid";
     }
 
     /// Directory for the current trial's input (subject/bloc/trial).
@@ -112,23 +111,19 @@ public:
 
     /// Output directory for the current trial (subject/bloc/trial under dic_path).
     std::string outputTrialDir() const {
-        const std::string root = base.dic_path.empty() ? std::string("analysis")
-                                                        : base.dic_path;
+        const std::string root = base.dic_path.empty() ? std::string("analysis") : base.dic_path;
         return root + "/" + subject + "/" + bloc + "/" + trial;
     }
 
     /// Output directory shared per (subject, bloc) — holds ROI/seed reference files.
     std::string outputBlocDir() const {
-        const std::string root = base.dic_path.empty() ? std::string("analysis")
-                                                        : base.dic_path;
+        const std::string root = base.dic_path.empty() ? std::string("analysis") : base.dic_path;
         return root + "/" + subject + "/" + bloc;
     }
 
     /// ROI mask file, shared per bloc and keyed by reference trial.
     /// Mirrors Vik: REF_MASK_<reftrial>.mat
-    std::string roiFile() const {
-        return outputBlocDir() + "/REF_MASK_" + reftrial + ".mat";
-    }
+    std::string roiFile() const { return outputBlocDir() + "/REF_MASK_" + reftrial + ".mat"; }
 
     /// Seed file, shared per bloc, keyed by reference trial and direction.
     /// Mirrors Vik: REF_SEED_<reftrial>_<dir>.mat
@@ -160,10 +155,10 @@ public:
         bp.baseResultPath = base.dic_path;
         bp.outputPath = outputTrialDir();
         bp.subject = subject;
-        bp.material = bloc;       // reuse 'material' slot for bloc
+        bp.material = bloc; // reuse 'material' slot for bloc
         bp.trial = trial;
-        bp.stereopair = 1;        // single camera => single (degenerate) pair
-        bp.phase = tracking_dir;  // reuse 'phase' slot for tracking direction
+        bp.stereopair = 1;       // single camera => single (degenerate) pair
+        bp.phase = tracking_dir; // reuse 'phase' slot for tracking direction
         bp.reftrial = reftrial;
         bp.roifile = roiFile();
         bp.matchingfile = matchingFile();
@@ -178,6 +173,6 @@ public:
     }
 };
 
-}  // namespace singledic
+} // namespace singledic
 
-#endif  // SINGLEDIC_CONFIG_H
+#endif // SINGLEDIC_CONFIG_H

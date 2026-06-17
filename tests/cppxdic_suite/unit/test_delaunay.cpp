@@ -17,8 +17,7 @@
 using cppxdic::DelaunayTriangulation;
 
 TEST(delaunay, compute_square_plus_centre) {
-    std::vector<cv::Point2f> pts = {
-        {0.f, 0.f}, {1.f, 0.f}, {1.f, 1.f}, {0.f, 1.f}, {0.5f, 0.5f}};
+    std::vector<cv::Point2f> pts = {{0.f, 0.f}, {1.f, 0.f}, {1.f, 1.f}, {0.f, 1.f}, {0.5f, 0.5f}};
     auto faces = DelaunayTriangulation::compute(pts);
     // 5 points (4 corners + centre) -> 4 triangles -> 12 flat indices.
     CHECK_EQ(faces.size(), static_cast<size_t>(12));
@@ -47,7 +46,7 @@ TEST(delaunay, edge_lengths_right_triangle) {
 
 TEST(delaunay, filter_by_edge_length) {
     std::vector<cv::Point2f> v = {
-        {0.f, 0.f}, {1.f, 0.f}, {0.f, 1.f},   // small triangle, max edge ~1.41
+        {0.f, 0.f}, {1.f, 0.f},  {0.f, 1.f},  // small triangle, max edge ~1.41
         {0.f, 0.f}, {10.f, 0.f}, {0.f, 1.f}}; // big triangle, max edge ~10.05
     std::vector<int> faces = {0, 1, 2, 3, 4, 5};
     auto filtered = DelaunayTriangulation::filterByEdgeLength(faces, v, 5.0);

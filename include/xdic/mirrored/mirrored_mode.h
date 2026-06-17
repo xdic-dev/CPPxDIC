@@ -47,8 +47,8 @@ enum class MaskHalf { Left = 1, Right = 2 };
  * Equivalent to the (cam_nbr, im_mask_width) pair returned by camera_info_from_view.m.
  */
 struct ViewInfo {
-    int view_nbr = 0;     ///< 1..8 logical view index (MATLAB view_nbr)
-    int cam_nbr = 0;      ///< physical camera id (from cam_order), used to find the video file
+    int view_nbr = 0; ///< 1..8 logical view index (MATLAB view_nbr)
+    int cam_nbr = 0;  ///< physical camera id (from cam_order), used to find the video file
     MaskHalf half = MaskHalf::Left;
 };
 
@@ -58,9 +58,9 @@ struct ViewInfo {
  * Equivalent to the stereo_param struct from get_cam_view_stereopair_param.m.
  */
 struct ViewPair {
-    int stereopair = 0;   ///< 1-based stereopair index
-    ViewInfo view1;       ///< first view of the pair
-    ViewInfo view2;       ///< second view of the pair
+    int stereopair = 0; ///< 1-based stereopair index
+    ViewInfo view1;     ///< first view of the pair
+    ViewInfo view2;     ///< second view of the pair
 };
 
 /**
@@ -103,13 +103,8 @@ cv::Mat extractViewFromFrame(const cv::Mat& frame, MaskHalf half);
  * @param out_frames   Output: paths of the written per-view PNG frames, in order.
  * @return true if at least one frame was extracted.
  */
-bool importRawViewMirrored(const Config& config,
-                           int trial,
-                           const ViewInfo& view,
-                           int frameStart,
-                           int frameEnd,
-                           int frameJump,
-                           std::vector<std::string>& out_frames);
+bool importRawViewMirrored(const Config& config, int trial, const ViewInfo& view, int frameStart,
+                           int frameEnd, int frameJump, std::vector<std::string>& out_frames);
 
 /**
  * @brief Run the mirrored-camera 2D DIC pipeline.

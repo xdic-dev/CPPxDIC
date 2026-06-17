@@ -45,8 +45,8 @@ namespace {
 namespace fs = std::filesystem;
 
 // MATLAB theGlobalSettings_MNG defaults.
-constexpr int kMngFps = 50;                 // actual_FS_vid
-constexpr int kLimitGrayscale = 120;        // LIMIT_GRAYSCALE in stepD_2DDIC_MNG.m
+constexpr int kMngFps = 50;          // actual_FS_vid
+constexpr int kLimitGrayscale = 120; // LIMIT_GRAYSCALE in stepD_2DDIC_MNG.m
 
 // Default physical-camera ordering from theGlobalSettings_MNG.cam_order = [2 1 4 3].
 const std::vector<int> kDefaultCamOrder = {2, 1, 4, 3};
@@ -78,22 +78,16 @@ std::string padNumber(int num, int width) {
 // <subject>_<material>_speckles_<trial>_.*_cam_<id>.*.mp4 . We accept either, plus a
 // permissive fallback that just requires "_cam_<id>" before the .mp4 extension, so the
 // mode works across both the MNG raw naming and the speckle naming.
-std::string findCameraVideo(const std::string& video_dir,
-                            const std::string& subject,
-                            const std::string& material,
-                            const std::string& trialname,
-                            int cam_id) {
+std::string findCameraVideo(const std::string& video_dir, const std::string& subject,
+                            const std::string& material, const std::string& trialname, int cam_id) {
     if (!fs::exists(video_dir)) return "";
 
-    const std::regex pat_speckle(
-        subject + "_" + material + "_speckles_" + trialname +
-        "_.*_cam_" + std::to_string(cam_id) + ".*\\.mp4$");
-    const std::regex pat_mng(
-        subject + "_.*_" + trialname + "_.*_cam_" + std::to_string(cam_id) + ".*\\.mp4$");
-    const std::regex pat_loose(
-        ".*_cam_" + std::to_string(cam_id) + "(\\.|_).*\\.mp4$");
-    const std::regex pat_loose_end(
-        ".*_cam_" + std::to_string(cam_id) + "\\.mp4$");
+    const std::regex pat_speckle(subject + "_" + material + "_speckles_" + trialname + "_.*_cam_" +
+                                 std::to_string(cam_id) + ".*\\.mp4$");
+    const std::regex pat_mng(subject + "_.*_" + trialname + "_.*_cam_" + std::to_string(cam_id) +
+                             ".*\\.mp4$");
+    const std::regex pat_loose(".*_cam_" + std::to_string(cam_id) + "(\\.|_).*\\.mp4$");
+    const std::regex pat_loose_end(".*_cam_" + std::to_string(cam_id) + "\\.mp4$");
 
     std::string loose_match;
     for (const auto& entry : fs::directory_iterator(video_dir)) {
@@ -119,27 +113,47 @@ cv::Mat toGrayPlane(const cv::Mat& frame) {
     if (frame.channels() == 3) {
         std::vector<cv::Mat> ch;
         cv::split(frame, ch);
-        return ch[2];  // R channel (BGR -> index 2)
+        return ch[2]; // R channel (BGR -> index 2)
     }
     return frame;
 }
 
-}  // namespace
+} // namespace
 
 ViewPair resolveViewPair(int stereopair, const std::vector<int>& cam_order) {
     // Port of get_cam_view_stereopair_param.m: stereopair -> (view_nbr_1, view_nbr_2).
     int v1 = 0, v2 = 0;
     switch (stereopair) {
-        case 1: v1 = 1; v2 = 2; break;
-        case 2: v1 = 2; v2 = 3; break;
-        case 3: v1 = 3; v2 = 4; break;
-        case 4: v1 = 4; v2 = 5; break;
-        case 5: v1 = 6; v2 = 5; break;
-        case 6: v1 = 7; v2 = 6; break;
-        case 7: v1 = 8; v2 = 7; break;
+        case 1:
+            v1 = 1;
+            v2 = 2;
+            break;
+        case 2:
+            v1 = 2;
+            v2 = 3;
+            break;
+        case 3:
+            v1 = 3;
+            v2 = 4;
+            break;
+        case 4:
+            v1 = 4;
+            v2 = 5;
+            break;
+        case 5:
+            v1 = 6;
+            v2 = 5;
+            break;
+        case 6:
+            v1 = 7;
+            v2 = 6;
+            break;
+        case 7:
+            v1 = 8;
+            v2 = 7;
+            break;
         default:
-            throw std::runtime_error("mirrored: invalid stereopair " +
-                                     std::to_string(stereopair));
+            throw std::runtime_error("mirrored: invalid stereopair " + std::to_string(stereopair));
     }
 
     // Port of camera_info_from_view.m: view_nbr -> (cam_nbr via cam_order, half).
@@ -147,7 +161,7 @@ ViewPair resolveViewPair(int stereopair, const std::vector<int>& cam_order) {
         ViewInfo vi;
         vi.view_nbr = view_nbr;
         // views 1,2 -> cam_order[0]; 3,4 -> cam_order[1]; 5,6 -> cam_order[2]; 7,8 -> cam_order[3]
-        const int cam_slot = (view_nbr - 1) / 2;   // 0..3
+        const int cam_slot = (view_nbr - 1) / 2; // 0..3
         if (cam_slot < 0 || cam_slot >= static_cast<int>(cam_order.size())) {
             throw std::runtime_error("mirrored: view " + std::to_string(view_nbr) +
                                      " has no camera in cam_order");
@@ -176,23 +190,17 @@ cv::Mat extractViewFromFrame(const cv::Mat& frame, MaskHalf half) {
     return gray(cv::Rect(half_w, 0, w - half_w, gray.rows)).clone();
 }
 
-bool importRawViewMirrored(const Config& config,
-                           int trial,
-                           const ViewInfo& view,
-                           int frameStart,
-                           int frameEnd,
-                           int frameJump,
-                           std::vector<std::string>& out_frames) {
+bool importRawViewMirrored(const Config& config, int trial, const ViewInfo& view, int frameStart,
+                           int frameEnd, int frameJump, std::vector<std::string>& out_frames) {
     try {
         const std::string trialname = padNumber(trial, 3);
-        const std::string video_dir =
-            Utils::buildVideoDir(config, true, true, true, true);
+        const std::string video_dir = Utils::buildVideoDir(config, true, true, true, true);
 
-        const std::string vid = findCameraVideo(
-            video_dir, config.subject_id, config.material, trialname, view.cam_nbr);
+        const std::string vid =
+            findCameraVideo(video_dir, config.subject_id, config.material, trialname, view.cam_nbr);
         if (vid.empty()) {
-            std::cerr << "mirrored: video not found for trial=" << trial
-                      << " cam=" << view.cam_nbr << " in " << video_dir << std::endl;
+            std::cerr << "mirrored: video not found for trial=" << trial << " cam=" << view.cam_nbr
+                      << " in " << video_dir << std::endl;
             return false;
         }
 
@@ -202,9 +210,8 @@ bool importRawViewMirrored(const Config& config,
             return false;
         }
 
-        std::cout << "  view " << view.view_nbr << " (cam " << view.cam_nbr
-                  << ", half " << (view.half == MaskHalf::Left ? "L" : "R")
-                  << ") <- " << vid << std::endl;
+        std::cout << "  view " << view.view_nbr << " (cam " << view.cam_nbr << ", half "
+                  << (view.half == MaskHalf::Left ? "L" : "R") << ") <- " << vid << std::endl;
 
         const int total = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_COUNT));
         if (frameEnd <= 0) frameEnd = total;
@@ -215,8 +222,7 @@ bool importRawViewMirrored(const Config& config,
         // Per-view frame output dir (kept separate from the camerapairs tmp_frames layout).
         std::ostringstream odir;
         odir << config.dic_path << "/" << config.subject_id << "/" << config.material
-             << "/tmp_frames_mirrored/T" << trial
-             << "/pair_unset/view" << view.view_nbr;
+             << "/tmp_frames_mirrored/T" << trial << "/pair_unset/view" << view.view_nbr;
         const std::string view_dir = odir.str();
         if (!ensureDir(view_dir)) {
             std::cerr << "mirrored: cannot create frame dir " << view_dir << std::endl;
@@ -247,14 +253,11 @@ namespace {
 // Reuse the CppNCorr engine exactly like StepDWorkflow::runNcorrAnalysis: build Image2D
 // from PNG paths, build ROI2D from the mask, run the MATLAB-style sequential DIC, then
 // persist the raw (pixel) output. Returns the raw DIC output.
-ncorr::DIC_analysis_output runViewDic(const Config& config,
-                                      const cv::Mat& ref_img,
-                                      const std::vector<cv::Mat>& cur_imgs,
-                                      const cv::Mat& roi_mask,
+ncorr::DIC_analysis_output runViewDic(const Config& config, const cv::Mat& ref_img,
+                                      const std::vector<cv::Mat>& cur_imgs, const cv::Mat& roi_mask,
                                       const cppxdic::SeedPoint& seed_point,
                                       const cppxdic::StepParameters& step_params,
-                                      const std::string& tmp_dir,
-                                      const std::string& output_path) {
+                                      const std::string& tmp_dir, const std::string& output_path) {
     ensureDir(tmp_dir);
 
     std::vector<ncorr::Image2D> imgs;
@@ -272,14 +275,8 @@ ncorr::DIC_analysis_output runViewDic(const Config& config,
 
     const int scalefactor = step_params.spacing + 1;
     ncorr::DIC_analysis_input dic_input(
-        imgs,
-        roi,
-        scalefactor,
-        ncorr::INTERP::QUINTIC_BSPLINE_PRECOMPUTE,
-        ncorr::SUBREGION::CIRCLE,
-        step_params.radius,
-        step_params.total_threads,
-        ncorr::DIC_analysis_config::KEEP_MOST_POINTS,
+        imgs, roi, scalefactor, ncorr::INTERP::QUINTIC_BSPLINE_PRECOMPUTE, ncorr::SUBREGION::CIRCLE,
+        step_params.radius, step_params.total_threads, ncorr::DIC_analysis_config::KEEP_MOST_POINTS,
         config.debug_mode);
     dic_input.update_corrcoef = config.ncorr_cutoff_corrcoef;
 
@@ -299,15 +296,10 @@ ncorr::DIC_analysis_output runViewDic(const Config& config,
 }
 
 // Process one stereopair end-to-end for one trial.
-bool processPair(const Config& config,
-                 int trial,
-                 const ViewPair& vp,
-                 int frameStart,
-                 int frameEnd,
+bool processPair(const Config& config, int trial, const ViewPair& vp, int frameStart, int frameEnd,
                  int frameJump) {
-    std::cout << "\n--- Trial " << trial << " stereopair " << vp.stereopair
-              << " (views " << vp.view1.view_nbr << " & " << vp.view2.view_nbr << ") ---"
-              << std::endl;
+    std::cout << "\n--- Trial " << trial << " stereopair " << vp.stereopair << " (views "
+              << vp.view1.view_nbr << " & " << vp.view2.view_nbr << ") ---" << std::endl;
 
     // 1. Mask-extract both views as full frames (import_raw_vid_MNG.m).
     std::vector<std::string> view1_paths, view2_paths;
@@ -339,17 +331,14 @@ bool processPair(const Config& config,
             std::cerr << "mirrored: failed to read extracted frame " << i << std::endl;
             return false;
         }
-        view1_satur.push_back(
-            cppxdic::ImageProcessor::saturate(a, kLimitGrayscale, "high"));
-        view2_satur.push_back(
-            cppxdic::ImageProcessor::saturate(b, kLimitGrayscale, "high"));
+        view1_satur.push_back(cppxdic::ImageProcessor::saturate(a, kLimitGrayscale, "high"));
+        view2_satur.push_back(cppxdic::ImageProcessor::saturate(b, kLimitGrayscale, "high"));
     }
 
     // 3. Output layout (per trial / per pair), mirroring buildPath conventions.
     std::ostringstream odir;
-    odir << config.dic_path << "/" << config.subject_id << "/" << config.material
-         << "/" << padNumber(trial, 3) << "/" << config.phase_id
-         << "/mirrored_pair" << vp.stereopair;
+    odir << config.dic_path << "/" << config.subject_id << "/" << config.material << "/"
+         << padNumber(trial, 3) << "/" << config.phase_id << "/mirrored_pair" << vp.stereopair;
     const std::string out_dir = odir.str();
     ensureDir(out_dir);
 
@@ -364,13 +353,10 @@ bool processPair(const Config& config,
     bp.outputPath = out_dir;
     bp.baseResultPath = config.dic_path;
     bp.limit_grayscale = kLimitGrayscale;
-    bp.roifile =
-        Utils::buildRoiFilePath(bp, bp.reftrial, vp.stereopair);
-    bp.seedfile =
-        Utils::buildSeedFilePath(bp, bp.reftrial, vp.stereopair);
+    bp.roifile = Utils::buildRoiFilePath(bp, bp.reftrial, vp.stereopair);
+    bp.seedfile = Utils::buildSeedFilePath(bp, bp.reftrial, vp.stereopair);
 
-    cv::Mat roi_view1 =
-        cppxdic::ROIManager::loadOrCreateROI(bp, view1_satur.front());
+    cv::Mat roi_view1 = cppxdic::ROIManager::loadOrCreateROI(bp, view1_satur.front());
 
     // 5. Seed: reuse ROIManager (loads REF seed if present, else ROI centre).
     cppxdic::SeedPoint seed1 = cppxdic::ROIManager::loadOrCreateSeed(bp, roi_view1);
@@ -386,14 +372,14 @@ bool processPair(const Config& config,
 
     cppxdic::StepParameters step_match = step_track;
     step_match.radius =
-        (config.step_e.radius > 0) ? config.step_e.radius : 30;  // matching radius (MNG=30)
+        (config.step_e.radius > 0) ? config.step_e.radius : 30; // matching radius (MNG=30)
 
     // 7. MATCHING view1 -> view2 at the reference frame (input2 = [view2_1, view1_1]).
     //    Mirrors the ncorr_dic_rewrited matching call in stepD_2DDIC_MNG.m.
     {
         std::vector<cv::Mat> match_cur = {view2_satur.front(), view1_satur.front()};
-        const std::string match_out = Utils::buildNcorrFilePath(
-            out_dir, vp.view1.view_nbr, vp.view2.view_nbr, ".bin");
+        const std::string match_out =
+            Utils::buildNcorrFilePath(out_dir, vp.view1.view_nbr, vp.view2.view_nbr, ".bin");
         runViewDic(config, view1_satur.front(), match_cur, roi_view1, seed1, step_match,
                    out_dir + "/tmp_ncorr_match", match_out);
     }
@@ -424,7 +410,7 @@ bool processPair(const Config& config,
     return true;
 }
 
-}  // namespace
+} // namespace
 
 bool run(const Config& config) {
     std::cout << "-------------------------------------------" << std::endl;
@@ -443,7 +429,7 @@ bool run(const Config& config) {
     std::cout << "True FPS: " << true_fps << ", frames " << frameStart << ".." << frameEnd
               << " jump " << frameJump << std::endl;
 
-    const int trial = config.ref_trial_id;  // single-trial entry, as in the MATLAB script
+    const int trial = config.ref_trial_id; // single-trial entry, as in the MATLAB script
 
     bool all_ok = true;
     for (int pair = 1; pair <= num_pair; ++pair) {
@@ -451,8 +437,7 @@ bool run(const Config& config) {
         try {
             vp = resolveViewPair(pair, kDefaultCamOrder);
         } catch (const std::exception& e) {
-            std::cerr << "mirrored: " << e.what() << " (skipping pair " << pair << ")"
-                      << std::endl;
+            std::cerr << "mirrored: " << e.what() << " (skipping pair " << pair << ")" << std::endl;
             all_ok = false;
             continue;
         }
@@ -470,5 +455,5 @@ bool run(const Config& config) {
     return all_ok;
 }
 
-}  // namespace mirrored
-}  // namespace xdic
+} // namespace mirrored
+} // namespace xdic

@@ -72,7 +72,7 @@ bool SingleDicWorkflow::importFrames(std::vector<cv::Mat>& frames) const {
         }
     }
 
-    const int start = std::max(1, cfg_.idx_frame_start);   // 1-based
+    const int start = std::max(1, cfg_.idx_frame_start); // 1-based
     const int jump = std::max(1, cfg_.frame_jump);
 
     auto window_done = [&](int count_kept_input_index, int frame_1based) {
@@ -87,16 +87,18 @@ bool SingleDicWorkflow::importFrames(std::vector<cv::Mat>& frames) const {
             std::cerr << "[singledic] Cannot open video: " << vpath << std::endl;
             return false;
         }
-        int frame_idx = 0;  // 0-based as read
+        int frame_idx = 0; // 0-based as read
         cv::Mat bgr;
         while (cap.read(bgr)) {
-            ++frame_idx;  // now 1-based for this frame
+            ++frame_idx; // now 1-based for this frame
             if (frame_idx < start) continue;
             if (window_done(0, frame_idx)) break;
             if (((frame_idx - start) % jump) != 0) continue;
             cv::Mat gray;
-            if (bgr.channels() == 3) cv::cvtColor(bgr, gray, cv::COLOR_BGR2GRAY);
-            else gray = bgr.clone();
+            if (bgr.channels() == 3)
+                cv::cvtColor(bgr, gray, cv::COLOR_BGR2GRAY);
+            else
+                gray = bgr.clone();
             if (gray.type() != CV_8UC1) gray.convertTo(gray, CV_8UC1);
             frames.push_back(gray);
         }
@@ -137,16 +139,15 @@ bool SingleDicWorkflow::importFrames(std::vector<cv::Mat>& frames) const {
         std::reverse(frames.begin(), frames.end());
     }
 
-    std::cout << "[singledic] Imported " << frames.size() << " frame(s) from "
-              << trial_dir << std::endl;
+    std::cout << "[singledic] Imported " << frames.size() << " frame(s) from " << trial_dir
+              << std::endl;
     return true;
 }
 
 // ---------------------------------------------------------------------------
 // Saturation — satur(satur(im,'level',high),'method','low','level',low).
 // ---------------------------------------------------------------------------
-std::vector<cv::Mat>
-SingleDicWorkflow::saturate(const std::vector<cv::Mat>& frames) const {
+std::vector<cv::Mat> SingleDicWorkflow::saturate(const std::vector<cv::Mat>& frames) const {
     using cppxdic::ImageProcessor;
     std::vector<cv::Mat> out;
     out.reserve(frames.size());
@@ -163,9 +164,8 @@ SingleDicWorkflow::saturate(const std::vector<cv::Mat>& frames) const {
 //   im = bandpassfft(im, low, high);
 //   y  = prctile(im(roi),[1 99]); im = clamp((im-y1)/(y2-y1),0,1)
 // ---------------------------------------------------------------------------
-std::vector<cv::Mat>
-SingleDicWorkflow::maybeFilter(const std::vector<cv::Mat>& frames,
-                               const cv::Mat& roi_mask) const {
+std::vector<cv::Mat> SingleDicWorkflow::maybeFilter(const std::vector<cv::Mat>& frames,
+                                                    const cv::Mat& roi_mask) const {
     if (!cfg_.filter_im_mode) return frames;
 
     using cppxdic::ImageProcessor;
@@ -208,17 +208,15 @@ std::vector<int> SingleDicWorkflow::loadOrCreateSeed(const cv::Mat& roi_mask) co
 // Tracking — one ncorr pass: reference frame (frames[0]) vs every current
 // frame, driven through the in-memory NcorrSession.
 // ---------------------------------------------------------------------------
-bool SingleDicWorkflow::track(const std::vector<cv::Mat>& frames,
-                              const cv::Mat& roi_mask,
-                              const std::vector<int>& seed_pw,
-                              SingleDicResult& out) const {
+bool SingleDicWorkflow::track(const std::vector<cv::Mat>& frames, const cv::Mat& roi_mask,
+                              const std::vector<int>& seed_pw, SingleDicResult& out) const {
     if (frames.empty()) return false;
 
     // Map CPPxDIC Config tunables onto the session config so singledic uses the
     // same DIC parameters as the production engine (step_d radius/spacing).
     ncorr::SessionConfig scfg;
     scfg.subregion_radius = cfg_.base.step_d.radius;
-    scfg.scalefactor = cfg_.base.step_d.spacing + 1;  // grid factor = spacing+1
+    scfg.scalefactor = cfg_.base.step_d.spacing + 1; // grid factor = spacing+1
     scfg.num_threads = std::max(1, cfg_.base.step_d.total_threads);
     scfg.debug = cfg_.base.debug_mode;
 
@@ -306,11 +304,10 @@ bool SingleDicWorkflow::writeCsv(const SingleDicResult& res) const {
                 size_t idx = static_cast<size_t>(gy) * fr.grid_width + gx;
                 if (idx >= fr.u.size()) continue;
                 double u = fr.u[idx];
-                if (std::isnan(u)) continue;  // outside ROI
+                if (std::isnan(u)) continue; // outside ROI
                 double v = (idx < fr.v.size()) ? fr.v[idx] : 0.0;
                 double c = (idx < fr.corrcoef.size()) ? fr.corrcoef[idx] : 0.0;
-                f << (fi + 1) << ',' << gx << ',' << gy << ','
-                  << u << ',' << v << ',' << c << '\n';
+                f << (fi + 1) << ',' << gx << ',' << gy << ',' << u << ',' << v << ',' << c << '\n';
             }
         }
     }
@@ -321,16 +318,15 @@ bool SingleDicWorkflow::writeCsv(const SingleDicResult& res) const {
 namespace {
 // Write a 2D double matrix (row-major in `data`, dims rows x cols) into an open
 // MAT file as a named variable. matio expects column-major, so we transpose.
-bool put_matrix(mat_t* mat, const std::string& name,
-                const std::vector<double>& data, size_t rows, size_t cols) {
+bool put_matrix(mat_t* mat, const std::string& name, const std::vector<double>& data, size_t rows,
+                size_t cols) {
     if (rows * cols != data.size()) return false;
     std::vector<double> col_major(rows * cols);
     for (size_t r = 0; r < rows; ++r)
-        for (size_t c = 0; c < cols; ++c)
-            col_major[c * rows + r] = data[r * cols + c];
+        for (size_t c = 0; c < cols; ++c) col_major[c * rows + r] = data[r * cols + c];
     size_t dims[2] = {rows, cols};
-    matvar_t* var = Mat_VarCreate(name.c_str(), MAT_C_DOUBLE, MAT_T_DOUBLE,
-                                  2, dims, col_major.data(), 0);
+    matvar_t* var =
+        Mat_VarCreate(name.c_str(), MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims, col_major.data(), 0);
     if (!var) return false;
     Mat_VarWrite(mat, var, MAT_COMPRESSION_NONE);
     Mat_VarFree(var);
@@ -339,14 +335,13 @@ bool put_matrix(mat_t* mat, const std::string& name,
 
 bool put_scalar(mat_t* mat, const std::string& name, double value) {
     size_t dims[2] = {1, 1};
-    matvar_t* var = Mat_VarCreate(name.c_str(), MAT_C_DOUBLE, MAT_T_DOUBLE,
-                                  2, dims, &value, 0);
+    matvar_t* var = Mat_VarCreate(name.c_str(), MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims, &value, 0);
     if (!var) return false;
     Mat_VarWrite(mat, var, MAT_COMPRESSION_NONE);
     Mat_VarFree(var);
     return true;
 }
-}  // namespace
+} // namespace
 
 // ---------------------------------------------------------------------------
 // MAT writer — compact, MATLAB-loadable dump of the displacement grids.
@@ -399,9 +394,8 @@ SingleDicResult SingleDicWorkflow::run() {
 
     std::cout << "-------------------------------------------\n";
     std::cout << "singledic: single-camera 2D DIC analysis\n";
-    std::cout << "  subject=" << cfg_.subject << " bloc=" << cfg_.bloc
-              << " trial=" << cfg_.trial << " ref=" << cfg_.reftrial
-              << " dir=" << cfg_.tracking_dir << "\n";
+    std::cout << "  subject=" << cfg_.subject << " bloc=" << cfg_.bloc << " trial=" << cfg_.trial
+              << " ref=" << cfg_.reftrial << " dir=" << cfg_.tracking_dir << "\n";
 
     // Ensure output directories exist.
     std::error_code ec;
@@ -453,4 +447,4 @@ SingleDicResult SingleDicWorkflow::run() {
     return result;
 }
 
-}  // namespace singledic
+} // namespace singledic

@@ -22,9 +22,9 @@ namespace {
 
 /// Create a unique temp directory and populate it with the given filenames (empty content).
 fs::path make_temp_with_files(const std::vector<std::string>& names) {
-    fs::path dir = fs::temp_directory_path() /
-                   ("ifr_test_" + std::to_string(::getpid()) + "_" +
-                    std::to_string(reinterpret_cast<uintptr_t>(&names)));
+    fs::path dir =
+        fs::temp_directory_path() / ("ifr_test_" + std::to_string(::getpid()) + "_" +
+                                     std::to_string(reinterpret_cast<uintptr_t>(&names)));
     fs::create_directories(dir);
     for (const auto& n : names) {
         std::ofstream(dir / n) << "x";
@@ -40,8 +40,13 @@ std::string basename_of(const std::string& p) {
 
 TEST(image_folder_reader, filters_and_sorts) {
     fs::path dir = make_temp_with_files({
-        "ohtcfrp_02.png", "ohtcfrp_00.png", "ohtcfrp_01.png",
-        "notes.txt", "data.csv", "img.JPG", "scan.tiff",
+        "ohtcfrp_02.png",
+        "ohtcfrp_00.png",
+        "ohtcfrp_01.png",
+        "notes.txt",
+        "data.csv",
+        "img.JPG",
+        "scan.tiff",
     });
     ImageFolderReader reader(dir.string());
     auto frames = reader.listFrames(/*skip_roi_ref=*/true);

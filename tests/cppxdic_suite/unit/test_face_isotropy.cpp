@@ -37,9 +37,10 @@ TEST(face_isotropy, sliver_is_low) {
 }
 
 TEST(face_isotropy, per_face_values_in_range) {
-    std::vector<Vector3d> verts = {
-        {0.0, 0.0, 0.0}, {1.0, 0.0, 0.0}, {0.5, std::sqrt(3.0) / 2.0, 0.0}, // equilateral
-        {2.0, 1e-3, 0.0}};                                                  // sliver partner
+    std::vector<Vector3d> verts = {{0.0, 0.0, 0.0},
+                                   {1.0, 0.0, 0.0},
+                                   {0.5, std::sqrt(3.0) / 2.0, 0.0}, // equilateral
+                                   {2.0, 1e-3, 0.0}};                // sliver partner
     std::vector<int> faces = {0, 1, 2, 0, 1, 3};
     auto idx = computeFaceIsotropyIndex(faces, verts);
     CHECK_EQ(idx.size(), static_cast<size_t>(2));

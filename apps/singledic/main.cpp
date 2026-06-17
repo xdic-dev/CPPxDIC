@@ -29,41 +29,40 @@
 #include <string>
 
 static void print_usage(const char* prog) {
-    std::cout
-        << "Usage: " << prog << " [OPTIONS]\n\n"
-        << "singledic - single-camera 2D DIC (no stereo / no 3D reconstruction)\n\n"
-        << "OPTIONS:\n"
-        << "  -c, --config <file>      Unified config file (reuses Config; key=value)\n"
-        << "      --dic-params <file>  dic_params.txt to load step-D/ncorr tunables\n"
-        << "      --data-path <dir>    Base data path (videos live under <dir>/vid)\n"
-        << "      --dic-path <dir>     Output/analysis base path\n"
-        << "  -s, --subject <id>       Subject folder name (e.g. S01)\n"
-        << "  -b, --bloc <id>          Bloc/block folder name\n"
-        << "  -t, --trial <id>         Trial name (video stem)\n"
-        << "  -r, --reftrial <id>      Reference trial name (default: trial)\n"
-        << "      --start <n>          First frame (1-based, default 1)\n"
-        << "      --end <n>            Last frame (default: end of sequence)\n"
-        << "      --jump <n>           Frame stride (default 1)\n"
-        << "      --dir <forward|backward>  Tracking direction (default forward)\n"
-        << "      --ncorr-number <n>   Output tag (1/2) for forward/backward (default 1)\n"
-        << "      --gs-low <n>         Saturation low clamp (default 40)\n"
-        << "      --gs-high <n>        Saturation high clamp (default 140)\n"
-        << "      --filter             Enable bandpass filtering before DIC\n"
-        << "      --filt-low <n>       Bandpass low cutoff (default 50)\n"
-        << "      --filt-high <n>      Bandpass high cutoff (default 200)\n"
-        << "      --no-mat             Do not write .mat sidecar\n"
-        << "      --no-csv             Do not write .csv output\n"
-        << "      --matlab-ref <path>  (informational) MATLAB reference folder\n"
-        << "  -h, --help               Show this help\n"
-        << std::endl;
+    std::cout << "Usage: " << prog << " [OPTIONS]\n\n"
+              << "singledic - single-camera 2D DIC (no stereo / no 3D reconstruction)\n\n"
+              << "OPTIONS:\n"
+              << "  -c, --config <file>      Unified config file (reuses Config; key=value)\n"
+              << "      --dic-params <file>  dic_params.txt to load step-D/ncorr tunables\n"
+              << "      --data-path <dir>    Base data path (videos live under <dir>/vid)\n"
+              << "      --dic-path <dir>     Output/analysis base path\n"
+              << "  -s, --subject <id>       Subject folder name (e.g. S01)\n"
+              << "  -b, --bloc <id>          Bloc/block folder name\n"
+              << "  -t, --trial <id>         Trial name (video stem)\n"
+              << "  -r, --reftrial <id>      Reference trial name (default: trial)\n"
+              << "      --start <n>          First frame (1-based, default 1)\n"
+              << "      --end <n>            Last frame (default: end of sequence)\n"
+              << "      --jump <n>           Frame stride (default 1)\n"
+              << "      --dir <forward|backward>  Tracking direction (default forward)\n"
+              << "      --ncorr-number <n>   Output tag (1/2) for forward/backward (default 1)\n"
+              << "      --gs-low <n>         Saturation low clamp (default 40)\n"
+              << "      --gs-high <n>        Saturation high clamp (default 140)\n"
+              << "      --filter             Enable bandpass filtering before DIC\n"
+              << "      --filt-low <n>       Bandpass low cutoff (default 50)\n"
+              << "      --filt-high <n>      Bandpass high cutoff (default 200)\n"
+              << "      --no-mat             Do not write .mat sidecar\n"
+              << "      --no-csv             Do not write .csv output\n"
+              << "      --matlab-ref <path>  (informational) MATLAB reference folder\n"
+              << "  -h, --help               Show this help\n"
+              << std::endl;
 }
 
 int main(int argc, char* argv[]) {
-    Config base_config;  // production defaults
+    Config base_config; // production defaults
 
     std::string config_file;
     std::string dic_params_file;
-    singledic::SinglediConfig cfg;  // wraps base_config below
+    singledic::SinglediConfig cfg; // wraps base_config below
 
     // Local holders for path overrides (applied to base_config before wrap).
     std::string data_path_override, dic_path_override;
@@ -78,62 +77,119 @@ int main(int argc, char* argv[]) {
     std::string matlab_ref;
 
     enum {
-        OPT_DIC_PARAMS = 1000, OPT_DATA_PATH, OPT_DIC_PATH, OPT_START, OPT_END,
-        OPT_JUMP, OPT_DIR, OPT_NCORR_NUMBER, OPT_GS_LOW, OPT_GS_HIGH, OPT_FILTER,
-        OPT_FILT_LOW, OPT_FILT_HIGH, OPT_NO_MAT, OPT_NO_CSV, OPT_MATLAB_REF
+        OPT_DIC_PARAMS = 1000,
+        OPT_DATA_PATH,
+        OPT_DIC_PATH,
+        OPT_START,
+        OPT_END,
+        OPT_JUMP,
+        OPT_DIR,
+        OPT_NCORR_NUMBER,
+        OPT_GS_LOW,
+        OPT_GS_HIGH,
+        OPT_FILTER,
+        OPT_FILT_LOW,
+        OPT_FILT_HIGH,
+        OPT_NO_MAT,
+        OPT_NO_CSV,
+        OPT_MATLAB_REF
     };
-    static struct option long_options[] = {
-        {"config",       required_argument, 0, 'c'},
-        {"dic-params",   required_argument, 0, OPT_DIC_PARAMS},
-        {"data-path",    required_argument, 0, OPT_DATA_PATH},
-        {"dic-path",     required_argument, 0, OPT_DIC_PATH},
-        {"subject",      required_argument, 0, 's'},
-        {"bloc",         required_argument, 0, 'b'},
-        {"trial",        required_argument, 0, 't'},
-        {"reftrial",     required_argument, 0, 'r'},
-        {"start",        required_argument, 0, OPT_START},
-        {"end",          required_argument, 0, OPT_END},
-        {"jump",         required_argument, 0, OPT_JUMP},
-        {"dir",          required_argument, 0, OPT_DIR},
-        {"ncorr-number", required_argument, 0, OPT_NCORR_NUMBER},
-        {"gs-low",       required_argument, 0, OPT_GS_LOW},
-        {"gs-high",      required_argument, 0, OPT_GS_HIGH},
-        {"filter",       no_argument,       0, OPT_FILTER},
-        {"filt-low",     required_argument, 0, OPT_FILT_LOW},
-        {"filt-high",    required_argument, 0, OPT_FILT_HIGH},
-        {"no-mat",       no_argument,       0, OPT_NO_MAT},
-        {"no-csv",       no_argument,       0, OPT_NO_CSV},
-        {"matlab-ref",   required_argument, 0, OPT_MATLAB_REF},
-        {"help",         no_argument,       0, 'h'},
-        {0, 0, 0, 0}
-    };
+    static struct option long_options[] = {{"config", required_argument, 0, 'c'},
+                                           {"dic-params", required_argument, 0, OPT_DIC_PARAMS},
+                                           {"data-path", required_argument, 0, OPT_DATA_PATH},
+                                           {"dic-path", required_argument, 0, OPT_DIC_PATH},
+                                           {"subject", required_argument, 0, 's'},
+                                           {"bloc", required_argument, 0, 'b'},
+                                           {"trial", required_argument, 0, 't'},
+                                           {"reftrial", required_argument, 0, 'r'},
+                                           {"start", required_argument, 0, OPT_START},
+                                           {"end", required_argument, 0, OPT_END},
+                                           {"jump", required_argument, 0, OPT_JUMP},
+                                           {"dir", required_argument, 0, OPT_DIR},
+                                           {"ncorr-number", required_argument, 0, OPT_NCORR_NUMBER},
+                                           {"gs-low", required_argument, 0, OPT_GS_LOW},
+                                           {"gs-high", required_argument, 0, OPT_GS_HIGH},
+                                           {"filter", no_argument, 0, OPT_FILTER},
+                                           {"filt-low", required_argument, 0, OPT_FILT_LOW},
+                                           {"filt-high", required_argument, 0, OPT_FILT_HIGH},
+                                           {"no-mat", no_argument, 0, OPT_NO_MAT},
+                                           {"no-csv", no_argument, 0, OPT_NO_CSV},
+                                           {"matlab-ref", required_argument, 0, OPT_MATLAB_REF},
+                                           {"help", no_argument, 0, 'h'},
+                                           {0, 0, 0, 0}};
 
     int opt, idx = 0;
     while ((opt = getopt_long(argc, argv, "c:s:b:t:r:h", long_options, &idx)) != -1) {
         switch (opt) {
-            case 'c': config_file = optarg; break;
-            case OPT_DIC_PARAMS: dic_params_file = optarg; break;
-            case OPT_DATA_PATH: data_path_override = optarg; break;
-            case OPT_DIC_PATH: dic_path_override = optarg; break;
-            case 's': subject = optarg; break;
-            case 'b': bloc = optarg; break;
-            case 't': trial = optarg; break;
-            case 'r': reftrial = optarg; break;
-            case OPT_START: start = std::stoi(optarg); break;
-            case OPT_END: end = std::stoi(optarg); break;
-            case OPT_JUMP: jump = std::stoi(optarg); break;
-            case OPT_DIR: tracking_dir = optarg; break;
-            case OPT_NCORR_NUMBER: ncorr_number = std::stoi(optarg); break;
-            case OPT_GS_LOW: gs_low = std::stoi(optarg); break;
-            case OPT_GS_HIGH: gs_high = std::stoi(optarg); break;
-            case OPT_FILTER: do_filter = true; break;
-            case OPT_FILT_LOW: filt_low = std::stoi(optarg); break;
-            case OPT_FILT_HIGH: filt_high = std::stoi(optarg); break;
-            case OPT_NO_MAT: write_mat = false; break;
-            case OPT_NO_CSV: write_csv = false; break;
-            case OPT_MATLAB_REF: matlab_ref = optarg; break;
-            case 'h': print_usage(argv[0]); return 0;
-            default: print_usage(argv[0]); return 1;
+            case 'c':
+                config_file = optarg;
+                break;
+            case OPT_DIC_PARAMS:
+                dic_params_file = optarg;
+                break;
+            case OPT_DATA_PATH:
+                data_path_override = optarg;
+                break;
+            case OPT_DIC_PATH:
+                dic_path_override = optarg;
+                break;
+            case 's':
+                subject = optarg;
+                break;
+            case 'b':
+                bloc = optarg;
+                break;
+            case 't':
+                trial = optarg;
+                break;
+            case 'r':
+                reftrial = optarg;
+                break;
+            case OPT_START:
+                start = std::stoi(optarg);
+                break;
+            case OPT_END:
+                end = std::stoi(optarg);
+                break;
+            case OPT_JUMP:
+                jump = std::stoi(optarg);
+                break;
+            case OPT_DIR:
+                tracking_dir = optarg;
+                break;
+            case OPT_NCORR_NUMBER:
+                ncorr_number = std::stoi(optarg);
+                break;
+            case OPT_GS_LOW:
+                gs_low = std::stoi(optarg);
+                break;
+            case OPT_GS_HIGH:
+                gs_high = std::stoi(optarg);
+                break;
+            case OPT_FILTER:
+                do_filter = true;
+                break;
+            case OPT_FILT_LOW:
+                filt_low = std::stoi(optarg);
+                break;
+            case OPT_FILT_HIGH:
+                filt_high = std::stoi(optarg);
+                break;
+            case OPT_NO_MAT:
+                write_mat = false;
+                break;
+            case OPT_NO_CSV:
+                write_csv = false;
+                break;
+            case OPT_MATLAB_REF:
+                matlab_ref = optarg;
+                break;
+            case 'h':
+                print_usage(argv[0]);
+                return 0;
+            default:
+                print_usage(argv[0]);
+                return 1;
         }
     }
 
@@ -164,8 +220,7 @@ int main(int argc, char* argv[]) {
     cfg.write_mat = write_mat;
     cfg.write_csv = write_csv;
 
-    if (!matlab_ref.empty())
-        std::cout << "MATLAB reference folder: " << matlab_ref << std::endl;
+    if (!matlab_ref.empty()) std::cout << "MATLAB reference folder: " << matlab_ref << std::endl;
 
     singledic::SingleDicWorkflow workflow(cfg);
     singledic::SingleDicResult res = workflow.run();
@@ -174,7 +229,6 @@ int main(int argc, char* argv[]) {
         std::cerr << "singledic: FAILED — " << res.message << std::endl;
         return 1;
     }
-    std::cout << "singledic: OK — tracked " << res.frames.size()
-              << " frame(s)." << std::endl;
+    std::cout << "singledic: OK — tracked " << res.frames.size() << " frame(s)." << std::endl;
     return 0;
 }

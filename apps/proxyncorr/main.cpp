@@ -63,10 +63,10 @@ using json = nlohmann::json;
 struct ProxyConfig {
     // Paths
     std::string folder = "images";
-    std::string roi_path = "";      // Empty means use folder/roi.png
-    std::string ref_path = "";      // Empty means use first frame
+    std::string roi_path = ""; // Empty means use folder/roi.png
+    std::string ref_path = ""; // Empty means use first frame
     std::string output_dir = "output";
-    
+
     // DIC parameters
     int scalefactor = 3;
     std::string interp_type = "QUINTIC_BSPLINE_PRECOMPUTE";
@@ -75,30 +75,30 @@ struct ProxyConfig {
     int num_threads = 4;
     std::string dic_config = "NO_UPDATE";
     bool debug = false;
-    
+
     // Perspective change
     std::string perspective_interp = "CUBIC_KEYS";
-    
+
     // Units
     std::string units = "mm";
     double units_per_pixel = 0.2;
-    
+
     // Strain parameters
     std::string strain_subregion_type = "CIRCLE";
     int strain_radius = 5;
-    
+
     // Algorithm mode: "auto", "sequential", "parallel"
     std::string algorithm_mode = "auto";
-    
+
     // Seeds configuration (one per region)
     std::vector<SeedParams> seeds_by_region;
-    std::string seeds_file = "";  // Path to seeds JSON file
+    std::string seeds_file = ""; // Path to seeds JSON file
     bool seeds_are_optimized = false;
-    
+
     // Video parameters
     double alpha = 0.5;
     double fps = 15.0;
-    
+
     // Flags
     bool save_json = true;
     bool save_binary = true;
@@ -245,27 +245,25 @@ json strain_output_to_json(const strain_analysis_output& strain_output) {
     return j;
 }
 
-void save_as_json(const DIC_analysis_input& dic_input, 
-                  const DIC_analysis_output& dic_output,
+void save_as_json(const DIC_analysis_input& dic_input, const DIC_analysis_output& dic_output,
                   const strain_analysis_input& strain_input,
-                  const strain_analysis_output& strain_output,
-                  const std::string& directory) {
+                  const strain_analysis_output& strain_output, const std::string& directory) {
     json dic_input_json = dic_input_to_json(dic_input);
     json dic_output_json = dic_output_to_json(dic_output);
     json strain_input_json = strain_input_to_json(strain_input);
     json strain_output_json = strain_output_to_json(strain_output);
-    
+
     system(("mkdir -p " + directory).c_str());
-    
+
     std::ofstream dic_input_file(directory + "/DIC_input.json");
     dic_input_file << std::setw(4) << dic_input_json << std::endl;
-    
+
     std::ofstream dic_output_file(directory + "/DIC_output.json");
     dic_output_file << std::setw(4) << dic_output_json << std::endl;
-    
+
     std::ofstream strain_input_file(directory + "/strain_input.json");
     strain_input_file << std::setw(4) << strain_input_json << std::endl;
-    
+
     std::ofstream strain_output_file(directory + "/strain_output.json");
     strain_output_file << std::setw(4) << strain_output_json << std::endl;
 }
@@ -273,13 +271,14 @@ void save_as_json(const DIC_analysis_input& dic_input,
 // ============================================================================
 // File discovery functions
 // ============================================================================
-std::vector<std::string> discover_frames(const std::string& folder, const std::string& ref_path, const std::string& roi_path) {
+std::vector<std::string> discover_frames(const std::string& folder, const std::string& ref_path,
+                                         const std::string& roi_path) {
     std::vector<std::string> frames;
     DIR* dir = opendir(folder.c_str());
     if (!dir) {
         throw std::runtime_error("Cannot open folder: " + folder);
     }
-    
+
     // Get basenames to exclude
     std::string roi_basename = "";
     std::string ref_basename = "";
@@ -291,45 +290,45 @@ std::vector<std::string> discover_frames(const std::string& folder, const std::s
         size_t pos = ref_path.find_last_of("/\\");
         ref_basename = (pos != std::string::npos) ? ref_path.substr(pos + 1) : ref_path;
     }
-    
+
     struct dirent* entry;
     while ((entry = readdir(dir)) != nullptr) {
         std::string name = entry->d_name;
-        
+
         // Skip hidden files and directories
         if (name[0] == '.') continue;
-        
+
         // Check for image extensions
         std::string lower_name = name;
         std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
-        
-        bool is_image = (lower_name.length() > 4 && 
-            (lower_name.substr(lower_name.length() - 4) == ".png" ||
-             lower_name.substr(lower_name.length() - 4) == ".jpg" ||
-             lower_name.substr(lower_name.length() - 4) == ".bmp" ||
-             lower_name.substr(lower_name.length() - 5) == ".jpeg" ||
-             lower_name.substr(lower_name.length() - 5) == ".tiff" ||
-             lower_name.substr(lower_name.length() - 4) == ".tif"));
-        
+
+        bool is_image =
+            (lower_name.length() > 4 && (lower_name.substr(lower_name.length() - 4) == ".png" ||
+                                         lower_name.substr(lower_name.length() - 4) == ".jpg" ||
+                                         lower_name.substr(lower_name.length() - 4) == ".bmp" ||
+                                         lower_name.substr(lower_name.length() - 5) == ".jpeg" ||
+                                         lower_name.substr(lower_name.length() - 5) == ".tiff" ||
+                                         lower_name.substr(lower_name.length() - 4) == ".tif"));
+
         if (!is_image) continue;
-        
+
         // Skip roi.png by default
         if (lower_name == "roi.png") continue;
-        
+
         // Skip ref.png by default
         if (lower_name == "ref.png") continue;
-        
+
         // Skip explicitly specified roi and ref files
         if (!roi_basename.empty() && name == roi_basename) continue;
         if (!ref_basename.empty() && name == ref_basename) continue;
-        
+
         frames.push_back(folder + "/" + name);
     }
     closedir(dir);
-    
+
     // Sort frames naturally (handles numbered files)
     std::sort(frames.begin(), frames.end());
-    
+
     return frames;
 }
 
@@ -347,10 +346,10 @@ std::vector<SeedParams> load_seeds_from_json(const std::string& seeds_path) {
     if (!file.is_open()) {
         throw std::runtime_error("Cannot open seeds file: " + seeds_path);
     }
-    
+
     json j;
     file >> j;
-    
+
     if (j.is_array()) {
         for (const auto& seed_json : j) {
             SeedParams seed;
@@ -366,7 +365,7 @@ std::vector<SeedParams> load_seeds_from_json(const std::string& seeds_path) {
             seeds.push_back(seed);
         }
     }
-    
+
     return seeds;
 }
 
@@ -379,56 +378,80 @@ ProxyConfig parse_config_file(const std::string& config_path) {
     if (!file.is_open()) {
         throw std::runtime_error("Cannot open config file: " + config_path);
     }
-    
+
     std::string line;
     while (std::getline(file, line)) {
         // Skip empty lines and comments
         if (line.empty() || line[0] == '#') continue;
-        
+
         // Remove leading/trailing whitespace
         size_t start = line.find_first_not_of(" \t");
         size_t end = line.find_last_not_of(" \t");
         if (start == std::string::npos) continue;
         line = line.substr(start, end - start + 1);
-        
+
         // Parse key=value
         size_t eq_pos = line.find('=');
         if (eq_pos == std::string::npos) continue;
-        
+
         std::string key = line.substr(0, eq_pos);
         std::string value = line.substr(eq_pos + 1);
-        
+
         // Trim key and value
         key.erase(key.find_last_not_of(" \t") + 1);
         value.erase(0, value.find_first_not_of(" \t"));
-        
+
         // Parse each parameter
-        if (key == "folder") config.folder = value;
-        else if (key == "roi") config.roi_path = value;
-        else if (key == "ref") config.ref_path = value;
-        else if (key == "output") config.output_dir = value;
-        else if (key == "scalefactor") config.scalefactor = std::stoi(value);
-        else if (key == "interp") config.interp_type = value;
-        else if (key == "subregion") config.subregion_type = value;
-        else if (key == "radius") config.subregion_radius = std::stoi(value);
-        else if (key == "threads") config.num_threads = std::stoi(value);
-        else if (key == "dic_config") config.dic_config = value;
-        else if (key == "debug") config.debug = (value == "true" || value == "1");
-        else if (key == "perspective_interp") config.perspective_interp = value;
-        else if (key == "units") config.units = value;
-        else if (key == "units_per_pixel") config.units_per_pixel = std::stod(value);
-        else if (key == "strain_subregion") config.strain_subregion_type = value;
-        else if (key == "strain_radius") config.strain_radius = std::stoi(value);
-        else if (key == "alpha") config.alpha = std::stod(value);
-        else if (key == "fps") config.fps = std::stod(value);
-        else if (key == "save_json") config.save_json = (value == "true" || value == "1");
-        else if (key == "save_binary") config.save_binary = (value == "true" || value == "1");
-        else if (key == "save_videos") config.save_videos = (value == "true" || value == "1");
-        else if (key == "algorithm_mode") config.algorithm_mode = value;
-        else if (key == "seeds_file") config.seeds_file = value;
-        else if (key == "seeds_are_optimized") config.seeds_are_optimized = (value == "true" || value == "1");
+        if (key == "folder")
+            config.folder = value;
+        else if (key == "roi")
+            config.roi_path = value;
+        else if (key == "ref")
+            config.ref_path = value;
+        else if (key == "output")
+            config.output_dir = value;
+        else if (key == "scalefactor")
+            config.scalefactor = std::stoi(value);
+        else if (key == "interp")
+            config.interp_type = value;
+        else if (key == "subregion")
+            config.subregion_type = value;
+        else if (key == "radius")
+            config.subregion_radius = std::stoi(value);
+        else if (key == "threads")
+            config.num_threads = std::stoi(value);
+        else if (key == "dic_config")
+            config.dic_config = value;
+        else if (key == "debug")
+            config.debug = (value == "true" || value == "1");
+        else if (key == "perspective_interp")
+            config.perspective_interp = value;
+        else if (key == "units")
+            config.units = value;
+        else if (key == "units_per_pixel")
+            config.units_per_pixel = std::stod(value);
+        else if (key == "strain_subregion")
+            config.strain_subregion_type = value;
+        else if (key == "strain_radius")
+            config.strain_radius = std::stoi(value);
+        else if (key == "alpha")
+            config.alpha = std::stod(value);
+        else if (key == "fps")
+            config.fps = std::stod(value);
+        else if (key == "save_json")
+            config.save_json = (value == "true" || value == "1");
+        else if (key == "save_binary")
+            config.save_binary = (value == "true" || value == "1");
+        else if (key == "save_videos")
+            config.save_videos = (value == "true" || value == "1");
+        else if (key == "algorithm_mode")
+            config.algorithm_mode = value;
+        else if (key == "seeds_file")
+            config.seeds_file = value;
+        else if (key == "seeds_are_optimized")
+            config.seeds_are_optimized = (value == "true" || value == "1");
     }
-    
+
     return config;
 }
 
@@ -483,8 +506,10 @@ static json dic_result_to_json(const ncorr::DICResult& r, int frame_index,
     auto field_to_json = [](const std::vector<double>& v) {
         json arr = json::array();
         for (double x : v) {
-            if (std::isnan(x)) arr.push_back(nullptr);
-            else arr.push_back(x);
+            if (std::isnan(x))
+                arr.push_back(nullptr);
+            else
+                arr.push_back(x);
         }
         return arr;
     };
@@ -504,31 +529,28 @@ static json dic_result_to_json(const ncorr::DICResult& r, int frame_index,
 
 // Drive the in-memory NcorrSession path end to end and dump per-frame JSON.
 // Returns 0 on success, non-zero if any frame failed to process.
-static int run_in_memory(const ProxyConfig& config,
-                         const std::string& roi_path,
-                         const std::string& ref_path,
-                         const std::vector<std::string>& frame_paths) {
+static int run_in_memory(const ProxyConfig& config, const std::string& roi_path,
+                         const std::string& ref_path, const std::vector<std::string>& frame_paths) {
     std::cout << "\n[IN-MEMORY MODE] Driving ncorr::NcorrSession (no disk round-trip)\n"
               << std::endl;
 
     ncorr::SessionConfig scfg;
-    scfg.scalefactor      = config.scalefactor;
+    scfg.scalefactor = config.scalefactor;
     scfg.subregion_radius = config.subregion_radius;
-    scfg.strain_radius    = config.strain_radius;
-    scfg.num_threads      = config.num_threads;
-    scfg.debug            = config.debug;
+    scfg.strain_radius = config.strain_radius;
+    scfg.num_threads = config.num_threads;
+    scfg.debug = config.debug;
 
     ncorr::NcorrSession session(scfg);
 
     // Reference frame. Keep the owning Mat alive for the whole session.
     cv::Mat ref_mat = load_mat(ref_path);
     session.set_reference(as_buffer(ref_mat));
-    std::cout << "Reference set: " << ref_path
-              << " (" << ref_mat.cols << "x" << ref_mat.rows
+    std::cout << "Reference set: " << ref_path << " (" << ref_mat.cols << "x" << ref_mat.rows
               << ", " << ref_mat.channels() << "ch)" << std::endl;
 
     // Optional ROI mask (same geometry as the reference).
-    cv::Mat roi_mat;  // declared here so it outlives set_roi()
+    cv::Mat roi_mat; // declared here so it outlives set_roi()
     if (!roi_path.empty() && file_exists(roi_path)) {
         roi_mat = load_mat(roi_path);
         session.set_roi(as_buffer(roi_mat));
@@ -542,35 +564,34 @@ static int run_in_memory(const ProxyConfig& config,
     int failures = 0;
     int frame_index = 0;
     for (const auto& path : frame_paths) {
-        if (path == ref_path) continue;  // skip self if ref is also a frame
+        if (path == ref_path) continue; // skip self if ref is also a frame
 
         cv::Mat def_mat = load_mat(path);
         ncorr::DICResult result = session.process_frame(as_buffer(def_mat));
 
         if (result.valid) {
-            std::cout << "  [frame " << frame_index << "] " << path
-                      << " -> " << result.width << "x" << result.height
-                      << " disp field" << std::endl;
+            std::cout << "  [frame " << frame_index << "] " << path << " -> " << result.width << "x"
+                      << result.height << " disp field" << std::endl;
         } else {
-            std::cerr << "  [frame " << frame_index << "] " << path
-                      << " FAILED: " << result.message << std::endl;
+            std::cerr << "  [frame " << frame_index << "] " << path << " FAILED: " << result.message
+                      << std::endl;
             ++failures;
         }
 
         if (config.save_json) {
             json j = dic_result_to_json(result, frame_index, path);
             std::ostringstream fname;
-            fname << config.output_dir << "/in_memory/frame_"
-                  << std::setw(4) << std::setfill('0') << frame_index << ".json";
+            fname << config.output_dir << "/in_memory/frame_" << std::setw(4) << std::setfill('0')
+                  << frame_index << ".json";
             std::ofstream out(fname.str());
             out << std::setw(2) << j << std::endl;
         }
         ++frame_index;
     }
 
-    std::cout << "\n[IN-MEMORY MODE] Processed " << frame_index << " frame(s), "
-              << failures << " failure(s). Displacement JSON in: "
-              << config.output_dir << "/in_memory" << std::endl;
+    std::cout << "\n[IN-MEMORY MODE] Processed " << frame_index << " frame(s), " << failures
+              << " failure(s). Displacement JSON in: " << config.output_dir << "/in_memory"
+              << std::endl;
 
     return failures == 0 ? 0 : 1;
 }
@@ -598,7 +619,8 @@ void print_usage(const char* prog_name) {
               << "  -p, --units-per-pixel <f>  Units per pixel (default: 0.2)\n"
               << "  --strain-subregion <type>  Strain subregion type (default: CIRCLE)\n"
               << "  --strain-radius <int>      Strain radius (default: 5)\n"
-              << "  -m, --mode <mode>          Algorithm mode: auto, sequential, parallel (default: auto)\n"
+              << "  -m, --mode <mode>          Algorithm mode: auto, sequential, parallel "
+                 "(default: auto)\n"
               << "  --seeds <path>             Path to seeds JSON file (one seed per region)\n"
               << "  --seeds-optimized          Seeds are already optimized (skip optimization)\n"
               << "  -a, --alpha <float>        Video overlay alpha (default: 0.5)\n"
@@ -644,85 +666,132 @@ void print_usage(const char* prog_name) {
 // ============================================================================
 int main(int argc, char* argv[]) {
     ProxyConfig config;
-    
+
     // Long options
-    static struct option long_options[] = {
-        {"folder",          required_argument, 0, 'f'},
-        {"config",          required_argument, 0, 'c'},
-        {"roi",             required_argument, 0, 'r'},
-        {"ref",             required_argument, 0, 'R'},
-        {"output",          required_argument, 0, 'o'},
-        {"scalefactor",     required_argument, 0, 's'},
-        {"interp",          required_argument, 0, 'i'},
-        {"subregion",       required_argument, 0, 'S'},
-        {"radius",          required_argument, 0, 'd'},
-        {"threads",         required_argument, 0, 't'},
-        {"units",           required_argument, 0, 'u'},
-        {"units-per-pixel", required_argument, 0, 'p'},
-        {"strain-subregion",required_argument, 0, 1001},
-        {"strain-radius",   required_argument, 0, 1002},
-        {"mode",            required_argument, 0, 'm'},
-        {"seeds",           required_argument, 0, 1007},
-        {"seeds-optimized", no_argument,       0, 1008},
-        {"alpha",           required_argument, 0, 'a'},
-        {"fps",             required_argument, 0, 'F'},
-        {"no-json",         no_argument,       0, 1003},
-        {"no-binary",       no_argument,       0, 1004},
-        {"no-videos",       no_argument,       0, 1005},
-        {"in-memory",       no_argument,       0, 1009},
-        {"debug",           no_argument,       0, 1006},
-        {"help",            no_argument,       0, 'h'},
-        {0, 0, 0, 0}
-    };
-    
+    static struct option long_options[] = {{"folder", required_argument, 0, 'f'},
+                                           {"config", required_argument, 0, 'c'},
+                                           {"roi", required_argument, 0, 'r'},
+                                           {"ref", required_argument, 0, 'R'},
+                                           {"output", required_argument, 0, 'o'},
+                                           {"scalefactor", required_argument, 0, 's'},
+                                           {"interp", required_argument, 0, 'i'},
+                                           {"subregion", required_argument, 0, 'S'},
+                                           {"radius", required_argument, 0, 'd'},
+                                           {"threads", required_argument, 0, 't'},
+                                           {"units", required_argument, 0, 'u'},
+                                           {"units-per-pixel", required_argument, 0, 'p'},
+                                           {"strain-subregion", required_argument, 0, 1001},
+                                           {"strain-radius", required_argument, 0, 1002},
+                                           {"mode", required_argument, 0, 'm'},
+                                           {"seeds", required_argument, 0, 1007},
+                                           {"seeds-optimized", no_argument, 0, 1008},
+                                           {"alpha", required_argument, 0, 'a'},
+                                           {"fps", required_argument, 0, 'F'},
+                                           {"no-json", no_argument, 0, 1003},
+                                           {"no-binary", no_argument, 0, 1004},
+                                           {"no-videos", no_argument, 0, 1005},
+                                           {"in-memory", no_argument, 0, 1009},
+                                           {"debug", no_argument, 0, 1006},
+                                           {"help", no_argument, 0, 'h'},
+                                           {0, 0, 0, 0}};
+
     std::string config_file = "";
-    
+
     // First pass: check for config file
     int opt;
     int option_index = 0;
-    while ((opt = getopt_long(argc, argv, "f:c:r:R:o:s:i:S:d:t:u:p:m:a:F:h", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "f:c:r:R:o:s:i:S:d:t:u:p:m:a:F:h", long_options,
+                              &option_index)) != -1) {
         if (opt == 'c') {
             config_file = optarg;
             break;
         }
     }
-    
+
     // Load config file if specified
     if (!config_file.empty()) {
         std::cout << "Loading config from: " << config_file << std::endl;
         config = parse_config_file(config_file);
     }
-    
+
     // Reset getopt
     optind = 1;
-    
+
     // Second pass: override with command line arguments
-    while ((opt = getopt_long(argc, argv, "f:c:r:R:o:s:i:S:d:t:u:p:m:a:F:h", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "f:c:r:R:o:s:i:S:d:t:u:p:m:a:F:h", long_options,
+                              &option_index)) != -1) {
         switch (opt) {
-            case 'f': config.folder = optarg; break;
-            case 'c': /* already handled */ break;
-            case 'r': config.roi_path = optarg; break;
-            case 'R': config.ref_path = optarg; break;
-            case 'o': config.output_dir = optarg; break;
-            case 's': config.scalefactor = std::stoi(optarg); break;
-            case 'i': config.interp_type = optarg; break;
-            case 'S': config.subregion_type = optarg; break;
-            case 'd': config.subregion_radius = std::stoi(optarg); break;
-            case 't': config.num_threads = std::stoi(optarg); break;
-            case 'u': config.units = optarg; break;
-            case 'p': config.units_per_pixel = std::stod(optarg); break;
-            case 1001: config.strain_subregion_type = optarg; break;
-            case 1002: config.strain_radius = std::stoi(optarg); break;
-            case 'm': config.algorithm_mode = optarg; break;
-            case 1007: config.seeds_file = optarg; break;
-            case 1008: config.seeds_are_optimized = true; break;
-            case 'a': config.alpha = std::stod(optarg); break;
-            case 'F': config.fps = std::stod(optarg); break;
-            case 1003: config.save_json = false; break;
-            case 1004: config.save_binary = false; break;
-            case 1005: config.save_videos = false; break;
-            case 1009: config.in_memory = true; break;
-            case 1006: config.debug = true; break;
+            case 'f':
+                config.folder = optarg;
+                break;
+            case 'c': /* already handled */
+                break;
+            case 'r':
+                config.roi_path = optarg;
+                break;
+            case 'R':
+                config.ref_path = optarg;
+                break;
+            case 'o':
+                config.output_dir = optarg;
+                break;
+            case 's':
+                config.scalefactor = std::stoi(optarg);
+                break;
+            case 'i':
+                config.interp_type = optarg;
+                break;
+            case 'S':
+                config.subregion_type = optarg;
+                break;
+            case 'd':
+                config.subregion_radius = std::stoi(optarg);
+                break;
+            case 't':
+                config.num_threads = std::stoi(optarg);
+                break;
+            case 'u':
+                config.units = optarg;
+                break;
+            case 'p':
+                config.units_per_pixel = std::stod(optarg);
+                break;
+            case 1001:
+                config.strain_subregion_type = optarg;
+                break;
+            case 1002:
+                config.strain_radius = std::stoi(optarg);
+                break;
+            case 'm':
+                config.algorithm_mode = optarg;
+                break;
+            case 1007:
+                config.seeds_file = optarg;
+                break;
+            case 1008:
+                config.seeds_are_optimized = true;
+                break;
+            case 'a':
+                config.alpha = std::stod(optarg);
+                break;
+            case 'F':
+                config.fps = std::stod(optarg);
+                break;
+            case 1003:
+                config.save_json = false;
+                break;
+            case 1004:
+                config.save_binary = false;
+                break;
+            case 1005:
+                config.save_videos = false;
+                break;
+            case 1009:
+                config.in_memory = true;
+                break;
+            case 1006:
+                config.debug = true;
+                break;
             case 'h':
                 print_usage(argv[0]);
                 return 0;
@@ -731,19 +800,19 @@ int main(int argc, char* argv[]) {
                 return 1;
         }
     }
-    
+
     // Resolve ROI path
     std::string roi_path = config.roi_path;
     if (roi_path.empty()) {
         roi_path = config.folder + "/roi.png";
     }
-    
+
     // Check ROI exists
     if (!file_exists(roi_path)) {
         std::cerr << "Error: ROI file not found: " << roi_path << std::endl;
         return 1;
     }
-    
+
     // Discover frames
     std::cout << "Discovering frames in: " << config.folder << std::endl;
     std::vector<std::string> frame_paths;
@@ -753,14 +822,14 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error: " << e.what() << std::endl;
         return 1;
     }
-    
+
     if (frame_paths.empty()) {
         std::cerr << "Error: No frames found in folder: " << config.folder << std::endl;
         return 1;
     }
-    
+
     std::cout << "Found " << frame_paths.size() << " frames" << std::endl;
-    
+
     // Handle reference image
     std::string ref_path = config.ref_path;
     if (ref_path.empty()) {
@@ -775,18 +844,18 @@ int main(int argc, char* argv[]) {
             std::cout << "Using first frame as reference: " << ref_path << std::endl;
         }
     }
-    
+
     // Build image list: reference first, then all frames
     std::vector<Image2D> imgs;
     imgs.push_back(Image2D(ref_path));
     for (const auto& path : frame_paths) {
-        if (path != ref_path) {  // Don't duplicate if ref is also a frame
+        if (path != ref_path) { // Don't duplicate if ref is also a frame
             imgs.push_back(Image2D(path));
         }
     }
-    
+
     std::cout << "Total images for analysis: " << imgs.size() << std::endl;
-    
+
     // Load seeds if specified
     if (!config.seeds_file.empty()) {
         if (file_exists(config.seeds_file)) {
@@ -797,14 +866,15 @@ int main(int argc, char* argv[]) {
             std::cerr << "Warning: Seeds file not found: " << config.seeds_file << std::endl;
         }
     }
-    
+
     // Print configuration
     std::cout << "\n=== Configuration ===" << std::endl;
     std::cout << "ROI: " << roi_path << std::endl;
     std::cout << "Reference: " << ref_path << std::endl;
     std::cout << "Scale factor: " << config.scalefactor << std::endl;
     std::cout << "Interpolation: " << config.interp_type << std::endl;
-    std::cout << "Subregion: " << config.subregion_type << " (r=" << config.subregion_radius << ")" << std::endl;
+    std::cout << "Subregion: " << config.subregion_type << " (r=" << config.subregion_radius << ")"
+              << std::endl;
     std::cout << "Threads: " << config.num_threads << std::endl;
     std::cout << "Algorithm mode: " << config.algorithm_mode << std::endl;
     if (!config.seeds_by_region.empty()) {
@@ -816,8 +886,10 @@ int main(int argc, char* argv[]) {
         }
         std::cout << std::endl;
     }
-    std::cout << "Units: " << config.units << " (" << config.units_per_pixel << " per pixel)" << std::endl;
-    std::cout << "Strain subregion: " << config.strain_subregion_type << " (r=" << config.strain_radius << ")" << std::endl;
+    std::cout << "Units: " << config.units << " (" << config.units_per_pixel << " per pixel)"
+              << std::endl;
+    std::cout << "Strain subregion: " << config.strain_subregion_type
+              << " (r=" << config.strain_radius << ")" << std::endl;
     std::cout << "Alpha: " << config.alpha << ", FPS: " << config.fps << std::endl;
     std::cout << "=====================\n" << std::endl;
 
@@ -837,40 +909,35 @@ int main(int argc, char* argv[]) {
     DIC_analysis_output DIC_output;
     strain_analysis_input strain_input;
     strain_analysis_output strain_output;
-    
+
     try {
         // Set DIC_input
-        DIC_input = DIC_analysis_input(
-            imgs,
-            ROI2D(Image2D(roi_path).get_gs() > 0.5),
-            config.scalefactor,
-            parse_interp(config.interp_type),
-            parse_subregion(config.subregion_type),
-            config.subregion_radius,
-            config.num_threads,
-            parse_dic_config(config.dic_config),
-            config.debug
-        );
-        
+        DIC_input = DIC_analysis_input(imgs, ROI2D(Image2D(roi_path).get_gs() > 0.5),
+                                       config.scalefactor, parse_interp(config.interp_type),
+                                       parse_subregion(config.subregion_type),
+                                       config.subregion_radius, config.num_threads,
+                                       parse_dic_config(config.dic_config), config.debug);
+
         // Perform DIC analysis based on mode and seeds
         bool has_seeds = !config.seeds_by_region.empty();
         std::string effective_mode = config.algorithm_mode;
-        
+
         // Determine effective mode
         if (effective_mode == "auto") {
             if (has_seeds) {
-                effective_mode = "sequential";  // Use sequential with seeds by default
-                std::cout << "[AUTO MODE] Seeds provided -> using sequential mode with seeds" << std::endl;
+                effective_mode = "sequential"; // Use sequential with seeds by default
+                std::cout << "[AUTO MODE] Seeds provided -> using sequential mode with seeds"
+                          << std::endl;
             } else {
-                effective_mode = "parallel";  // Use parallel (threaded) by default
+                effective_mode = "parallel"; // Use parallel (threaded) by default
                 std::cout << "[AUTO MODE] No seeds -> using parallel (threaded) mode" << std::endl;
             }
         }
-        
+
         // Execute based on effective mode
         if (effective_mode == "sequential") {
             if (has_seeds) {
-                std::cout << "[SEQUENTIAL MODE] Performing DIC analysis with " 
+                std::cout << "[SEQUENTIAL MODE] Performing DIC analysis with "
                           << config.seeds_by_region.size() << " user-provided seed(s)";
                 if (config.seeds_are_optimized) {
                     std::cout << " (pre-optimized, skipping optimization step)";
@@ -879,54 +946,58 @@ int main(int argc, char* argv[]) {
 
                 // Use the unambiguous 3-arg overload (the 1-arg form is ambiguous
                 // because DIC_analysis_parallel_input converts to DIC_analysis_input).
-                DIC_output = DIC_analysis_sequential(DIC_input, config.seeds_by_region, config.seeds_are_optimized);
+                DIC_output = DIC_analysis_sequential(DIC_input, config.seeds_by_region,
+                                                     config.seeds_are_optimized);
             } else {
-                std::cout << "[SEQUENTIAL MODE] Performing DIC analysis with auto-generated seeds..." << std::endl;
+                std::cout
+                    << "[SEQUENTIAL MODE] Performing DIC analysis with auto-generated seeds..."
+                    << std::endl;
                 DIC_output = DIC_analysis_sequential(DIC_input, {}, false);
             }
         } else if (effective_mode == "parallel") {
             if (has_seeds) {
-                std::cout << "[PARALLEL MODE] Performing parallel DIC analysis with " 
+                std::cout << "[PARALLEL MODE] Performing parallel DIC analysis with "
                           << config.seeds_by_region.size() << " user-provided seed(s)";
                 if (config.seeds_are_optimized) {
                     std::cout << " (pre-optimized)";
                 }
                 std::cout << "..." << std::endl;
-                
-                DIC_analysis_parallel_input parallel_input(DIC_input, config.seeds_by_region, config.seeds_are_optimized);
+
+                DIC_analysis_parallel_input parallel_input(DIC_input, config.seeds_by_region,
+                                                           config.seeds_are_optimized);
                 DIC_output = DIC_analysis_parallel(parallel_input);
             } else {
-                std::cout << "[PARALLEL MODE] Performing parallel DIC analysis with auto-generated seeds..." << std::endl;
+                std::cout << "[PARALLEL MODE] Performing parallel DIC analysis with auto-generated "
+                             "seeds..."
+                          << std::endl;
                 DIC_output = DIC_analysis(DIC_input);
             }
         } else {
-            throw std::runtime_error("Unknown algorithm mode: " + effective_mode + ". Use: auto, sequential, or parallel");
+            throw std::runtime_error("Unknown algorithm mode: " + effective_mode +
+                                     ". Use: auto, sequential, or parallel");
         }
-        
+
         // Convert to Eulerian perspective
         std::cout << "Converting to Eulerian perspective..." << std::endl;
         DIC_output = change_perspective(DIC_output, parse_interp(config.perspective_interp));
-        
+
         // Set units
         DIC_output = set_units(DIC_output, config.units, config.units_per_pixel);
-        
+
         // Set strain input
-        strain_input = strain_analysis_input(
-            DIC_input,
-            DIC_output,
-            parse_subregion(config.strain_subregion_type),
-            config.strain_radius
-        );
-        
+        strain_input = strain_analysis_input(DIC_input, DIC_output,
+                                             parse_subregion(config.strain_subregion_type),
+                                             config.strain_radius);
+
         // Perform strain analysis
         std::cout << "Performing strain analysis..." << std::endl;
         strain_output = strain_analysis(strain_input);
-        
+
         // Create output directories
         system(("mkdir -p " + config.output_dir + "/save").c_str());
         system(("mkdir -p " + config.output_dir + "/save_json").c_str());
         system(("mkdir -p " + config.output_dir + "/video").c_str());
-        
+
         // Save outputs
         if (config.save_binary) {
             std::cout << "Saving binary outputs..." << std::endl;
@@ -935,44 +1006,39 @@ int main(int argc, char* argv[]) {
             save(strain_input, config.output_dir + "/save/strain_input.bin");
             save(strain_output, config.output_dir + "/save/strain_output.bin");
         }
-        
+
         if (config.save_json) {
             std::cout << "Saving JSON outputs..." << std::endl;
-            save_as_json(DIC_input, DIC_output, strain_input, strain_output, 
-                        config.output_dir + "/save_json");
+            save_as_json(DIC_input, DIC_output, strain_input, strain_output,
+                         config.output_dir + "/save_json");
         }
-        
+
         // Create videos
         if (config.save_videos) {
             std::cout << "Creating videos..." << std::endl;
-            
-            save_DIC_video(config.output_dir + "/video/v_eulerian.avi",
-                          DIC_input, DIC_output, DISP::V,
-                          config.alpha, config.fps);
-            
-            save_DIC_video(config.output_dir + "/video/u_eulerian.avi",
-                          DIC_input, DIC_output, DISP::U,
-                          config.alpha, config.fps);
-            
-            save_strain_video(config.output_dir + "/video/eyy_eulerian.avi",
-                             strain_input, strain_output, STRAIN::EYY,
-                             config.alpha, config.fps);
-            
-            save_strain_video(config.output_dir + "/video/exy_eulerian.avi",
-                             strain_input, strain_output, STRAIN::EXY,
-                             config.alpha, config.fps);
-            
-            save_strain_video(config.output_dir + "/video/exx_eulerian.avi",
-                             strain_input, strain_output, STRAIN::EXX,
-                             config.alpha, config.fps);
+
+            save_DIC_video(config.output_dir + "/video/v_eulerian.avi", DIC_input, DIC_output,
+                           DISP::V, config.alpha, config.fps);
+
+            save_DIC_video(config.output_dir + "/video/u_eulerian.avi", DIC_input, DIC_output,
+                           DISP::U, config.alpha, config.fps);
+
+            save_strain_video(config.output_dir + "/video/eyy_eulerian.avi", strain_input,
+                              strain_output, STRAIN::EYY, config.alpha, config.fps);
+
+            save_strain_video(config.output_dir + "/video/exy_eulerian.avi", strain_input,
+                              strain_output, STRAIN::EXY, config.alpha, config.fps);
+
+            save_strain_video(config.output_dir + "/video/exx_eulerian.avi", strain_input,
+                              strain_output, STRAIN::EXX, config.alpha, config.fps);
         }
-        
+
         std::cout << "\nAnalysis complete! Results saved to: " << config.output_dir << std::endl;
-        
+
     } catch (const std::exception& e) {
         std::cerr << "Error during analysis: " << e.what() << std::endl;
         return 1;
     }
-    
+
     return 0;
 }
