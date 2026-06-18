@@ -43,22 +43,29 @@ const char* baseName(const char* path) {
 
 const char* colorFor(Level l) {
     switch (l) {
-        case Level::Trace: return "\033[37m";  // grey
-        case Level::Debug: return "\033[36m";  // cyan
-        case Level::Info: return "\033[32m";   // green
-        case Level::Warn: return "\033[33m";   // yellow
-        case Level::Error: return "\033[31m";  // red
-        default: return "";
+        case Level::Trace:
+            return "\033[37m"; // grey
+        case Level::Debug:
+            return "\033[36m"; // cyan
+        case Level::Info:
+            return "\033[32m"; // green
+        case Level::Warn:
+            return "\033[33m"; // yellow
+        case Level::Error:
+            return "\033[31m"; // red
+        default:
+            return "";
     }
 }
-const char* colorReset() { return "\033[0m"; }
+const char* colorReset() {
+    return "\033[0m";
+}
 
 std::string timestamp() {
     using namespace std::chrono;
     const auto now = system_clock::now();
     const auto t = system_clock::to_time_t(now);
-    const auto ms =
-        duration_cast<milliseconds>(now.time_since_epoch()).count() % 1000;
+    const auto ms = duration_cast<milliseconds>(now.time_since_epoch()).count() % 1000;
     std::tm tm_buf{};
 #if defined(_WIN32)
     localtime_s(&tm_buf, &t);
@@ -84,7 +91,7 @@ std::string rtrim(const std::string& s) {
     return s.substr(0, end);
 }
 
-}  // namespace
+} // namespace
 
 Level levelFromString(const std::string& s, Level fallback) {
     const std::string v = toLower(s);
@@ -99,12 +106,18 @@ Level levelFromString(const std::string& s, Level fallback) {
 
 const char* levelName(Level l) {
     switch (l) {
-        case Level::Trace: return "TRACE";
-        case Level::Debug: return "DEBUG";
-        case Level::Info: return "INFO ";
-        case Level::Warn: return "WARN ";
-        case Level::Error: return "ERROR";
-        case Level::Off: return "OFF  ";
+        case Level::Trace:
+            return "TRACE";
+        case Level::Debug:
+            return "DEBUG";
+        case Level::Info:
+            return "INFO ";
+        case Level::Warn:
+            return "WARN ";
+        case Level::Error:
+            return "ERROR";
+        case Level::Off:
+            return "OFF  ";
     }
     return "?????";
 }
@@ -114,7 +127,9 @@ Logger& Logger::instance() {
     return logger;
 }
 
-Logger::Logger() { color_ = CPPXDIC_ISATTY(CPPXDIC_FILENO(stderr)) != 0; }
+Logger::Logger() {
+    color_ = CPPXDIC_ISATTY(CPPXDIC_FILENO(stderr)) != 0;
+}
 
 void Logger::ensureEnv() {
     if (!env_done_) {
@@ -201,15 +216,19 @@ void Logger::write(Level l, const char* file, int line, const std::string& msg) 
     }
 
     if (file_.is_open() && l >= file_level_) {
-        file_ << timestamp() << " [" << levelName(l) << "] " << fname << ":" << line
-              << " " << text << "\n";
+        file_ << timestamp() << " [" << levelName(l) << "] " << fname << ":" << line << " " << text
+              << "\n";
         file_.flush();
     }
 }
 
-void setLevel(Level l) { Logger::instance().setConsoleLevel(l); }
+void setLevel(Level l) {
+    Logger::instance().setConsoleLevel(l);
+}
 
-bool setFile(const std::string& path) { return Logger::instance().setFile(path); }
+bool setFile(const std::string& path) {
+    return Logger::instance().setFile(path);
+}
 
 void configureFromOptions(const Options& opts) {
     Logger& lg = Logger::instance();
@@ -253,5 +272,5 @@ void configureFromOptions(const Options& opts) {
 #endif
 }
 
-}  // namespace log
-}  // namespace cppxdic
+} // namespace log
+} // namespace cppxdic

@@ -3,7 +3,6 @@
  */
 
 #include "dic_analysis.h"
-#include "profiling.h"
 #include "mat_reader.h"
 #include "utils.h"
 #include "step_d_workflow.h"
@@ -1381,8 +1380,7 @@ bool DicAnalysis::run(const std::vector<int>& trial_target) {
         LOG_INFO << "\n=== STEP D: 2D-DIC ===";
         LOG_INFO << "Running 2D DIC analysis...";
         auto start = std::chrono::high_resolution_clock::now();
-        bool success;
-        { XPROF_SCOPE("STEP_D_total"); success = dic2DAnalysis(trial_target); }
+        bool success = dic2DAnalysis(trial_target);
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
         
@@ -1406,8 +1404,7 @@ bool DicAnalysis::run(const std::vector<int>& trial_target) {
         }
         LOG_INFO << "Running 3D reconstruction...";
         auto start = std::chrono::high_resolution_clock::now();
-        bool success;
-        { XPROF_SCOPE("STEP_E_total"); success = dic3DReconstruction(trial_target); }
+        bool success = dic3DReconstruction(trial_target);
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
         
@@ -1431,8 +1428,7 @@ bool DicAnalysis::run(const std::vector<int>& trial_target) {
         }
         LOG_INFO << "Running deformation analysis...";
         auto start = std::chrono::high_resolution_clock::now();
-        bool success;
-        { XPROF_SCOPE("STEP_F_total"); success = dicDeformationAnalysis(trial_target); }
+        bool success = dicDeformationAnalysis(trial_target);
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
         

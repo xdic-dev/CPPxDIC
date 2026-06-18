@@ -97,11 +97,11 @@ private:
 /// Aggregated options resolved from env/config/CLI, applied in one call.
 struct Options {
     Level console_level = Level::Info;
-    bool console_level_set = false;  ///< true if an explicit level was chosen
-    std::string log_file;            ///< empty = no file sink
-    bool debug = false;              ///< debug mode (Debug level + verbose format)
-    bool quiet = false;              ///< force console threshold up to Warn
-    int verbose = 0;                 ///< -V count: lowers threshold per step
+    bool console_level_set = false; ///< true if an explicit level was chosen
+    std::string log_file;           ///< empty = no file sink
+    bool debug = false;             ///< debug mode (Debug level + verbose format)
+    bool quiet = false;             ///< force console threshold up to Warn
+    int verbose = 0;                ///< -V count: lowers threshold per step
 };
 
 /// Apply env vars, then the supplied options (CLI/config), to the singleton.
@@ -112,7 +112,9 @@ void configureFromOptions(const Options& opts);
 /// Convenience accessors.
 void setLevel(Level l);
 bool setFile(const std::string& path);
-inline bool enabled(Level l) { return Logger::instance().enabled(l); }
+inline bool enabled(Level l) {
+    return Logger::instance().enabled(l);
+}
 
 /**
  * @brief RAII stream builder; flushes accumulated text to the logger when it is
@@ -120,8 +122,7 @@ inline bool enabled(Level l) { return Logger::instance().enabled(l); }
  */
 class Stream {
 public:
-    Stream(Level level, const char* file, int line)
-        : level_(level), file_(file), line_(line) {}
+    Stream(Level level, const char* file, int line) : level_(level), file_(file), line_(line) {}
     ~Stream() { Logger::instance().write(level_, file_, line_, oss_.str()); }
 
     Stream(const Stream&) = delete;
@@ -154,16 +155,15 @@ public:
     void operator&(Stream&) {}
 };
 
-}  // namespace log
-}  // namespace cppxdic
+} // namespace log
+} // namespace cppxdic
 
 // Stream-style logging macros. When the level is disabled, the right-hand side
 // (message construction) is never evaluated.
-#define LOG_AT(lvl)                                                            \
-    !::cppxdic::log::enabled(lvl)                                              \
-        ? (void)0                                                             \
-        : ::cppxdic::log::Voidify() &                                         \
-              ::cppxdic::log::Stream((lvl), __FILE__, __LINE__)
+#define LOG_AT(lvl)               \
+    !::cppxdic::log::enabled(lvl) \
+        ? (void)0                 \
+        : ::cppxdic::log::Voidify() & ::cppxdic::log::Stream((lvl), __FILE__, __LINE__)
 
 #define LOG_TRACE LOG_AT(::cppxdic::log::Level::Trace)
 #define LOG_DEBUG LOG_AT(::cppxdic::log::Level::Debug)
@@ -171,4 +171,4 @@ public:
 #define LOG_WARN LOG_AT(::cppxdic::log::Level::Warn)
 #define LOG_ERROR LOG_AT(::cppxdic::log::Level::Error)
 
-#endif  // CPPXDIC_LOGGING_H
+#endif // CPPXDIC_LOGGING_H
