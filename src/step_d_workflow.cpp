@@ -5,6 +5,7 @@
  */
 
 #include "step_d_workflow.h"
+#include "profiling.h"
 #include "Array2D.h"
 #include "mat_writer.h"
 #include "mat_reader.h"
@@ -13,6 +14,7 @@
 #include "ncorr.h"
 #include "utils.h"
 #include "matlab_functions.h"
+#include "logging.h"
 #include <iostream>
 #include <opencv2/imgcodecs.hpp>
 #include <sstream>
@@ -101,9 +103,9 @@ StepDWorkflow::StepDWorkflow(const Config& config) : config_(config) {
 
 std::tuple<std::string, std::vector<int>, bool> 
 StepDWorkflow::execute(const std::string& trial, int stereopair) {
-    std::cout << "-------------------------------------------" << std::endl;
-    std::cout << "-------------------------------------------" << std::endl;
-    std::cout << "Digital Image Correlation analysis launch" << std::endl;
+    LOG_INFO << "-------------------------------------------";
+    LOG_INFO << "-------------------------------------------";
+    LOG_INFO << "Digital Image Correlation analysis launch";
     
     // CHECKPOINT SYSTEM (matching MATLAB implementation):
     // The following checkpoint files are checked/created to avoid redundant computation:
@@ -118,61 +120,69 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     // I. Preps analysis
     // 1. Load protocol and determine reference trial
     if (!loadProtocol()) {
-        std::cerr << "Failed to load protocol" << std::endl;
+        LOG_ERROR << "Failed to load protocol";
         return {"", {}, false};
     }
-    
+
     std::string reftrial = determineReferenceTrial(trial);
-    std::cout << "Reference trial: " << reftrial << std::endl;
+    LOG_INFO << "Reference trial: " << reftrial;
     
     // 2. Setup parameters
     setupBaseParameters(trial, stereopair, reftrial);
     
     // 3. Import video frames
     std::vector<cv::Mat> cam_first_raw, cam_second_raw;
-    std::cout << "Reading video data... ";
-    if (!importVideoFrames(trial, stereopair, cam_first_raw, cam_second_raw)) {
-        std::cerr << "Failed to import video frames" << std::endl;
+    LOG_INFO << "Reading video data... ";
+    bool import_ok;
+    { XPROF_SCOPE("D.preproc.import_video");
+      import_ok = importVideoFrames(trial, stereopair, cam_first_raw, cam_second_raw); }
+    if (!import_ok) {
+        LOG_ERROR << "Failed to import video frames";
         return {"", {}, false};
     }
-    std::cout << "Reading done. Frames: " << cam_first_raw.size() << std::endl;
+    LOG_INFO << "Reading done. Frames: " << cam_first_raw.size();
     
     // 4. Phase-specific frame selection
     if (config_.phase_id == "slide1") {
         size_t keep = cam_first_raw.size() / 2 + 5;
         cam_first_raw.resize(keep);
         cam_second_raw.resize(keep);
-        std::cout << "Phase 'slide1': keeping " << keep << " frames" << std::endl;
+        LOG_INFO << "Phase 'slide1': keeping " << keep << " frames";
     }
     
     // 5. Saturation
     std::vector<cv::Mat> cam_first_satur, cam_second_satur;
-    std::cout << "Applying saturation..." << std::endl;
-    performSaturation(cam_first_raw, cam_second_raw, cam_first_satur, cam_second_satur);
+    LOG_INFO << "Applying saturation...";
+    { XPROF_SCOPE("D.preproc.saturation");
+      performSaturation(cam_first_raw, cam_second_raw, cam_first_satur, cam_second_satur); }
     
     // II. ROI, Seed, and Matching REF to Trial at frame 1
     cv::Mat refmask_REF, refmask_trial;
     SeedPoint ref_seed_point, initial_seed_point_set1;
-    std::cout << "Initializing ROI, seed, and matching REF to Trial..." << std::endl;
-    if (!initializeROIAndSeed(cam_first_satur, refmask_REF, refmask_trial,
-                             ref_seed_point, initial_seed_point_set1)) {
-        std::cerr << "Failed to initialize ROI and seed" << std::endl;
+    LOG_INFO << "Initializing ROI, seed, and matching REF to Trial...";
+    bool roi_ok;
+    { XPROF_SCOPE("D.preproc.roi_seed_match");
+      roi_ok = initializeROIAndSeed(cam_first_satur, refmask_REF, refmask_trial,
+                                    ref_seed_point, initial_seed_point_set1); }
+    if (!roi_ok) {
+        LOG_ERROR << "Failed to initialize ROI and seed";
         return {"", {}, false};
     }
 
-    std::cout << "--> STEP: ROI loaded and formatted" << std::endl;
-    std::cout << "--> STEP: SEED loaded and formatted" << std::endl;
-    std::cout << "--> STEP: Matching REF to Trial loaded and formatted" << std::endl;
+    LOG_INFO << "--> STEP: ROI loaded and formatted";
+    LOG_INFO << "--> STEP: SEED loaded and formatted";
+    LOG_INFO << "--> STEP: Matching REF to Trial loaded and formatted";
     
     // post-III. Image filtering
     std::vector<cv::Mat> cam_first, cam_second;
     if(config_.im_filter_mode) {
-        std::cout << "Applying image filtering..." << std::endl;
-        applyImageFiltering(cam_first_satur, cam_second_satur, refmask_trial,
-                           cam_first, cam_second);
-        std::cout << "--> STEP: filtering done" << std::endl;
+        LOG_INFO << "Applying image filtering...";
+        { XPROF_SCOPE("D.preproc.filtering");
+          applyImageFiltering(cam_first_satur, cam_second_satur, refmask_trial,
+                             cam_first, cam_second); }
+        LOG_INFO << "--> STEP: filtering done";
     } else {
-        std::cout << "Skipping image filtering" << std::endl;
+        LOG_INFO << "Skipping image filtering";
         cam_first = cam_first_satur;
         cam_second = cam_second_satur;
     }
@@ -180,11 +190,14 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     // III. Matching inside a Trial between cameras (cam1 -> cam2 at frame 1)
     cv::Mat refmask_trial_matched;
     SeedPoint initial_seed_point_set2;
-    std::cout << "\nPerforming camera matching..." << std::endl;
-    if (!performMatching(cam_first_satur, cam_second_satur, refmask_trial,
-                        initial_seed_point_set1, refmask_trial_matched,
-                        initial_seed_point_set2)) {
-        std::cerr << "Failed matching step" << std::endl;
+    LOG_INFO << "\nPerforming camera matching...";
+    bool match_ok;
+    { XPROF_SCOPE("D.matching_cams");
+      match_ok = performMatching(cam_first_satur, cam_second_satur, refmask_trial,
+                                 initial_seed_point_set1, refmask_trial_matched,
+                                 initial_seed_point_set2); }
+    if (!match_ok) {
+        LOG_ERROR << "Failed matching step";
         return {"", {}, false};
     }
     
@@ -192,16 +205,22 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     saveTrialInfo(trial, stereopair, cam_first.size());
     
     // V. Tracking camera 1
-    std::cout << "\nPerforming tracking camera 1..." << std::endl;
-    if (!performTracking1(cam_first, refmask_trial, initial_seed_point_set1)) {
-        std::cerr << "Failed tracking1 step" << std::endl;
+    LOG_INFO << "\nPerforming tracking camera 1...";
+    bool track1_ok;
+    { XPROF_SCOPE("D.tracking1");
+      track1_ok = performTracking1(cam_first, refmask_trial, initial_seed_point_set1); }
+    if (!track1_ok) {
+        LOG_ERROR << "Failed tracking1 step";
         return {"", {}, false};
     }
     
     // VI. Tracking camera 2
-    std::cout << "\nPerforming tracking camera 2..." << std::endl;
-    if (!performTracking2(cam_second, refmask_trial_matched, initial_seed_point_set2)) {
-        std::cerr << "Failed tracking2 step" << std::endl;
+    LOG_INFO << "\nPerforming tracking camera 2...";
+    bool track2_ok;
+    { XPROF_SCOPE("D.tracking2");
+      track2_ok = performTracking2(cam_second, refmask_trial_matched, initial_seed_point_set2); }
+    if (!track2_ok) {
+        LOG_ERROR << "Failed tracking2 step";
         return {"", {}, false};
     }
     
@@ -217,10 +236,11 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     }
 
     // Post-preps. Format output
-    formatOutput(trial, stereopair, pairOrder, pairForced);
+    { XPROF_SCOPE("D.format_output");
+      formatOutput(trial, stereopair, pairOrder, pairForced); }
     
-    std::cout << "--> STEP: Ncorr analysis completed" << std::endl;
-    
+    LOG_INFO << "--> STEP: Ncorr analysis completed";
+
     return {base_params_.outputPath, pairOrder, pairForced};
 }
 
@@ -290,23 +310,23 @@ void StepDWorkflow::setupStepParameters() {
 bool StepDWorkflow::loadProtocol() {
     // Load protocol MAT file
     std::string protocol_dir = Utils::buildProtocolDir(config_, true, true, true, true);
-    std::cout << "protocol_path: " << protocol_dir << std::endl;
-    
+    LOG_INFO << "protocol_path: " << protocol_dir;
+
     // Find MAT file in protocol directory
     auto mat_files = Utils::findFiles(protocol_dir, "*.mat");
-    
+
     if (mat_files.empty()) {
-        std::cerr << "No protocol file found in: " << protocol_dir << std::endl;
+        LOG_ERROR << "No protocol file found in: " << protocol_dir;
         return false;
     }
-    
+
     // Load first MAT file found using MatReader
     std::string protocol_file = mat_files[0];
-    std::cout << "Loading protocol: " << protocol_file << std::endl;
-    
+    LOG_INFO << "Loading protocol: " << protocol_file;
+
     cppxdic::ProtocolFileData protocol_data;
     if (!MatReader::loadProtocol(protocol_file, protocol_data)) {
-        std::cerr << "Failed to parse protocol file: " << protocol_file << std::endl;
+        LOG_ERROR << "Failed to parse protocol file: " << protocol_file;
         return false;
     }
     
@@ -334,13 +354,13 @@ bool StepDWorkflow::loadProtocol() {
         protocol_info_.spddxlcond.push_back(0.08);
     }
     
-    std::cout << "Protocol loaded: " << protocol_data.trials.size() << " trials" << std::endl;
+    LOG_INFO << "Protocol loaded: " << protocol_data.trials.size() << " trials";
     if (config_.debug_mode) {
         for (size_t i = 1; i < protocol_info_.dircond.size(); ++i) {
-            std::cout << "  Trial " << i << ": dir=" << protocol_info_.dircond[i]
+            LOG_DEBUG << "  Trial " << i << ": dir=" << protocol_info_.dircond[i]
                       << " nf=" << protocol_info_.nfcond[i]
                       << " spd=" << protocol_info_.spdcond[i]
-                      << " rep=" << protocol_info_.repcond[i] << std::endl;
+                      << " rep=" << protocol_info_.repcond[i];
         }
     }
     return true;
@@ -351,7 +371,7 @@ std::string StepDWorkflow::determineReferenceTrial(const std::string& trial) {
     if (config_.ref_trial_id > 0) {
         std::ostringstream oss;
         oss << std::setw(3) << std::setfill('0') << config_.ref_trial_id;
-        std::cout << "Reference trial (manual override): " << oss.str() << std::endl;
+        LOG_INFO << "Reference trial (manual override): " << oss.str();
         return oss.str();
     }
     
@@ -368,7 +388,7 @@ std::string StepDWorkflow::determineReferenceTrial(const std::string& trial) {
                     protocol_info_.dircond[i] == "Ubnf") {
                     std::ostringstream oss;
                     oss << std::setw(3) << std::setfill('0') << i;
-                    std::cout << "Reference trial (nf=1, Ubnf): " << oss.str() << std::endl;
+                    LOG_INFO << "Reference trial (nf=1, Ubnf): " << oss.str();
                     return oss.str();
                 }
             }
@@ -380,20 +400,20 @@ std::string StepDWorkflow::determineReferenceTrial(const std::string& trial) {
                     protocol_info_.dircond[i] == "Ubnf") {
                     std::ostringstream oss;
                     oss << std::setw(3) << std::setfill('0') << i;
-                    std::cout << "Reference trial (nf=5, Ubnf): " << oss.str() << std::endl;
+                    LOG_INFO << "Reference trial (nf=5, Ubnf): " << oss.str();
                     return oss.str();
                 }
             }
         }
         
-        std::cerr << "Warning: No matching reference trial found for trial " << trial
-                  << " (phase=" << config_.phase_id << ", nf=" << trial_nf << ")" << std::endl;
+        LOG_WARN << "No matching reference trial found for trial " << trial
+                  << " (phase=" << config_.phase_id << ", nf=" << trial_nf << ")";
     } else {
-        std::cerr << "Warning: Trial index " << trial_idx << " out of protocol range" << std::endl;
+        LOG_WARN << "Trial index " << trial_idx << " out of protocol range";
     }
-    
+
     // Fallback to current trial
-    std::cout << "Reference trial (fallback): " << trial << std::endl;
+    LOG_INFO << "Reference trial (fallback): " << trial;
     return trial;
 }
 
@@ -409,22 +429,22 @@ bool StepDWorkflow::importVideoFrames(const std::string& trial,
     
     // Import video frames using Utils
     if (!Utils::importVid(config_, trial_num, stereopair, cam1_frames, cam2_frames)) {
-        std::cerr << "Failed to import video frames for trial " << trial 
-                  << " stereopair " << stereopair << std::endl;
+        LOG_ERROR << "Failed to import video frames for trial " << trial
+                  << " stereopair " << stereopair;
         return false;
     }
-    
+
     // Check that we got frames
     if (cam1_frames.empty() || cam2_frames.empty()) {
-        std::cerr << "No frames imported for trial " << trial 
-                  << " stereopair " << stereopair << std::endl;
+        LOG_ERROR << "No frames imported for trial " << trial
+                  << " stereopair " << stereopair;
         return false;
     }
-    
+
     // Check frame count consistency
     if (cam1_frames.size() != cam2_frames.size()) {
-        std::cerr << "Frame count mismatch: cam1=" << cam1_frames.size() 
-                  << " cam2=" << cam2_frames.size() << std::endl;
+        LOG_ERROR << "Frame count mismatch: cam1=" << cam1_frames.size()
+                  << " cam2=" << cam2_frames.size();
         return false;
     }
     
@@ -438,14 +458,14 @@ bool StepDWorkflow::importVideoFrames(const std::string& trial,
         // Load first camera frame
         cv::Mat img1 = cv::imread(cam1_frames[i], cv::IMREAD_GRAYSCALE);
         if (img1.empty()) {
-            std::cerr << "Failed to load frame: " << cam1_frames[i] << std::endl;
+            LOG_ERROR << "Failed to load frame: " << cam1_frames[i];
             return false;
         }
         
         // Load second camera frame
         cv::Mat img2 = cv::imread(cam2_frames[i], cv::IMREAD_GRAYSCALE);
         if (img2.empty()) {
-            std::cerr << "Failed to load frame: " << cam2_frames[i] << std::endl;
+            LOG_ERROR << "Failed to load frame: " << cam2_frames[i];
             return false;
         }
         
@@ -453,7 +473,7 @@ bool StepDWorkflow::importVideoFrames(const std::string& trial,
         cam_second_raw.push_back(img2);
     }
     
-    std::cout << "Loaded " << cam_first_raw.size() << " frames for each camera" << std::endl;
+    LOG_INFO << "Loaded " << cam_first_raw.size() << " frames for each camera";
     return true;
 }
 
@@ -486,17 +506,17 @@ bool StepDWorkflow::initializeROIAndSeed(const std::vector<cv::Mat>& cam_first_s
     // Check for MATCHING file (ncorr binary, saved directly in output dir)
     if (!std::filesystem::exists(base_params_.matchingfile)) {
         // No matching file - compute it
-        std::cout << "\n--> STEP: MATCHING file computation)" << std::endl;
+        LOG_INFO << "\n--> STEP: MATCHING file computation)";
         std::vector<cv::Mat> reftrial_cam_second_raw;
-        std::cout << "Reading REF Trial video data..." << std::endl;
-        if (!importVideoFrames(base_params_.reftrial, 
-                            base_params_.stereopair, 
-                            reftrial_cam_first_raw, 
+        LOG_INFO << "Reading REF Trial video data...";
+        if (!importVideoFrames(base_params_.reftrial,
+                            base_params_.stereopair,
+                            reftrial_cam_first_raw,
                             reftrial_cam_second_raw)) {
-            std::cerr << "Failed to import REF Trial video frames" << std::endl;
+            LOG_ERROR << "Failed to import REF Trial video frames";
             return false;
         }
-        std::cout << "Reading REF Trial video data done. Frames: " << reftrial_cam_first_raw.size() << std::endl;
+        LOG_INFO << "Reading REF Trial video data done. Frames: " << reftrial_cam_first_raw.size();
         
         std::ostringstream message_oss;
         message_oss << "Matching Pair " << base_params_.stereopair << ": trial " << base_params_.reftrial << "'s frame 1 TO trial " << base_params_.trial << "'s frame 1";
@@ -511,8 +531,8 @@ bool StepDWorkflow::initializeROIAndSeed(const std::vector<cv::Mat>& cam_first_s
             return false;
         }
     } else {
-        std::cout << "Checkpoint found: " << base_params_.matchingfile << std::endl;
-        std::cout << "--> STEP: MATCHING file loaded from checkpoint (skipped computation)" << std::endl;
+        LOG_INFO << "Checkpoint found: " << base_params_.matchingfile;
+        LOG_INFO << "--> STEP: MATCHING file loaded from checkpoint (skipped computation)";
     }
 
     // Load matching displacement fields from ncorr binary to map seed point
@@ -521,7 +541,7 @@ bool StepDWorkflow::initializeROIAndSeed(const std::vector<cv::Mat>& cam_first_s
 
         if (updateMaskAndSeedFromOutput(refmask_REF, ref_seed_point, dic_output,
                                         refmask_trial, after_disp_seed_point)) {
-            std::cout << "--> STEP: MATCHING transformation applied" << std::endl;
+            LOG_INFO << "--> STEP: MATCHING transformation applied";
             if (config_.debug_mode) {
                 if (reftrial_cam_first_raw.empty()) {
                     std::vector<cv::Mat> reftrial_cam_second_raw;
@@ -541,11 +561,11 @@ bool StepDWorkflow::initializeROIAndSeed(const std::vector<cv::Mat>& cam_first_s
             }
             return true;
         } else {
-            std::cerr << "Warning: MATCHING file has no displacements" << std::endl;
+            LOG_WARN << "MATCHING file has no displacements";
         }
     }
-    
-    std::cerr << "Warning: Something went wrong for the MATCHING" << std::endl;
+
+    LOG_WARN << "Something went wrong for the MATCHING";
     return false;
 }
 
@@ -557,7 +577,7 @@ bool StepDWorkflow::matchingInitialFrame(const std::vector<cv::Mat>& cam_ref,
                                    const SeedPoint& ref_seed_point,
                                    cv::Mat& refmask_cur_matched,
                                    SeedPoint& after_disp_seed_point) {
-    std::cout << message << std::endl;
+    LOG_INFO << message;
     
     // MATLAB uses a two-frame current stack during matching to avoid an ncorr edge case.
     std::vector<cv::Mat> cur_imgs;
@@ -578,11 +598,11 @@ bool StepDWorkflow::matchingInitialFrame(const std::vector<cv::Mat>& cam_ref,
 
     if (!updateMaskAndSeedFromOutput(refmask_ref, ref_seed_point, dic_output,
                                      refmask_cur_matched, after_disp_seed_point)) {
-        std::cerr << "No displacement output from matching" << std::endl;
+        LOG_ERROR << "No displacement output from matching";
         return false;
     }
 
-    std::cout << "--> STEP: " << message << " done" << std::endl;
+    LOG_INFO << "--> STEP: " << message << " done";
     return true;
 }
 
@@ -592,7 +612,7 @@ bool StepDWorkflow::performMatching(const std::vector<cv::Mat>& cam_first_satur,
                                    SeedPoint& ref_seed_point,
                                    cv::Mat& after_disp_mask,
                                    SeedPoint& after_disp_seed_point) {
-    std::cout << "MATCHING STEP - RUN #1" << std::endl;
+    LOG_INFO << "MATCHING STEP - RUN #1";
     
     // Get camera numbers
     int cam_1, cam_2;
@@ -604,7 +624,7 @@ bool StepDWorkflow::performMatching(const std::vector<cv::Mat>& cam_first_satur,
     
     // Compute matching if output doesn't exist
     if (!std::filesystem::exists(ncorr_matching_path)) {
-        std::cout << "\n--> STEP: MATCHING file computation)" << std::endl;
+        LOG_INFO << "\n--> STEP: MATCHING file computation)";
 
         std::ostringstream message_oss;
         message_oss << "Matching Inside Camera Pair (1-2) : Cam1's frame 1 VS cam2's frame 1";
@@ -618,8 +638,8 @@ bool StepDWorkflow::performMatching(const std::vector<cv::Mat>& cam_first_satur,
                             after_disp_mask, 
                             after_disp_seed_point);
     } else {
-        std::cout << "Checkpoint found: " << ncorr_matching_path << std::endl;
-        std::cout << "--> STEP: MATCHING loaded from checkpoint (skipped computation)" << std::endl;
+        LOG_INFO << "Checkpoint found: " << ncorr_matching_path;
+        LOG_INFO << "--> STEP: MATCHING loaded from checkpoint (skipped computation)";
     }
 
     // Load matching displacement fields from ncorr binary to map seed point
@@ -628,7 +648,7 @@ bool StepDWorkflow::performMatching(const std::vector<cv::Mat>& cam_first_satur,
 
         if (updateMaskAndSeedFromOutput(refmask, ref_seed_point, dic_output,
                                         after_disp_mask, after_disp_seed_point)) {
-            std::cout << "--> STEP: MATCHING transformation applied" << std::endl;
+            LOG_INFO << "--> STEP: MATCHING transformation applied";
             if (config_.debug_mode) {
                 writeMatchingDebugPanel("icm",
                                         cam_first_satur[0],
@@ -641,11 +661,11 @@ bool StepDWorkflow::performMatching(const std::vector<cv::Mat>& cam_first_satur,
             }
             return true;
         } else {
-            std::cerr << "Warning: Matching file has no displacements" << std::endl;
+            LOG_WARN << "Matching file has no displacements";
         }
     }
-    
-    std::cerr << "Warning: Something went wrong with the matching" << std::endl;
+
+    LOG_WARN << "Something went wrong with the matching";
     return false;
 }
 
@@ -659,14 +679,14 @@ bool StepDWorkflow::performTracking(const int tracking_number,
 
     auto cam_number = tracking_number == 1 ? cam_1 : cam_2;
 
-    std::cout << "\nTRACKING STEP " << tracking_number << std::endl;
+    LOG_INFO << "\nTRACKING STEP " << tracking_number;
     
     std::string output_path = base_params_.outputPath + "/ncorr" + std::to_string(cam_number) + ".bin";
     
     // Checkpoint: Check if ncorr binary already exists
     if (std::filesystem::exists(output_path)) {
-        std::cout << "Checkpoint found: " << output_path << std::endl;
-        std::cout << "--> STEP: Ncorr " << cam_number << " loaded from checkpoint (skipped computation)" << std::endl;
+        LOG_INFO << "Checkpoint found: " << output_path;
+        LOG_INFO << "--> STEP: Ncorr " << cam_number << " loaded from checkpoint (skipped computation)";
         return true;
     }
     
@@ -686,29 +706,29 @@ bool StepDWorkflow::performTracking(const int tracking_number,
         cur_frames.erase(cur_frames.begin());
     }
     if (cur_frames.empty()) {
-        std::cerr << "No current frames available for tracking " << tracking_number << std::endl;
+        LOG_ERROR << "No current frames available for tracking " << tracking_number;
         return false;
     }
-    
+
     runNcorrAnalysis(cam_frames[0], cur_frames, refmask,
                      initial_seed_point, step_params_,
                      output_path, config_.parallel_processing, true);
-    
-    std::cout << "--> STEP: Ncorr " << cam_number << " done and saved to " << output_path << std::endl;
+
+    LOG_INFO << "--> STEP: Ncorr " << cam_number << " done and saved to " << output_path;
     return true;
 }
 
 bool StepDWorkflow::performTracking1(const std::vector<cv::Mat>& cam_first,
                                     const cv::Mat& refmask_trial,
                                     const SeedPoint& initial_seed_point_set1) {
-    std::cout << "Performing tracking camera 1..." << initial_seed_point_set1.pw[0] << "," << initial_seed_point_set1.pw[1] << std::endl;
+    LOG_DEBUG << "Performing tracking camera 1..." << initial_seed_point_set1.pw[0] << "," << initial_seed_point_set1.pw[1];
     return performTracking(1, cam_first, refmask_trial, initial_seed_point_set1);
 }
 
 bool StepDWorkflow::performTracking2(const std::vector<cv::Mat>& cam_second,
                                     const cv::Mat& refmask_trial_matched,
                                     const SeedPoint& initial_seed_point_set2) {
-    std::cout << "Performing tracking camera 2..." << initial_seed_point_set2.pw[0] << "," << initial_seed_point_set2.pw[1] << std::endl;
+    LOG_DEBUG << "Performing tracking camera 2..." << initial_seed_point_set2.pw[0] << "," << initial_seed_point_set2.pw[1];
     return performTracking(2, cam_second, refmask_trial_matched, initial_seed_point_set2);
 }
 
@@ -753,7 +773,7 @@ void StepDWorkflow::formatOutput(const std::string& trial,
                                 const std::vector<int>& pairOrder,
                                 bool pairForced) {
     (void)trial;
-    std::cout << "Formatting output files (step2_dic_finish equivalent)..." << std::endl;
+    LOG_INFO << "Formatting output files (step2_dic_finish equivalent)...";
     
     int cam_1, cam_2;
     Utils::getCamerasForPair(stereopair, cam_1, cam_2);
@@ -764,10 +784,10 @@ void StepDWorkflow::formatOutput(const std::string& trial,
     std::string ncorr12_bin = base_params_.outputPath + "/ncorr" + std::to_string(cam_1) + std::to_string(cam_2) + ".bin";
     
     if (!std::filesystem::exists(ncorr1_bin) || !std::filesystem::exists(ncorr2_bin) || !std::filesystem::exists(ncorr12_bin)) {
-        std::cerr << "Warning: cached ncorr result files not found" << std::endl;
-        if (!std::filesystem::exists(ncorr1_bin)) std::cerr << "  Missing: " << ncorr1_bin << std::endl;
-        if (!std::filesystem::exists(ncorr2_bin)) std::cerr << "  Missing: " << ncorr2_bin << std::endl;
-        if (!std::filesystem::exists(ncorr12_bin)) std::cerr << "  Missing: " << ncorr12_bin << std::endl;
+        LOG_WARN << "cached ncorr result files not found";
+        if (!std::filesystem::exists(ncorr1_bin)) LOG_WARN << "  Missing: " << ncorr1_bin;
+        if (!std::filesystem::exists(ncorr2_bin)) LOG_WARN << "  Missing: " << ncorr2_bin;
+        if (!std::filesystem::exists(ncorr12_bin)) LOG_WARN << "  Missing: " << ncorr12_bin;
         return;
     }
     
@@ -776,24 +796,24 @@ void StepDWorkflow::formatOutput(const std::string& trial,
         std::to_string(cam_1) + "_C_" + std::to_string(cam_2) + d_serializer->extension();
     
     if (std::filesystem::exists(output_file)) {
-        std::cout << "Checkpoint found: " << output_file << std::endl;
+        LOG_INFO << "Checkpoint found: " << output_file;
         return;
     }
-    
-    std::cout << "  Loading cached DIC outputs..." << std::endl;
+
+    LOG_INFO << "  Loading cached DIC outputs...";
     ncorr::DIC_analysis_output dic1 = ncorr::DIC_analysis_output::load(ncorr1_bin);
     ncorr::DIC_analysis_output dic2 = ncorr::DIC_analysis_output::load(ncorr2_bin);
     ncorr::DIC_analysis_output dic12 = ncorr::DIC_analysis_output::load(ncorr12_bin);
     
     if (dic1.disps.empty() || dic2.disps.empty() || dic12.disps.empty()) {
-        std::cerr << "Error: DIC outputs are empty" << std::endl;
+        LOG_ERROR << "DIC outputs are empty";
         return;
     }
 
     // Apply replacebadcorr if enabled (MATLAB step2_dic_finish equivalent)
     // This replaces badly correlated subsets with spatiotemporally filtered values
     if (config_.step_d_replacebadcorr) {
-        std::cout << "  Applying replacebadcorr (MATLAB step2_dic_finish)..." << std::endl;
+        LOG_INFO << "  Applying replacebadcorr (MATLAB step2_dic_finish)...";
         cppxdic::matlab_replacebadcorr(dic1);
         cppxdic::matlab_replacebadcorr(dic2);
         cppxdic::matlab_replacebadcorr(dic12);
@@ -804,11 +824,11 @@ void StepDWorkflow::formatOutput(const std::string& trial,
     const int Factor = dic1.disps[0].get_scalefactor(); // MATLAB: spacing + 1
     const double nan = std::numeric_limits<double>::quiet_NaN();
 
-    std::cout << "  Processing " << n_frames_cam1 << " cam1 frames, "
-              << n_frames_cam2 << " cam2 frames, Factor=" << Factor << std::endl;
+    LOG_INFO << "  Processing " << n_frames_cam1 << " cam1 frames, "
+              << n_frames_cam2 << " cam2 frames, Factor=" << Factor;
     if (n_frames_cam2 + 1 != n_frames_cam1) {
-        std::cout << "  Warning: cam2 tracking count differs from MATLAB expectation "
-                  << "(expected " << (n_frames_cam1 - 1) << ", got " << n_frames_cam2 << ")" << std::endl;
+        LOG_WARN << "cam2 tracking count differs from MATLAB expectation "
+                  << "(expected " << (n_frames_cam1 - 1) << ", got " << n_frames_cam2 << ")";
     }
 
     DIC2DPairResults results;
@@ -854,7 +874,7 @@ void StepDWorkflow::formatOutput(const std::string& trial,
             }
         }
     }
-    std::cout << "  Reference points: " << Pref.size() << std::endl;
+    LOG_INFO << "  Reference points: " << Pref.size();
 
     const size_t n_total_frames = n_frames_cam1 + 1 + n_frames_cam2;
     results.Points.resize(n_total_frames);
@@ -890,19 +910,19 @@ void StepDWorkflow::formatOutput(const std::string& trial,
         results.CorCoeffVec[out_idx] = std::move(corrcoef);
     };
 
-    std::cout << "  Processing cam1 frames..." << std::endl;
+    LOG_INFO << "  Processing cam1 frames...";
     for (size_t ii = 0; ii < n_frames_cam1; ++ii) {
         fillDirectFrame(dic1.disps[ii], ii);
     }
 
-    std::cout << "  Processing inter-camera matching frame..." << std::endl;
+    LOG_INFO << "  Processing inter-camera matching frame...";
     fillDirectFrame(dic12.disps.front(), n_frames_cam1);
 
     const auto& disp12_ref = dic12.disps.front();
     const auto& u12_full = disp12_ref.get_u().get_array();
     const auto& v12_full = disp12_ref.get_v().get_array();
 
-    std::cout << "  Processing cam2 frames (mapped through matching)..." << std::endl;
+    LOG_INFO << "  Processing cam2 frames (mapped through matching)...";
     for (size_t ii = 0; ii < n_frames_cam2; ++ii) {
         const auto& disp2 = dic2.disps[ii];
         const auto& u2_array = disp2.get_u().get_array();
@@ -990,7 +1010,7 @@ void StepDWorkflow::formatOutput(const std::string& trial,
         results.CorCoeffVec[n_frames_cam1 + 1 + ii] = std::move(corrcoef);
     }
     
-    std::cout << "  Creating Delaunay triangulation..." << std::endl;
+    LOG_INFO << "  Creating Delaunay triangulation...";
     std::vector<cv::Point2f> pref_float;
     pref_float.reserve(Pref.size());
     for (const auto& p : Pref) {
@@ -1000,15 +1020,15 @@ void StepDWorkflow::formatOutput(const std::string& trial,
     double max_edge = 1.1 * std::sqrt(2.0) * Factor;
     results.Faces = DelaunayTriangulation::filterByEdgeLength(results.Faces, pref_float, max_edge);
     results.Faces = DelaunayTriangulation::flipOrientation(results.Faces);
-    std::cout << "  Triangles: " << (results.Faces.size() / 3) << std::endl;
+    LOG_INFO << "  Triangles: " << (results.Faces.size() / 3);
     
     results.FaceColors.resize(results.Faces.size() / 3, 128.0);
     
-    std::cout << "  Writing results..." << std::endl;
+    LOG_INFO << "  Writing results...";
     if (d_serializer->saveDIC2DPairResults(output_file, results)) {
-        std::cout << "Output formatting complete: " << output_file << std::endl;
+        LOG_INFO << "Output formatting complete: " << output_file;
     } else {
-        std::cerr << "Failed to write DIC2DPairResults" << std::endl;
+        LOG_ERROR << "Failed to write DIC2DPairResults";
     }
 }
 
@@ -1046,8 +1066,8 @@ bool StepDWorkflow::updateMaskAndSeedFromOutput(const cv::Mat& input_mask,
         ncorr::ROI2D roi_updated = ncorr::update(roi_current, disp, ncorr::INTERP::CUBIC_KEYS, ncorr::ROI_UPDATE_MODE::SKIP_INVALID);
         output_mask = ROIManager::ncorrROIToMat(roi_updated);
     } catch (const std::exception& e) {
-        std::cerr << "  Warning: failed to update ROI through displacement field: "
-                  << e.what() << std::endl;
+        LOG_WARN << "failed to update ROI through displacement field: "
+                  << e.what();
     }
 
     return true;
@@ -1086,8 +1106,8 @@ void StepDWorkflow::writeNcorrMatSidecar(const std::string& output_path,
                                              cur_rois,
                                              dic_outputs,
                                              dispinfo)) {
-        std::cerr << "  Warning: failed to write ncorr MAT sidecar: "
-                  << mat_path << std::endl;
+        LOG_WARN << "failed to write ncorr MAT sidecar: "
+                  << mat_path;
     }
 }
 
@@ -1170,10 +1190,10 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     const bool go_parallel,
     const bool use_no_update) {
     
-    std::cout << "Running ncorr DIC analysis..." << std::endl;
-    std::cout << "  Radius: " << step_params.radius << ", Spacing: " << step_params.spacing << std::endl;
-    std::cout << "  Scalefactor: " << (step_params.spacing + 1) << " (spacing + 1)" << std::endl;
-    std::cout << "  Seed: (" << seed_point.pw[0] << ", " << seed_point.pw[1] << ")" << std::endl;
+    LOG_INFO << "Running ncorr DIC analysis...";
+    LOG_DEBUG << "  Radius: " << step_params.radius << ", Spacing: " << step_params.spacing;
+    LOG_DEBUG << "  Scalefactor: " << (step_params.spacing + 1) << " (spacing + 1)";
+    LOG_DEBUG << "  Seed: (" << seed_point.pw[0] << ", " << seed_point.pw[1] << ")";
     
     // Convert images to ncorr Image2D format
     // ncorr::Image2D expects file paths, so we need to save cv::Mat as temporary files
@@ -1232,9 +1252,9 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     ncorr::DIC_analysis_output dic_output_raw;
     
     if (go_parallel) {
-        std::cout << "  Using parallel DIC processing"
+        LOG_INFO << "  Using parallel DIC processing"
                   << (config_.ncorr_use_exact_matlab ? " (exact_matlab_*)" : " (matlab_*)")
-                  << "..." << std::endl;
+                  << "...";
 
         // Create seed parameters from the seed point
         std::vector<ncorr::SeedParams> seeds;
@@ -1248,9 +1268,9 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
             ? ncorr::exact_matlab_DIC_analysis_parallel(dic_parallel_input)
             : ncorr::matlab_DIC_analysis_parallel(dic_parallel_input);
     } else {
-        std::cout << "  Using Matlab-style sequential DIC processing"
+        LOG_INFO << "  Using Matlab-style sequential DIC processing"
                   << (config_.ncorr_use_exact_matlab ? " (exact_matlab_*)" : " (matlab_*)")
-                  << "..." << std::endl;
+                  << "...";
         dic_output_raw = config_.ncorr_use_exact_matlab
             ? ncorr::exact_matlab_DIC_analysis_sequential(
                 dic_input,
@@ -1263,7 +1283,7 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     }
     
     // Post-process with both perspectives
-    std::cout << "Post-processing displacements..." << std::endl;
+    LOG_INFO << "Post-processing displacements...";
     
     // Step 1: Convert to Eulerian perspective with sign inversion (still in pixels)
     ncorr::DIC_analysis_output dic_eulerian_pixels = ncorr::change_perspective_with_inversion(
@@ -1275,7 +1295,7 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     ncorr::DIC_analysis_output dic_lagrangian = ncorr::set_units(dic_output_raw, "mm", config_.units_per_pixel);
     ncorr::DIC_analysis_output dic_eulerian = ncorr::set_units(dic_eulerian_pixels, "mm", config_.units_per_pixel);
     
-    std::cout << "  Created both Lagrangian and Eulerian perspectives" << std::endl;
+    LOG_INFO << "  Created both Lagrangian and Eulerian perspectives";
     
     // Save debug videos if debug mode is enabled
     if (config_.debug_mode) {
@@ -1285,15 +1305,15 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
         double alpha = config_.video_alpha;
         double fps = static_cast<double>(config_.video_fps);
         
-        std::cout << "  Saving debug DIC videos to " << video_dir << std::endl;
+        LOG_INFO << "  Saving debug DIC videos to " << video_dir;
         try {
             ncorr::save_DIC_video(video_dir + base_name + "_v_eulerian.avi",
                            dic_input, dic_eulerian, ncorr::DISP::V, alpha, fps);
             ncorr::save_DIC_video(video_dir + base_name + "_u_eulerian.avi",
                            dic_input, dic_eulerian, ncorr::DISP::U, alpha, fps);
-            std::cout << "  ✓ Debug DIC videos saved" << std::endl;
+            LOG_INFO << "  ✓ Debug DIC videos saved";
         } catch (const std::exception& e) {
-            std::cerr << "  Warning: Failed to save debug videos: " << e.what() << std::endl;
+            LOG_WARN << "Failed to save debug videos: " << e.what();
         }
     }
     
@@ -1304,8 +1324,8 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     // because they combine (x*scalefactor + displacement) for DLT reconstruction.
     save(dic_output_raw, output_path);
     writeNcorrMatSidecar(output_path, ref_img, cur_imgs, roi_mask, step_params, dic_output_raw);
-    std::cout << "DIC analysis saved: " << output_path << std::endl;
-    
+    LOG_INFO << "DIC analysis saved: " << output_path;
+
     return dic_output_raw;
 }
 

@@ -23,6 +23,7 @@
 #include "singledic/single_dic_workflow.h"
 
 #include "config.h"
+#include "logging.h"
 
 #include <getopt.h>
 #include <iostream>
@@ -220,15 +221,15 @@ int main(int argc, char* argv[]) {
     cfg.write_mat = write_mat;
     cfg.write_csv = write_csv;
 
-    if (!matlab_ref.empty()) std::cout << "MATLAB reference folder: " << matlab_ref << std::endl;
+    if (!matlab_ref.empty()) LOG_INFO << "MATLAB reference folder: " << matlab_ref;
 
     singledic::SingleDicWorkflow workflow(cfg);
     singledic::SingleDicResult res = workflow.run();
 
     if (!res.ok) {
-        std::cerr << "singledic: FAILED — " << res.message << std::endl;
+        LOG_ERROR << "singledic: FAILED — " << res.message;
         return 1;
     }
-    std::cout << "singledic: OK — tracked " << res.frames.size() << " frame(s)." << std::endl;
+    LOG_INFO << "singledic: OK — tracked " << res.frames.size() << " frame(s).";
     return 0;
 }

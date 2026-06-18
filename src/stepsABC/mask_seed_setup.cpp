@@ -8,6 +8,8 @@
 
 #include "stepsABC/mask_seed_setup.h"
 
+#include "logging.h"
+
 #include <cctype>
 #include <cmath>
 #include <fstream>
@@ -240,10 +242,9 @@ MaskSeedResult MaskSeedSetup::runGui(const cv::Mat& reference_image, int num_see
     cv::setMouseCallback(win, onMouse, &st);
 
     cv::Mat display;
-    std::cout << "[gui] Draw mask polygon: left-click vertices, right-click to close.\n"
-              << "[gui] Then click " << num_seeds
-              << " seed point(s). Keys: u=undo, "
-                 "r=reset, ENTER=accept, ESC=cancel.\n";
+    LOG_INFO << "[gui] Draw mask polygon: left-click vertices, right-click to close. "
+             << "Then click " << num_seeds
+             << " seed point(s). Keys: u=undo, r=reset, ENTER=accept, ESC=cancel.";
 
     while (true) {
         renderOverlay(reference_image, st, display);

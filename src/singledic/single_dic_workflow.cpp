@@ -20,6 +20,7 @@
 #include "image_processor.h"
 #include "roi_manager.h"
 #include "parameters.h"
+#include "logging.h"
 
 #include <ncorr/session.h>
 #include <ncorr/frame_reader.h>
@@ -84,7 +85,7 @@ bool SingleDicWorkflow::importFrames(std::vector<cv::Mat>& frames) const {
         const std::string& vpath = video_candidates.front();
         cv::VideoCapture cap(vpath);
         if (!cap.isOpened()) {
-            std::cerr << "[singledic] Cannot open video: " << vpath << std::endl;
+            LOG_ERROR << "[singledic] Cannot open video: " << vpath;
             return false;
         }
         int frame_idx = 0; // 0-based as read
@@ -109,7 +110,7 @@ bool SingleDicWorkflow::importFrames(std::vector<cv::Mat>& frames) const {
         try {
             paths = ncorr::discover_frames(trial_dir, "", "");
         } catch (const std::exception& e) {
-            std::cerr << "[singledic] " << e.what() << std::endl;
+            LOG_ERROR << "[singledic] " << e.what();
             return false;
         }
         for (size_t i = 0; i < paths.size(); ++i) {
@@ -119,18 +120,18 @@ bool SingleDicWorkflow::importFrames(std::vector<cv::Mat>& frames) const {
             if (((frame_1based - start) % jump) != 0) continue;
             cv::Mat gray = cv::imread(paths[i], cv::IMREAD_GRAYSCALE);
             if (gray.empty()) {
-                std::cerr << "[singledic] Failed to read frame: " << paths[i] << std::endl;
+                LOG_ERROR << "[singledic] Failed to read frame: " << paths[i];
                 return false;
             }
             frames.push_back(gray);
         }
     } else {
-        std::cerr << "[singledic] No video or image folder at: " << trial_dir << std::endl;
+        LOG_ERROR << "[singledic] No video or image folder at: " << trial_dir;
         return false;
     }
 
     if (frames.empty()) {
-        std::cerr << "[singledic] No frames imported from " << trial_dir << std::endl;
+        LOG_ERROR << "[singledic] No frames imported from " << trial_dir;
         return false;
     }
 
@@ -139,8 +140,7 @@ bool SingleDicWorkflow::importFrames(std::vector<cv::Mat>& frames) const {
         std::reverse(frames.begin(), frames.end());
     }
 
-    std::cout << "[singledic] Imported " << frames.size() << " frame(s) from " << trial_dir
-              << std::endl;
+    LOG_INFO << "[singledic] Imported " << frames.size() << " frame(s) from " << trial_dir;
     return true;
 }
 
@@ -264,7 +264,7 @@ bool SingleDicWorkflow::track(const std::vector<cv::Mat>& frames, const cv::Mat&
         try {
             r = session.process_frame(ncorr::ImageBuffer(def8.data, def8.cols, def8.rows, 1));
         } catch (const std::exception& e) {
-            std::cerr << "[singledic] frame " << i << " DIC failed: " << e.what() << std::endl;
+            LOG_ERROR << "[singledic] frame " << i << " DIC failed: " << e.what();
         }
         FrameResult fr;
         fr.grid_width = r.width;
@@ -275,8 +275,8 @@ bool SingleDicWorkflow::track(const std::vector<cv::Mat>& frames, const cv::Mat&
         fr.valid = r.valid;
         out.frames.push_back(std::move(fr));
         if (cfg_.base.debug_mode) {
-            std::cout << "[singledic] tracked frame " << i << "/" << (frames.size() - 1)
-                      << (r.valid ? " ok" : " FAILED") << std::endl;
+            LOG_DEBUG << "[singledic] tracked frame " << i << "/" << (frames.size() - 1)
+                      << (r.valid ? " ok" : " FAILED");
         }
     }
 
@@ -292,7 +292,7 @@ bool SingleDicWorkflow::writeCsv(const SingleDicResult& res) const {
     const std::string path = cfg_.ncorrStem() + ".csv";
     std::ofstream f(path);
     if (!f) {
-        std::cerr << "[singledic] cannot write CSV: " << path << std::endl;
+        LOG_ERROR << "[singledic] cannot write CSV: " << path;
         return false;
     }
     f << "frame,grid_x,grid_y,u_px,v_px,corrcoef\n";
@@ -311,7 +311,7 @@ bool SingleDicWorkflow::writeCsv(const SingleDicResult& res) const {
             }
         }
     }
-    std::cout << "[singledic] wrote " << path << std::endl;
+    LOG_INFO << "[singledic] wrote " << path;
     return true;
 }
 
@@ -356,7 +356,7 @@ bool SingleDicWorkflow::writeMat(const SingleDicResult& res) const {
     const std::string path = cfg_.ncorrStem() + ".mat";
     mat_t* mat = Mat_CreateVer(path.c_str(), nullptr, MAT_FT_MAT5);
     if (!mat) {
-        std::cerr << "[singledic] cannot create MAT: " << path << std::endl;
+        LOG_ERROR << "[singledic] cannot create MAT: " << path;
         return false;
     }
 
@@ -382,7 +382,7 @@ bool SingleDicWorkflow::writeMat(const SingleDicResult& res) const {
     }
 
     Mat_Close(mat);
-    std::cout << "[singledic] wrote " << path << std::endl;
+    LOG_INFO << "[singledic] wrote " << path;
     return true;
 }
 
@@ -392,10 +392,10 @@ bool SingleDicWorkflow::writeMat(const SingleDicResult& res) const {
 SingleDicResult SingleDicWorkflow::run() {
     SingleDicResult result;
 
-    std::cout << "-------------------------------------------\n";
-    std::cout << "singledic: single-camera 2D DIC analysis\n";
-    std::cout << "  subject=" << cfg_.subject << " bloc=" << cfg_.bloc << " trial=" << cfg_.trial
-              << " ref=" << cfg_.reftrial << " dir=" << cfg_.tracking_dir << "\n";
+    LOG_INFO << "-------------------------------------------";
+    LOG_INFO << "singledic: single-camera 2D DIC analysis";
+    LOG_INFO << "  subject=" << cfg_.subject << " bloc=" << cfg_.bloc << " trial=" << cfg_.trial
+             << " ref=" << cfg_.reftrial << " dir=" << cfg_.tracking_dir;
 
     // Ensure output directories exist.
     std::error_code ec;
@@ -420,8 +420,8 @@ SingleDicResult SingleDicWorkflow::run() {
 
     // 5. Seed (load-or-center).
     std::vector<int> seed = loadOrCreateSeed(roi);
-    std::cout << "[singledic] seed = (" << (seed.size() > 0 ? seed[0] : 0) << ", "
-              << (seed.size() > 1 ? seed[1] : 0) << ")\n";
+    LOG_INFO << "[singledic] seed = (" << (seed.size() > 0 ? seed[0] : 0) << ", "
+             << (seed.size() > 1 ? seed[1] : 0) << ")";
 
     // NOTE on matching-to-reference: Vik's ncorr_matching2ref_single.m maps the
     // reference *trial's* ROI/seed onto the current trial via a one-frame DIC.
@@ -429,8 +429,8 @@ SingleDicResult SingleDicWorkflow::run() {
     // current trial, that mapping would be inserted here. The single-tracking
     // semantics below are unchanged; see report for the documented gap.
     if (cfg_.do_matching && cfg_.reftrial != cfg_.trial) {
-        std::cout << "[singledic] (matching-to-reference requested; using trial ROI/seed — "
-                     "cross-trial mapping is a documented gap)\n";
+        LOG_INFO << "[singledic] (matching-to-reference requested; using trial ROI/seed — "
+                    "cross-trial mapping is a documented gap)";
     }
 
     // 6. Single tracking pass.
@@ -443,7 +443,7 @@ SingleDicResult SingleDicWorkflow::run() {
     if (cfg_.write_csv) writeCsv(result);
     if (cfg_.write_mat) writeMat(result);
 
-    std::cout << "--> singledic analysis completed\n";
+    LOG_INFO << "--> singledic analysis completed";
     return result;
 }
 

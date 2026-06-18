@@ -6,15 +6,18 @@
  */
 
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 #include <chrono>
 #include <getopt.h>
 #include "config.h"
 #include "dic_analysis.h"
+#include "logging.h"
 #include "trial_selection.h"
 #include "utils.h"
 #include "xdic/xdic_mode.h"
+#include "profiling.h"
 
 // Mode-specific dispatch headers (stubs for non-default modes).
 #if defined(XDIC_MODE_MIRRORED)
@@ -26,7 +29,10 @@ enum {
     OPT_TRIAL = 1000,
     OPT_TRIALS,
     OPT_TRIALS_FILE,
-    OPT_SUBJECT_TRIAL_CSV
+    OPT_SUBJECT_TRIAL_CSV,
+    OPT_LOG_LEVEL,
+    OPT_LOG_FILE,
+    OPT_DEBUG
 };
 
 // Print usage information
@@ -42,6 +48,13 @@ void print_usage(const char* prog_name) {
               << "  -v, --viz-params <file>    Visualization parameters file (default: "
                  "visualization_params.txt)\n"
               << "  -h, --help                 Show this help message\n\n"
+              << "LOGGING:\n"
+              << "  -V, --verbose              Increase console verbosity (repeatable: -VV)\n"
+              << "  -q, --quiet                Quiet: only warnings and errors on the console\n"
+              << "      --log-level <lvl>      Console level: trace|debug|info|warn|error|off\n"
+              << "      --log-file <path>      Also write a full-detail (debug) log to <path>\n"
+              << "      --debug                Debug mode: debug-level console + source locations\n"
+              << "  Env: CPPXDIC_LOG_LEVEL, CPPXDIC_LOG_FILE, CPPXDIC_LOG_CONSOLE also apply.\n\n"
               << "TRIAL-LEVEL RUN MODES (mutually exclusive; pick at most one):\n"
               << "  (a) --trial <id>             Run a single trial.\n"
               << "  (b) --trials <list>          Trial list (e.g. 7,12,25); with SLURM_ARRAY_TASK_ID\n"
@@ -63,11 +76,6 @@ void print_usage(const char* prog_name) {
 }
 
 int main(int argc, char* argv[]) {
-    std::cout << "FINGERTIP 3D RECONSTRUCTION using DIC" << std::endl;
-    std::cout << "--------------------------------------" << std::endl;
-    std::cout << "DIC analysis for the fingertip" << std::endl;
-    std::cout << std::endl;
-
     // Command-line argument parsing
     std::string subject_override = "";
     int reftrial_override = -1;
@@ -82,6 +90,13 @@ int main(int argc, char* argv[]) {
     std::string trials_file;       // --trials-file <path>
     std::string subject_trial_csv; // --subject-trial-csv <path>
 
+    // Logging selectors (CLI overrides config-file values, which override env).
+    std::string cli_log_level;
+    std::string cli_log_file;
+    int verbose_count = 0;
+    bool quiet = false;
+    bool cli_debug = false;
+
     static struct option long_options[] = {{"subject", required_argument, 0, 's'},
                                            {"reftrial", required_argument, 0, 'r'},
                                            {"config", required_argument, 0, 'C'},
@@ -92,12 +107,17 @@ int main(int argc, char* argv[]) {
                                            {"trials", required_argument, 0, OPT_TRIALS},
                                            {"trials-file", required_argument, 0, OPT_TRIALS_FILE},
                                            {"subject-trial-csv", required_argument, 0, OPT_SUBJECT_TRIAL_CSV},
+                                           {"verbose", no_argument, 0, 'V'},
+                                           {"quiet", no_argument, 0, 'q'},
+                                           {"log-level", required_argument, 0, OPT_LOG_LEVEL},
+                                           {"log-file", required_argument, 0, OPT_LOG_FILE},
+                                           {"debug", no_argument, 0, OPT_DEBUG},
                                            {"help", no_argument, 0, 'h'},
                                            {0, 0, 0, 0}};
 
     int opt;
     int option_index = 0;
-    while ((opt = getopt_long(argc, argv, "s:r:C:d:n:v:h", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "s:r:C:d:n:v:hVq", long_options, &option_index)) != -1) {
         switch (opt) {
             case 's':
                 subject_override = optarg;
@@ -129,6 +149,21 @@ int main(int argc, char* argv[]) {
             case OPT_SUBJECT_TRIAL_CSV:
                 subject_trial_csv = optarg;
                 break;
+            case 'V':
+                ++verbose_count;
+                break;
+            case 'q':
+                quiet = true;
+                break;
+            case OPT_LOG_LEVEL:
+                cli_log_level = optarg;
+                break;
+            case OPT_LOG_FILE:
+                cli_log_file = optarg;
+                break;
+            case OPT_DEBUG:
+                cli_debug = true;
+                break;
             case 'h':
                 print_usage(argv[0]);
                 return 0;
@@ -137,6 +172,26 @@ int main(int argc, char* argv[]) {
                 return 1;
         }
     }
+
+    // Configure logging as early as possible from CLI + environment so that all
+    // subsequent output (including config loading) is leveled and, if requested,
+    // captured to the log file. Config-file values are merged in after load.
+    {
+        cppxdic::log::Options logopts;
+        if (!cli_log_level.empty()) {
+            logopts.console_level = cppxdic::log::levelFromString(cli_log_level);
+            logopts.console_level_set = true;
+        }
+        logopts.log_file = cli_log_file;
+        logopts.debug = cli_debug;
+        logopts.verbose = verbose_count;
+        logopts.quiet = quiet;
+        cppxdic::log::configureFromOptions(logopts);
+    }
+
+    LOG_INFO << "FINGERTIP 3D RECONSTRUCTION using DIC";
+    LOG_INFO << "--------------------------------------";
+    LOG_INFO << "DIC analysis for the fingertip";
 
     // ---- Resolve trial-level run mode (Part 2) --------------------------------
     // Exactly one of the four selectors may be used. They produce either an
@@ -148,9 +203,8 @@ int main(int argc, char* argv[]) {
         int mode_count = (single_trial >= 0 ? 1 : 0) + (!trials_spec.empty() ? 1 : 0) +
                          (!trials_file.empty() ? 1 : 0) + (!subject_trial_csv.empty() ? 1 : 0);
         if (mode_count > 1) {
-            std::cerr << "Error: --trial, --trials, --trials-file and --subject-trial-csv "
-                         "are mutually exclusive."
-                      << std::endl;
+            LOG_ERROR << "--trial, --trials, --trials-file and --subject-trial-csv "
+                         "are mutually exclusive.";
             return 1;
         }
 
@@ -165,18 +219,18 @@ int main(int argc, char* argv[]) {
                                               ? cppxdic::parseTrialList(trials_spec)
                                               : cppxdic::readTrialsFile(trials_file);
                 if (trials.empty()) {
-                    std::cerr << "Error: trial list is empty." << std::endl;
+                    LOG_ERROR << "trial list is empty.";
                     return 1;
                 }
                 if (task_id >= 0) {
                     if (task_id < 1 || static_cast<size_t>(task_id) > trials.size()) {
-                        std::cerr << "Error: SLURM_ARRAY_TASK_ID=" << task_id
-                                  << " out of range 1.." << trials.size() << std::endl;
+                        LOG_ERROR << "SLURM_ARRAY_TASK_ID=" << task_id
+                                  << " out of range 1.." << trials.size();
                         return 1;
                     }
                     selected_trials = {trials[task_id - 1]};
-                    std::cout << "[SLURM array] task " << task_id << " -> trial "
-                              << selected_trials.front() << std::endl;
+                    LOG_INFO << "[SLURM array] task " << task_id << " -> trial "
+                             << selected_trials.front();
                 } else {
                     selected_trials = trials;  // no array: run the whole list
                 }
@@ -185,21 +239,20 @@ int main(int argc, char* argv[]) {
                 std::vector<cppxdic::SubjectTrial> rows =
                     cppxdic::readSubjectTrialCsv(subject_trial_csv);
                 if (rows.empty()) {
-                    std::cerr << "Error: subject_trial CSV has no data rows: "
-                              << subject_trial_csv << std::endl;
+                    LOG_ERROR << "subject_trial CSV has no data rows: " << subject_trial_csv;
                     return 1;
                 }
                 if (task_id >= 0) {
                     if (task_id < 1 || static_cast<size_t>(task_id) > rows.size()) {
-                        std::cerr << "Error: SLURM_ARRAY_TASK_ID=" << task_id
-                                  << " out of range 1.." << rows.size() << std::endl;
+                        LOG_ERROR << "SLURM_ARRAY_TASK_ID=" << task_id
+                                  << " out of range 1.." << rows.size();
                         return 1;
                     }
                     const auto& row = rows[task_id - 1];
                     subject_override = row.subject;  // CSV drives the subject
                     selected_trials = {row.trial};
-                    std::cout << "[SLURM array] task " << task_id << " -> subject "
-                              << row.subject << ", trial " << row.trial << std::endl;
+                    LOG_INFO << "[SLURM array] task " << task_id << " -> subject "
+                             << row.subject << ", trial " << row.trial;
                 } else {
                     // No array: process every row. Require all rows share one
                     // subject so a single Config run is well defined; otherwise
@@ -207,11 +260,10 @@ int main(int argc, char* argv[]) {
                     const std::string& subj0 = rows.front().subject;
                     for (const auto& row : rows) {
                         if (row.subject != subj0) {
-                            std::cerr << "Error: subject_trial CSV spans multiple subjects ("
+                            LOG_ERROR << "subject_trial CSV spans multiple subjects ("
                                       << subj0 << ", " << row.subject
                                       << "). Use SLURM_ARRAY_TASK_ID to select a row, "
-                                         "or split the CSV per subject."
-                                      << std::endl;
+                                         "or split the CSV per subject.";
                             return 1;
                         }
                         selected_trials.push_back(row.trial);
@@ -220,7 +272,7 @@ int main(int argc, char* argv[]) {
                 }
             }
         } catch (const std::exception& e) {
-            std::cerr << "Error resolving trial selection: " << e.what() << std::endl;
+            LOG_ERROR << "Error resolving trial selection: " << e.what();
             return 1;
         }
     }
@@ -234,8 +286,8 @@ int main(int argc, char* argv[]) {
         // Tier 1: compiled defaults (from class initialization)
         Config config;
 
-        std::cout << "Loading configuration files..." << std::endl;
-        std::cout << "------------------------------" << std::endl;
+        LOG_INFO << "Loading configuration files...";
+        LOG_INFO << "------------------------------";
 
         // Tier 2a: unified config file (broadest config-file source)
         config.loadFromConfigFile(config_file);
@@ -255,31 +307,51 @@ int main(int argc, char* argv[]) {
 
         // Update derived variables
         config.updateVariables();
-        std::cout << std::endl;
+
+        // Re-apply logging configuration now that config files are loaded, merging
+        // their values (log_level/log_file/debug_mode) under any CLI flags, which
+        // keep priority. Env was already applied in the early configure above.
+        {
+            cppxdic::log::Options logopts;
+            if (!config.log_level.empty()) {
+                logopts.console_level = cppxdic::log::levelFromString(config.log_level);
+                logopts.console_level_set = true;
+            }
+            logopts.log_file = config.log_file;
+            logopts.debug = config.debug_mode;
+            // CLI flags override config-file values.
+            if (!cli_log_level.empty()) {
+                logopts.console_level = cppxdic::log::levelFromString(cli_log_level);
+                logopts.console_level_set = true;
+            }
+            if (!cli_log_file.empty()) logopts.log_file = cli_log_file;
+            if (cli_debug) logopts.debug = true;
+            logopts.verbose = verbose_count;
+            logopts.quiet = quiet;
+            cppxdic::log::configureFromOptions(logopts);
+        }
 
         // Announce the compile-time reconstruction mode (Section 2c).
-        std::cout << "xDIC reconstruction mode: " << xdic::active_mode_name() << std::endl;
+        LOG_INFO << "xDIC reconstruction mode: " << xdic::active_mode_name();
 
         // Print final parameters
-        std::cout << "Final Configuration:" << std::endl;
-        std::cout << "--------------------" << std::endl;
-        std::cout << "Subject: " << config.subject_id << ", Phase: " << config.phase_id
-                  << ", Material: " << config.material << ", Stereo Pairs: " << config.num_pair
-                  << std::endl;
-        std::cout << "Reference trial number: " << config.ref_trial_id << std::endl;
-        std::cout << "Frame: " << config.idx_frame_start << " to " << config.idx_frame_end
-                  << ", jump= " << config.frame_jump << std::endl;
-        std::cout << "Show visualization: " << config.showvisu
-                  << ", Debug mode: " << config.debug_mode
-                  << ", Automatic process: " << config.automatic_process << std::endl;
-        std::cout << std::endl;
+        LOG_INFO << "Final Configuration:";
+        LOG_INFO << "--------------------";
+        LOG_INFO << "Subject: " << config.subject_id << ", Phase: " << config.phase_id
+                 << ", Material: " << config.material << ", Stereo Pairs: " << config.num_pair;
+        LOG_INFO << "Reference trial number: " << config.ref_trial_id;
+        LOG_INFO << "Frame: " << config.idx_frame_start << " to " << config.idx_frame_end
+                 << ", jump= " << config.frame_jump;
+        LOG_INFO << "Show visualization: " << config.showvisu
+                 << ", Debug mode: " << config.debug_mode
+                 << ", Automatic process: " << config.automatic_process;
 
 #if defined(XDIC_MODE_CAMERAPAIRS)
         // ---- Camera-pairs mode: the only fully-implemented reconstruction path. ----
         // Checking
-        std::cout << "Checking the data and protocol..." << std::endl;
+        LOG_INFO << "Checking the data and protocol...";
         if (!Utils::dicCheck(config)) {
-            std::cerr << "Data and protocol check failed!" << std::endl;
+            LOG_ERROR << "Data and protocol check failed!";
             return 1;
         }
         // Call analysis function. If a trial-level run mode was selected, run
@@ -287,27 +359,27 @@ int main(int argc, char* argv[]) {
         DicAnalysis dicAnalysis(config);
         bool success;
         if (!selected_trials.empty()) {
-            std::cout << "Running selected trials: [";
+            std::ostringstream trial_list;
             for (size_t i = 0; i < selected_trials.size(); ++i) {
-                std::cout << selected_trials[i];
-                if (i + 1 < selected_trials.size()) std::cout << ", ";
+                trial_list << selected_trials[i];
+                if (i + 1 < selected_trials.size()) trial_list << ", ";
             }
-            std::cout << "]" << std::endl;
+            LOG_INFO << "Running selected trials: [" << trial_list.str() << "]";
             success = dicAnalysis.run(selected_trials);
         } else {
             success = dicAnalysis.run();
         }
 
         if (success) {
-            std::cout << "Analysis completed successfully!" << std::endl;
+            LOG_INFO << "Analysis completed successfully!";
         } else {
-            std::cerr << "Analysis failed!" << std::endl;
+            LOG_ERROR << "Analysis failed!";
             return 1;
         }
 #elif defined(XDIC_MODE_MIRRORED)
         // ---- Mirrored-camera mode: STUB (Section 2d). ----
         if (!xdic::mirrored::run(config)) {
-            std::cerr << "Mirrored mode failed." << std::endl;
+            LOG_ERROR << "Mirrored mode failed.";
             return 1;
         }
 #elif defined(XDIC_MODE_MULTI)
@@ -319,10 +391,11 @@ int main(int argc, char* argv[]) {
 #endif
 
     } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+        LOG_ERROR << e.what();
         return 1;
     }
 
-    std::cout << "End of script" << std::endl;
+    ::xprof::Profiler::I().dump();
+    LOG_INFO << "End of script";
     return 0;
 }

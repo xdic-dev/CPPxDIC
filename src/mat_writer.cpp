@@ -5,6 +5,7 @@
  */
 
 #include "mat_writer.h"
+#include "logging.h"
 #include <iostream>
 #include <cstring>
 #include <vector>
@@ -43,7 +44,7 @@ bool MatWriter::writeMatchingFile(const std::string& filename,
                                      dispinfo_var, displacements_var, dic_output);
     
     if (success) {
-        std::cout << "Wrote MATCHING file: " << filename << std::endl;
+        LOG_INFO << "Wrote MATCHING file: " << filename;
     }
     
     return success;
@@ -67,7 +68,7 @@ bool MatWriter::writeMatchingFile(const std::string& filename,
                                      dispinfo_var, displacements_var, dic_lagrangian);
     
     if (success) {
-        std::cout << "Wrote MATCHING file with both perspectives: " << filename << std::endl;
+        LOG_INFO << "Wrote MATCHING file with both perspectives: " << filename;
     }
     
     return success;
@@ -85,14 +86,14 @@ bool MatWriter::writeDicNcorrFile(const std::string& filename,
     // Create MAT file (v7.3 HDF5 format for xDIC compatibility)
     mat_t* matfp = createMatFileHDF5(filename);
     if (!matfp) {
-        std::cerr << "Failed to create MAT file: " << filename << std::endl;
+        LOG_ERROR << "Failed to create MAT file: " << filename;
         return false;
     }
-    
+
     // ===== CREATE REFERENCE_SAVE STRUCT =====
     std::vector<std::string> ref_fields = {"gs", "name", "path", "roi", "type"};
     matvar_t* reference_save = createStructVariable("reference_save", ref_fields);
-    
+
     // Add ref image
     writeMatVariable(matfp, "ref_gs_temp", ref_img);
     matvar_t* ref_gs = Mat_VarRead(matfp, "ref_gs_temp");
@@ -125,10 +126,9 @@ bool MatWriter::writeDicNcorrFile(const std::string& filename,
             // Convert back to cv::Mat
             cur_roi_updated = convertROI2DToMat(roi_updated);
             
-            std::cout << "  Applied ROI update with displacement field" << std::endl;
+            LOG_DEBUG << "  Applied ROI update with displacement field";
         } catch (const std::exception& e) {
-            std::cerr << "  Warning: ROI update failed: " << e.what() << std::endl;
-            std::cerr << "  Using original ROI instead" << std::endl;
+            LOG_WARN << "ROI update failed: " << e.what() << "; using original ROI instead";
             // cur_roi_updated remains as clone of cur_roi
         }
     }
@@ -196,12 +196,12 @@ bool MatWriter::writeMultiFrameNcorrFile(const std::string& filename,
                                         const std::string& ref_name) {
     
     if (cur_imgs.empty()) {
-        std::cerr << "Error: No current images provided" << std::endl;
+        LOG_ERROR << "No current images provided";
         return false;
     }
-    
+
     size_t n_frames = cur_imgs.size();
-    std::cout << "Writing multi-frame ncorr file with " << n_frames << " frames..." << std::endl;
+    LOG_INFO << "Writing multi-frame ncorr file with " << n_frames << " frames...";
 
     ncorr::DIC_analysis_output aggregated_output;
     bool have_aggregated_output = false;
@@ -232,10 +232,10 @@ bool MatWriter::writeMultiFrameNcorrFile(const std::string& filename,
     // Create MAT file (v7.3 HDF5 format)
     mat_t* matfp = createMatFileHDF5(filename);
     if (!matfp) {
-        std::cerr << "Failed to create MAT file: " << filename << std::endl;
+        LOG_ERROR << "Failed to create MAT file: " << filename;
         return false;
     }
-    
+
     // ===== CREATE REFERENCE_SAVE STRUCT (single image) =====
     std::vector<std::string> ref_fields = {"gs", "name", "path", "roi", "type"};
     matvar_t* reference_save = createStructVariable("reference_save", ref_fields);
@@ -296,7 +296,7 @@ bool MatWriter::writeMultiFrameNcorrFile(const std::string& filename,
                 );
                 cur_roi_to_use = convertROI2DToMat(roi_updated);
             } catch (const std::exception& e) {
-                std::cerr << "  Warning: ROI update failed for frame " << i << ": " << e.what() << std::endl;
+                LOG_WARN << "ROI update failed for frame " << i << ": " << e.what();
             }
         }
         
@@ -398,7 +398,7 @@ bool MatWriter::writeMultiFrameNcorrFile(const std::string& filename,
     
     Mat_Close(matfp);
     
-    std::cout << "Successfully wrote multi-frame ncorr file: " << filename << std::endl;
+    LOG_INFO << "Successfully wrote multi-frame ncorr file: " << filename;
     return true;
 }
 
@@ -406,7 +406,7 @@ bool MatWriter::writeROIMaskFile(const std::string& filename,
                                 const cv::Mat& mask) {
     mat_t* matfp = createMatFileV5(filename);
     if (!matfp) {
-        std::cerr << "Failed to create ROI mask file: " << filename << std::endl;
+        LOG_ERROR << "Failed to create ROI mask file: " << filename;
         return false;
     }
     
@@ -422,7 +422,7 @@ bool MatWriter::writeSeedFile(const std::string& filename,
                              int seed_y) {
     mat_t* matfp = createMatFileV5(filename);
     if (!matfp) {
-        std::cerr << "Failed to create seed file: " << filename << std::endl;
+        LOG_ERROR << "Failed to create seed file: " << filename;
         return false;
     }
     
@@ -442,7 +442,7 @@ bool MatWriter::writeTrialInfoFile(const std::string& filename,
                                   const std::vector<int>& frame_indices) {
     mat_t* matfp = createMatFileV5(filename);
     if (!matfp) {
-        std::cerr << "Failed to create trial info file: " << filename << std::endl;
+        LOG_ERROR << "Failed to create trial info file: " << filename;
         return false;
     }
     
@@ -468,7 +468,7 @@ bool MatWriter::writeDICResultFile(const std::string& filename,
                                   const ncorr::DIC_analysis_output& dic_output) {
     mat_t* matfp = createMatFileHDF5(filename);
     if (!matfp) {
-        std::cerr << "Failed to create DIC result file: " << filename << std::endl;
+        LOG_ERROR << "Failed to create DIC result file: " << filename;
         return false;
     }
     
@@ -568,7 +568,7 @@ bool MatWriter::writeDICResultFile(const std::string& filename,
     
     Mat_Close(matfp);
     
-    std::cout << "Wrote DIC result file: " << filename << " (" << n_frames << " frames)" << std::endl;
+    LOG_INFO << "Wrote DIC result file: " << filename << " (" << n_frames << " frames)";
     return true;
 }
 
@@ -590,7 +590,7 @@ bool MatWriter::writeMatVariable(mat_t* matfp,
                                 const std::string& varname,
                                 const cv::Mat& mat) {
     if (mat.empty()) {
-        std::cerr << "Cannot write empty Mat" << std::endl;
+        LOG_ERROR << "Cannot write empty Mat";
         return false;
     }
     
@@ -619,7 +619,7 @@ bool MatWriter::writeMatVariable(mat_t* matfp,
             mat_class = MAT_C_DOUBLE;
             break;
         default:
-            std::cerr << "Unsupported Mat type: " << mat.type() << std::endl;
+            LOG_ERROR << "Unsupported Mat type: " << mat.type();
             return false;
     }
     
@@ -629,7 +629,7 @@ bool MatWriter::writeMatVariable(mat_t* matfp,
     matvar_t* matvar = Mat_VarCreate(varname.c_str(), mat_class, mat_type,
                                      2, dims.data(), transposed.data, 0);
     if (!matvar) {
-        std::cerr << "Failed to create variable: " << varname << std::endl;
+        LOG_ERROR << "Failed to create variable: " << varname;
         return false;
     }
     
@@ -650,7 +650,7 @@ bool MatWriter::writeArrayVariable(mat_t* matfp,
     matvar_t* matvar = Mat_VarCreate(varname.c_str(), class_type, data_type,
                                      rank, const_cast<size_t*>(dims.data()), (void*)data, 0);
     if (!matvar) {
-        std::cerr << "Failed to create array variable: " << varname << std::endl;
+        LOG_ERROR << "Failed to create array variable: " << varname;
         return false;
     }
     
@@ -668,7 +668,7 @@ bool MatWriter::writeStringVariable(mat_t* matfp,
     matvar_t* matvar = Mat_VarCreate(varname.c_str(), MAT_C_CHAR, MAT_T_UTF8,
                                      2, dims.data(), (void*)str.c_str(), 0);
     if (!matvar) {
-        std::cerr << "Failed to create string variable: " << varname << std::endl;
+        LOG_ERROR << "Failed to create string variable: " << varname;
         return false;
     }
     
@@ -686,7 +686,7 @@ bool MatWriter::writeScalarVariable(mat_t* matfp,
     matvar_t* matvar = Mat_VarCreate(varname.c_str(), MAT_C_DOUBLE, MAT_T_DOUBLE,
                                      2, dims.data(), &value, 0);
     if (!matvar) {
-        std::cerr << "Failed to create scalar variable: " << varname << std::endl;
+        LOG_ERROR << "Failed to create scalar variable: " << varname;
         return false;
     }
     
@@ -720,12 +720,12 @@ bool MatWriter::addFieldToStruct(matvar_t* struct_var,
                                 matvar_t* field_var,
                                 size_t index) {
     if (!struct_var || struct_var->class_type != MAT_C_STRUCT) {
-        std::cerr << "Error: Not a struct variable" << std::endl;
+        LOG_ERROR << "Not a struct variable";
         return false;
     }
-    
+
     if (!field_var) {
-        std::cerr << "Error: Null field variable adding: " << field_name << std::endl;
+        LOG_ERROR << "Null field variable adding: " << field_name;
         return false;
     }
     
@@ -1109,15 +1109,15 @@ bool MatWriter::convertBinToMat(const std::string& bin_path,
     try {
         dic_output = ncorr::DIC_analysis_output::load(bin_path);
     } catch (const std::exception& e) {
-        std::cerr << "Failed to load .bin file: " << bin_path << ": " << e.what() << std::endl;
+        LOG_ERROR << "Failed to load .bin file: " << bin_path << ": " << e.what();
         return false;
     }
-    
+
     // Write to .mat format
     bool success = writeDICResultFile(mat_path, dic_input, dic_output);
-    
+
     if (success) {
-        std::cout << "Converted " << bin_path << " -> " << mat_path << std::endl;
+        LOG_INFO << "Converted " << bin_path << " -> " << mat_path;
     }
     
     return success;
@@ -1127,7 +1127,7 @@ bool MatWriter::writeDIC2DPairResults(const std::string& filename,
                                       const DIC2DPairResults& results) {
     mat_t* matfp = createMatFileHDF5(filename);
     if (!matfp) {
-        std::cerr << "Failed to create DIC2DPairResults file: " << filename << std::endl;
+        LOG_ERROR << "Failed to create DIC2DPairResults file: " << filename;
         return false;
     }
     
@@ -1324,7 +1324,7 @@ bool MatWriter::writeDIC2DPairResults(const std::string& filename,
     }
     
     Mat_Close(matfp);
-    std::cout << "Wrote DIC2DPairResults: " << filename << std::endl;
+    LOG_INFO << "Wrote DIC2DPairResults: " << filename;
     return true;
 }
 
@@ -1345,7 +1345,7 @@ matvar_t* MatWriter::buildCombinedStructFields(mat_t* matfp,
     
     matvar_t* combined_struct = createStructVariable(struct_name, combined_fields);
     if (!combined_struct) {
-        std::cerr << "Failed to create " << struct_name << " struct" << std::endl;
+        LOG_ERROR << "Failed to create " << struct_name << " struct";
         return nullptr;
     }
     
@@ -1566,10 +1566,10 @@ bool MatWriter::write3DCombinedResults(const std::string& filename,
                                        const std::string& struct_name) {
     mat_t* matfp = createMatFileHDF5(filename);
     if (!matfp) {
-        std::cerr << "Failed to create file: " << filename << std::endl;
+        LOG_ERROR << "Failed to create file: " << filename;
         return false;
     }
-    
+
     matvar_t* combined_struct = buildCombinedStructFields(matfp, combined, struct_name);
     if (!combined_struct) {
         Mat_Close(matfp);
@@ -1579,7 +1579,7 @@ bool MatWriter::write3DCombinedResults(const std::string& filename,
     Mat_VarWrite(matfp, combined_struct, MAT_COMPRESSION_NONE);
     Mat_VarFree(combined_struct);
     Mat_Close(matfp);
-    std::cout << "Wrote " << struct_name << ": " << filename << std::endl;
+    LOG_INFO << "Wrote " << struct_name << ": " << filename;
     return true;
 }
 
@@ -1587,7 +1587,7 @@ bool MatWriter::write3DPPresults(const std::string& filename,
                                 const DIC3DPPresults& ppresults) {
     mat_t* matfp = createMatFileHDF5(filename);
     if (!matfp) {
-        std::cerr << "Failed to create DIC3DPPresults file: " << filename << std::endl;
+        LOG_ERROR << "Failed to create DIC3DPPresults file: " << filename;
         return false;
     }
     
@@ -1601,16 +1601,16 @@ bool MatWriter::write3DPPresults(const std::string& filename,
     
     // Add Deform sub-struct inside the parent struct
     if (!ppresults.deform_full.frames.empty()) {
-        std::cout << "Writing full Deform group with " << ppresults.deform_full.n_frames 
-                  << " frames and " << ppresults.deform_full.n_faces << " faces..." << std::endl;
+        LOG_INFO << "Writing full Deform group with " << ppresults.deform_full.n_frames
+                 << " frames and " << ppresults.deform_full.n_faces << " faces...";
         matvar_t* deform_struct = buildDeformationStruct("Deform", ppresults.deform_full);
         if (deform_struct) {
             Mat_VarSetStructFieldByName(pp_struct, "Deform", 0, deform_struct);
         } else {
-            std::cerr << "Warning: Failed to build Deform struct" << std::endl;
+            LOG_WARN << "Failed to build Deform struct";
         }
     } else {
-        std::cout << "Warning: No deformation data available, skipping Deform group" << std::endl;
+        LOG_WARN << "No deformation data available, skipping Deform group";
     }
     
     // Add FaceIsoInd as cell array (MATLAB: 1×nFrames cell, each cell is nFaces×1)
@@ -1642,7 +1642,7 @@ bool MatWriter::write3DPPresults(const std::string& filename,
     Mat_VarWrite(matfp, pp_struct, MAT_COMPRESSION_NONE);
     Mat_VarFree(pp_struct);
     Mat_Close(matfp);
-    std::cout << "Wrote DIC3DPPresults: " << filename << std::endl;
+    LOG_INFO << "Wrote DIC3DPPresults: " << filename;
     return true;
 }
 
@@ -1787,8 +1787,8 @@ matvar_t* MatWriter::buildDeformationStruct(const std::string& group_name,
     Mat_VarSetStructFieldByName(deform_struct, "Emat", 0, Emat_cell);
     Mat_VarSetStructFieldByName(deform_struct, "emat", 0, emat_cell);
     
-    std::cout << "Built deformation struct '" << group_name << "' with " 
-              << n_frames << " frames and " << deform_data.n_faces << " faces" << std::endl;
+    LOG_DEBUG << "Built deformation struct '" << group_name << "' with "
+              << n_frames << " frames and " << deform_data.n_faces << " faces";
     return deform_struct;
 }
 
@@ -1796,20 +1796,20 @@ bool MatWriter::writeDeformationGroup(mat_t* matfp,
                                       const std::string& group_name,
                                       const FrameDeformationResult& deform_data) {
     if (!matfp) {
-        std::cerr << "Invalid MAT file pointer" << std::endl;
+        LOG_ERROR << "Invalid MAT file pointer";
         return false;
     }
-    
+
     matvar_t* deform_struct = buildDeformationStruct(group_name, deform_data);
     if (!deform_struct) {
-        std::cerr << "Failed to build deformation struct" << std::endl;
+        LOG_ERROR << "Failed to build deformation struct";
         return false;
     }
-    
+
     Mat_VarWrite(matfp, deform_struct, MAT_COMPRESSION_NONE);
     Mat_VarFree(deform_struct);
-    
-    std::cout << "Successfully wrote all deformation fields to '" << group_name << "' group" << std::endl;
+
+    LOG_INFO << "Successfully wrote all deformation fields to '" << group_name << "' group";
     return true;
 }
 
@@ -1818,36 +1818,36 @@ bool MatWriter::writeDisplacementGroup(mat_t* matfp,
                                        const std::vector<std::vector<double>>& disp_mgn,
                                        size_t n_frames) {
     if (!matfp) {
-        std::cerr << "Invalid MAT file pointer" << std::endl;
+        LOG_ERROR << "Invalid MAT file pointer";
         return false;
     }
-    
-    std::cout << "Writing displacement group with " << n_frames << " frames" << std::endl;
-    
+
+    LOG_INFO << "Writing displacement group with " << n_frames << " frames";
+
     // Create DispVec cell array (Nx3 per frame)
     matvar_t* disp_vec_cell = createCellArrayFromVectors("DispVec", disp_vec, n_frames);
     if (!disp_vec_cell) {
-        std::cerr << "Failed to create DispVec cell array" << std::endl;
+        LOG_ERROR << "Failed to create DispVec cell array";
         return false;
     }
-    
+
     // Create DispMgn cell array (Nx1 per frame)
     matvar_t* disp_mgn_cell = createCellArrayFromScalars("DispMgn", disp_mgn, n_frames);
     if (!disp_mgn_cell) {
-        std::cerr << "Failed to create DispMgn cell array" << std::endl;
+        LOG_ERROR << "Failed to create DispMgn cell array";
         Mat_VarFree(disp_vec_cell);
         return false;
     }
-    
+
     // Write both to file
     Mat_VarWrite(matfp, disp_vec_cell, MAT_COMPRESSION_NONE);
     Mat_VarWrite(matfp, disp_mgn_cell, MAT_COMPRESSION_NONE);
-    
+
     // Free cell arrays
     Mat_VarFree(disp_vec_cell);
     Mat_VarFree(disp_mgn_cell);
-    
-    std::cout << "Successfully wrote displacement fields (DispVec, DispMgn)" << std::endl;
+
+    LOG_INFO << "Successfully wrote displacement fields (DispVec, DispMgn)";
     return true;
 }
 
@@ -1857,31 +1857,31 @@ bool MatWriter::writeFaceArrays(mat_t* matfp,
                                const std::vector<std::vector<double>>& face_iso_ind,
                                size_t n_frames) {
     if (!matfp) {
-        std::cerr << "Invalid MAT file pointer" << std::endl;
+        LOG_ERROR << "Invalid MAT file pointer";
         return false;
     }
-    
-    std::cout << "Writing face-based arrays with " << n_frames << " frames" << std::endl;
-    
+
+    LOG_INFO << "Writing face-based arrays with " << n_frames << " frames";
+
     // Create FaceCentroids cell array (Mx3 per frame)
     matvar_t* face_centroids_cell = createCellArrayFromVectors("FaceCentroids", face_centroids, n_frames);
     if (!face_centroids_cell) {
-        std::cerr << "Failed to create FaceCentroids cell array" << std::endl;
+        LOG_ERROR << "Failed to create FaceCentroids cell array";
         return false;
     }
-    
+
     // Create FaceCorrComb cell array (Mx1 per frame)
     matvar_t* face_corr_comb_cell = createCellArrayFromScalars("FaceCorrComb", face_corr_comb, n_frames);
     if (!face_corr_comb_cell) {
-        std::cerr << "Failed to create FaceCorrComb cell array" << std::endl;
+        LOG_ERROR << "Failed to create FaceCorrComb cell array";
         Mat_VarFree(face_centroids_cell);
         return false;
     }
-    
+
     // Create FaceIsoInd cell array (Mx1 per frame)
     matvar_t* face_iso_ind_cell = createCellArrayFromScalars("FaceIsoInd", face_iso_ind, n_frames);
     if (!face_iso_ind_cell) {
-        std::cerr << "Failed to create FaceIsoInd cell array" << std::endl;
+        LOG_ERROR << "Failed to create FaceIsoInd cell array";
         Mat_VarFree(face_centroids_cell);
         Mat_VarFree(face_corr_comb_cell);
         return false;
@@ -1897,48 +1897,48 @@ bool MatWriter::writeFaceArrays(mat_t* matfp,
     Mat_VarFree(face_corr_comb_cell);
     Mat_VarFree(face_iso_ind_cell);
     
-    std::cout << "Successfully wrote face arrays (FaceCentroids, FaceCorrComb, FaceIsoInd)" << std::endl;
+    LOG_INFO << "Successfully wrote face arrays (FaceCentroids, FaceCorrComb, FaceIsoInd)";
     return true;
 }
 
 bool MatWriter::writeCalibrationGroup(mat_t* matfp,
                                       const CalibrationData& calibration) {
     if (!matfp) {
-        std::cerr << "Invalid MAT file pointer" << std::endl;
+        LOG_ERROR << "Invalid MAT file pointer";
         return false;
     }
-    
-    std::cout << "Writing calibration group..." << std::endl;
-    
+
+    LOG_INFO << "Writing calibration group...";
+
     // Determine dimensions (should be 2x2 for stereo pairs)
     size_t rows = calibration.DLT_paths.size();
     size_t cols = (rows > 0) ? calibration.DLT_paths[0].size() : 0;
-    
+
     if (rows == 0 || cols == 0) {
-        std::cout << "Warning: Empty calibration data, skipping" << std::endl;
+        LOG_WARN << "Empty calibration data, skipping";
         return true;
     }
-    
+
     // Create DLTpath cell array (2x2 strings)
     matvar_t* dlt_path_cell = createCellArray2DFromStrings("DLTpath", calibration.DLT_paths, rows, cols);
     if (!dlt_path_cell) {
-        std::cerr << "Failed to create DLTpath cell array" << std::endl;
+        LOG_ERROR << "Failed to create DLTpath cell array";
         return false;
     }
-    
+
     // Create DLTparameters cell array (2x2 double vectors)
     matvar_t* dlt_params_cell = createCellArray2DFromVectors("DLTparameters", calibration.DLT_params, rows, cols);
     if (!dlt_params_cell) {
-        std::cerr << "Failed to create DLTparameters cell array" << std::endl;
+        LOG_ERROR << "Failed to create DLTparameters cell array";
         Mat_VarFree(dlt_path_cell);
         return false;
     }
-    
+
     // Create calibration struct/group to wrap both fields
     std::vector<std::string> calib_fields = {"DLTpath", "DLTparameters"};
     matvar_t* calib_struct = createStructVariable("calibration", calib_fields);
     if (!calib_struct) {
-        std::cerr << "Failed to create calibration struct" << std::endl;
+        LOG_ERROR << "Failed to create calibration struct";
         Mat_VarFree(dlt_path_cell);
         Mat_VarFree(dlt_params_cell);
         return false;
@@ -1952,48 +1952,48 @@ bool MatWriter::writeCalibrationGroup(mat_t* matfp,
     Mat_VarWrite(matfp, calib_struct, MAT_COMPRESSION_NONE);
     Mat_VarFree(calib_struct);
     
-    std::cout << "Successfully wrote calibration group (DLTpath, DLTparameters)" << std::endl;
+    LOG_INFO << "Successfully wrote calibration group (DLTpath, DLTparameters)";
     return true;
 }
 
 bool MatWriter::writeDistortionGroup(mat_t* matfp,
                                     const DistortionData& distortion) {
     if (!matfp) {
-        std::cerr << "Invalid MAT file pointer" << std::endl;
+        LOG_ERROR << "Invalid MAT file pointer";
         return false;
     }
-    
-    std::cout << "Writing distortion group..." << std::endl;
-    
+
+    LOG_INFO << "Writing distortion group...";
+
     // Determine dimensions (should be 2x2 for stereo pairs)
     size_t rows = distortion.distortion_models.size();
     size_t cols = (rows > 0) ? distortion.distortion_models[0].size() : 0;
-    
+
     if (rows == 0 || cols == 0) {
-        std::cout << "Warning: Empty distortion data, skipping" << std::endl;
+        LOG_WARN << "Empty distortion data, skipping";
         return true;
     }
-    
+
     // Create distortionModel cell array (2x2 strings)
     matvar_t* dist_model_cell = createCellArray2DFromStrings("distortionModel", distortion.distortion_models, rows, cols);
     if (!dist_model_cell) {
-        std::cerr << "Failed to create distortionModel cell array" << std::endl;
+        LOG_ERROR << "Failed to create distortionModel cell array";
         return false;
     }
-    
+
     // Create distortionPath cell array (2x2 strings)
     matvar_t* dist_path_cell = createCellArray2DFromStrings("distortionPath", distortion.distortion_paths, rows, cols);
     if (!dist_path_cell) {
-        std::cerr << "Failed to create distortionPath cell array" << std::endl;
+        LOG_ERROR << "Failed to create distortionPath cell array";
         Mat_VarFree(dist_model_cell);
         return false;
     }
-    
+
     // Create distortion struct/group to wrap both fields
     std::vector<std::string> dist_fields = {"distortionModel", "distortionPath"};
     matvar_t* dist_struct = createStructVariable("distortion", dist_fields);
     if (!dist_struct) {
-        std::cerr << "Failed to create distortion struct" << std::endl;
+        LOG_ERROR << "Failed to create distortion struct";
         Mat_VarFree(dist_model_cell);
         Mat_VarFree(dist_path_cell);
         return false;
@@ -2007,32 +2007,32 @@ bool MatWriter::writeDistortionGroup(mat_t* matfp,
     Mat_VarWrite(matfp, dist_struct, MAT_COMPRESSION_NONE);
     Mat_VarFree(dist_struct);
     
-    std::cout << "Successfully wrote distortion group (distortionModel, distortionPath)" << std::endl;
+    LOG_INFO << "Successfully wrote distortion group (distortionModel, distortionPath)";
     return true;
 }
 
 bool MatWriter::writeAllPairsResults(mat_t* matfp,
                                     const std::vector<DIC3DpairResults>& all_pairs) {
     if (!matfp) {
-        std::cerr << "Invalid MAT file pointer" << std::endl;
+        LOG_ERROR << "Invalid MAT file pointer";
         return false;
     }
-    
-    std::cout << "Writing AllPairsResults with " << all_pairs.size() << " pairs..." << std::endl;
-    
+
+    LOG_INFO << "Writing AllPairsResults with " << all_pairs.size() << " pairs...";
+
     if (all_pairs.empty()) {
-        std::cout << "Warning: Empty AllPairsResults, skipping" << std::endl;
+        LOG_WARN << "Empty AllPairsResults, skipping";
         return true;
     }
-    
+
     // Create cell array (1 x n_pairs)
     size_t n_pairs = all_pairs.size();
     std::vector<size_t> cell_dims = {1, n_pairs};
     matvar_t* cell_array = Mat_VarCreate("AllPairsResults", MAT_C_CELL, MAT_T_CELL,
                                          2, cell_dims.data(), nullptr, 0);
-    
+
     if (!cell_array) {
-        std::cerr << "Failed to create AllPairsResults cell array" << std::endl;
+        LOG_ERROR << "Failed to create AllPairsResults cell array";
         return false;
     }
     
@@ -2281,21 +2281,21 @@ bool MatWriter::writeAllPairsResults(mat_t* matfp,
     Mat_VarWrite(matfp, cell_array, MAT_COMPRESSION_NONE);
     Mat_VarFree(cell_array);
     
-    std::cout << "✓ AllPairsResults written successfully (" << n_pairs << " pairs)" << std::endl;
+    LOG_INFO << "AllPairsResults written successfully (" << n_pairs << " pairs)";
     return true;
 }
 
 bool MatWriter::writeDIC2Dinfo(mat_t* matfp,
                               const std::vector<DIC2DPairResults>& dic2d_info) {
     if (!matfp) {
-        std::cerr << "Invalid MAT file pointer" << std::endl;
+        LOG_ERROR << "Invalid MAT file pointer";
         return false;
     }
-    
-    std::cout << "Writing DIC2Dinfo with " << dic2d_info.size() << " entries..." << std::endl;
-    
+
+    LOG_INFO << "Writing DIC2Dinfo with " << dic2d_info.size() << " entries...";
+
     if (dic2d_info.empty()) {
-        std::cout << "Warning: Empty DIC2Dinfo, skipping" << std::endl;
+        LOG_WARN << "Empty DIC2Dinfo, skipping";
         return true;
     }
     
@@ -2306,7 +2306,7 @@ bool MatWriter::writeDIC2Dinfo(mat_t* matfp,
                                         2, array_dims.data(), nullptr, 0);
     
     if (!obj_array) {
-        std::cerr << "Failed to create DIC2Dinfo cell array" << std::endl;
+        LOG_ERROR << "Failed to create DIC2Dinfo cell array";
         return false;
     }
     
@@ -2475,7 +2475,7 @@ bool MatWriter::writeDIC2Dinfo(mat_t* matfp,
     Mat_VarWrite(matfp, obj_array, MAT_COMPRESSION_NONE);
     Mat_VarFree(obj_array);
     
-    std::cout << "✓ DIC2Dinfo written successfully (" << n_entries << " entries)" << std::endl;
+    LOG_INFO << "DIC2Dinfo written successfully (" << n_entries << " entries)";
     return true;
 }
 
@@ -2524,7 +2524,7 @@ matvar_t* MatWriter::createCellArrayFromScalars(
                                          2, cell_dims.data(), nullptr, 0);
     
     if (!cell_array) {
-        std::cerr << "Failed to create cell array: " << name << std::endl;
+        LOG_ERROR << "Failed to create cell array: " << name;
         return nullptr;
     }
     
@@ -2561,7 +2561,7 @@ matvar_t* MatWriter::createCellArrayFromVectors(
                                          2, cell_dims.data(), nullptr, 0);
     
     if (!cell_array) {
-        std::cerr << "Failed to create cell array: " << name << std::endl;
+        LOG_ERROR << "Failed to create cell array: " << name;
         return nullptr;
     }
     
@@ -2605,7 +2605,7 @@ matvar_t* MatWriter::createCellArrayFromMatrices(
                                          2, cell_dims.data(), nullptr, 0);
     
     if (!cell_array) {
-        std::cerr << "Failed to create cell array: " << name << std::endl;
+        LOG_ERROR << "Failed to create cell array: " << name;
         return nullptr;
     }
     
@@ -2652,7 +2652,7 @@ matvar_t* MatWriter::createCellArray2DFromStrings(
                                          2, cell_dims.data(), nullptr, 0);
     
     if (!cell_array) {
-        std::cerr << "Failed to create 2D cell array: " << name << std::endl;
+        LOG_ERROR << "Failed to create 2D cell array: " << name;
         return nullptr;
     }
     
@@ -2691,7 +2691,7 @@ matvar_t* MatWriter::createCellArray2DFromVectors(
                                          2, cell_dims.data(), nullptr, 0);
     
     if (!cell_array) {
-        std::cerr << "Failed to create 2D cell array: " << name << std::endl;
+        LOG_ERROR << "Failed to create 2D cell array: " << name;
         return nullptr;
     }
     

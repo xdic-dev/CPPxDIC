@@ -4,6 +4,7 @@
 
 #include "mat_reader.h"
 #include "dic_structures.h"
+#include "logging.h"
 #include <iostream>
 #include <matio.h>
 #include <sstream>
@@ -103,13 +104,13 @@ bool MatReader::readStructString(matvar_t* s, const char* field, std::string& ou
 bool MatReader::loadDLTCalibration(const std::string& mat_path, DLTCalibrationData& calib) {
     auto matfp = openMat(mat_path);
     if (!matfp) {
-        std::cerr << "Failed to open DLT calibration file: " << mat_path << '\n';
+        LOG_ERROR << "Failed to open DLT calibration file: " << mat_path;
         return false;
     }
 
     auto dlt_var = readVar(matfp.get(), "DLTstructCam");
     if (!dlt_var || dlt_var->class_type != MAT_C_STRUCT) {
-        std::cerr << "Variable 'DLTstructCam' not found or not a struct in " << mat_path << '\n';
+        LOG_ERROR << "Variable 'DLTstructCam' not found or not a struct in " << mat_path;
         return false;
     }
 
@@ -120,7 +121,7 @@ bool MatReader::loadDLTCalibration(const std::string& mat_path, DLTCalibrationDa
         calib.DLTparams = readDoubleArray(f);
     }
     if (calib.DLTparams.size() != 11) {
-        std::cerr << "DLTparams has " << calib.DLTparams.size() << " elements (expected 11) in " << mat_path << '\n';
+        LOG_ERROR << "DLTparams has " << calib.DLTparams.size() << " elements (expected 11) in " << mat_path;
         return false;
     }
 
@@ -181,10 +182,10 @@ bool MatReader::loadDLTCalibration(const std::string& mat_path, DLTCalibrationDa
         }
     }
 
-    std::cout << "Loaded DLT calibration: cam " << calib.indCam
-              << ", " << calib.DLTparams.size() << " DLT params"
-              << ", " << calib.imageCentroids_rows << " centroids"
-              << " from " << mat_path << '\n';
+    LOG_INFO << "Loaded DLT calibration: cam " << calib.indCam
+             << ", " << calib.DLTparams.size() << " DLT params"
+             << ", " << calib.imageCentroids_rows << " centroids"
+             << " from " << mat_path;
 
     return true;
 }
@@ -196,7 +197,7 @@ bool MatReader::loadDLTCalibration(const std::string& mat_path, DLTCalibrationDa
 bool MatReader::loadProtocol(const std::string& protocol_path, ProtocolFileData& protocol) {
     auto matfp = openMat(protocol_path);
     if (!matfp) {
-        std::cerr << "Failed to open protocol file: " << protocol_path << '\n';
+        LOG_ERROR << "Failed to open protocol file: " << protocol_path;
         return false;
     }
 
@@ -368,7 +369,7 @@ std::vector<double> MatReader::readDoubleArray(matvar_t* var) {
     if (!var || !var->data) return result;
 
     if (var->class_type != MAT_C_DOUBLE) {
-        std::cerr << "Warning: Variable is not double type\n";
+        LOG_WARN << "Variable is not double type";
         return result;
     }
 
@@ -388,7 +389,7 @@ std::vector<double> MatReader::readDouble2DArray(matvar_t* var, size_t& rows, si
     if (!var || !var->data || var->rank < 2) return result;
 
     if (var->class_type != MAT_C_DOUBLE) {
-        std::cerr << "Warning: Variable is not double type\n";
+        LOG_WARN << "Variable is not double type";
         return result;
     }
 
@@ -412,7 +413,7 @@ cv::Mat MatReader::readImage(matvar_t* var) {
     if (!var || !var->data) return cv::Mat();
 
     if (var->rank != 2) {
-        std::cerr << "Warning: Expected 2D array for image\n";
+        LOG_WARN << "Expected 2D array for image";
         return cv::Mat();
     }
 
@@ -444,7 +445,7 @@ cv::Mat MatReader::readImage(matvar_t* var) {
         return img;
     }
 
-    std::cerr << "Warning: Unsupported image data type\n";
+    LOG_WARN << "Unsupported image data type";
     return cv::Mat();
 }
 
@@ -461,7 +462,7 @@ double MatReader::readScalar(matvar_t* var) {
         return static_cast<double>(static_cast<const uint8_t*>(var->data)[0]);
     }
 
-    std::cerr << "Warning: Unsupported scalar type\n";
+    LOG_WARN << "Unsupported scalar type";
     return 0.0;
 }
 
@@ -483,7 +484,7 @@ std::string MatReader::readString(matvar_t* var) {
         return out;
     }
 
-    std::cerr << "Warning: Unsupported string type\n";
+    LOG_WARN << "Unsupported string type";
     return "";
 }
 
@@ -539,13 +540,13 @@ bool MatReader::variableExists(mat_t* matfp, const std::string& var_name) {
 cv::Mat MatReader::readROIMask(const std::string& mat_path, const std::string& var_name) {
     auto matfp = openMat(mat_path);
     if (!matfp) {
-        std::cerr << "Failed to open MAT file: " << mat_path << '\n';
+        LOG_ERROR << "Failed to open MAT file: " << mat_path;
         return cv::Mat();
     }
 
     auto var = readVar(matfp.get(), var_name);
     if (!var) {
-        std::cerr << "Variable '" << var_name << "' not found in " << mat_path << '\n';
+        LOG_ERROR << "Variable '" << var_name << "' not found in " << mat_path;
         return cv::Mat();
     }
 
@@ -555,7 +556,7 @@ cv::Mat MatReader::readROIMask(const std::string& mat_path, const std::string& v
 bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& combined) {
     auto matfp = openMat(mat_path);
     if (!matfp) {
-        std::cerr << "Failed to open MAT file: " << mat_path << '\n';
+        LOG_ERROR << "Failed to open MAT file: " << mat_path;
         return false;
     }
 
@@ -570,7 +571,7 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
     }
 
     if (!dic3d_var || dic3d_var->class_type != MAT_C_STRUCT) {
-        std::cerr << "DIC3Dcombined structure not found in " << mat_path << '\n';
+        LOG_ERROR << "DIC3Dcombined structure not found in " << mat_path;
         return false;
     }
 
@@ -580,7 +581,7 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
         }
         if (Mat_VarReadDataAll(matfp.get(), var) != 0) {
             if (!var->data && var->class_type != MAT_C_STRUCT && var->class_type != MAT_C_CELL) {
-                std::cerr << "Warning: failed to fully load '" << label << "' from " << mat_path << '\n';
+                LOG_WARN << "failed to fully load '" << label << "' from " << mat_path;
             }
         }
         return true;
@@ -632,10 +633,10 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
                     }
                 }
             } else {
-                std::cerr << "Warning: Unexpected Faces class_type " << faces_var->class_type << '\n';
+                LOG_WARN << "Unexpected Faces class_type " << faces_var->class_type;
             }
-            std::cout << "Loaded " << nFaces << " faces (type=" << faces_var->class_type 
-                      << ", dims=" << dim0 << "x" << dim1 << ")" << std::endl;
+            LOG_DEBUG << "Loaded " << nFaces << " faces (type=" << faces_var->class_type
+                      << ", dims=" << dim0 << "x" << dim1 << ")";
         }
     }
 
@@ -694,8 +695,8 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
                             combined.Points3D[frame].z[p] = d[p * 3 + 2];
                         }
                     } else {
-                        std::cerr << "Warning: Points3D frame " << frame << " has dims "
-                                  << dim0 << "x" << dim1 << " (expected Nx3 or 3xN) in " << mat_path << '\n';
+                        LOG_WARN << "Points3D frame " << frame << " has dims "
+                                 << dim0 << "x" << dim1 << " (expected Nx3 or 3xN) in " << mat_path;
                         continue;
                     }
                 } else {
@@ -705,8 +706,8 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
                 // Consistency check
                 if (combined.Points3D[frame].x.size() != combined.Points3D[frame].y.size() ||
                     combined.Points3D[frame].x.size() != combined.Points3D[frame].z.size()) {
-                    std::cerr << "Warning: inconsistent x/y/z sizes in Points3D frame "
-                            << frame << " in " << mat_path << '\n';
+                    LOG_WARN << "inconsistent x/y/z sizes in Points3D frame "
+                             << frame << " in " << mat_path;
 
                     combined.Points3D[frame].x.clear();
                     combined.Points3D[frame].y.clear();
@@ -714,8 +715,8 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
                 }
             }
             if (!combined.Points3D.empty() && !combined.Points3D[0].x.empty()) {
-                std::cout << "Loaded Points3D: " << nFrames << " frames, "
-                          << combined.Points3D[0].x.size() << " points per frame" << std::endl;
+                LOG_DEBUG << "Loaded Points3D: " << nFrames << " frames, "
+                          << combined.Points3D[0].x.size() << " points per frame";
             }
         }
     }
@@ -855,10 +856,10 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
         }
     }
 
-    std::cout << "Loaded DIC3Dcombined: "
-              << combined.Points3D.size() << " frames, "
-              << (combined.Points3D.empty() ? 0 : combined.Points3D[0].x.size()) << " points, "
-              << combined.Faces.size() / 3 << " faces\n";
+    LOG_INFO << "Loaded DIC3Dcombined: "
+             << combined.Points3D.size() << " frames, "
+             << (combined.Points3D.empty() ? 0 : combined.Points3D[0].x.size()) << " points, "
+             << combined.Faces.size() / 3 << " faces";
 
     return true;
 }
@@ -1048,7 +1049,7 @@ bool MatReader::readDIC2DPairResultsFromStruct(matvar_t* dic2d_root, DIC2DPairRe
 bool MatReader::readDIC2DPairResults(const std::string& mat_path, DIC2DPairResults& result) {
     auto matfp = openMat(mat_path);
     if (!matfp) {
-        std::cerr << "Failed to open MAT file: " << mat_path << '\n';
+        LOG_ERROR << "Failed to open MAT file: " << mat_path;
         return false;
     }
 
@@ -1065,13 +1066,13 @@ bool MatReader::readDIC2DPairResults(const std::string& mat_path, DIC2DPairResul
         if (!readDIC2DPairResultsFromStruct(dic2d_root, result)) {
             return false;
         }
-        std::cout << "Loaded DIC2DPairResults: "
-                  << "nCamRef=" << result.nCamRef
-                  << ", nCamDef=" << result.nCamDef
-                  << ", nImages=" << result.nImages
-                  << ", pairOrder=" << result.pairOrder.size()
-                  << ", " << result.Points.size() << " frames"
-                  << ", " << result.Faces.size() / 3 << " faces\n";
+        LOG_INFO << "Loaded DIC2DPairResults: "
+                 << "nCamRef=" << result.nCamRef
+                 << ", nCamDef=" << result.nCamDef
+                 << ", nImages=" << result.nImages
+                 << ", pairOrder=" << result.pairOrder.size()
+                 << ", " << result.Points.size() << " frames"
+                 << ", " << result.Faces.size() / 3 << " faces";
         return true;
     }
 
@@ -1121,8 +1122,8 @@ bool MatReader::readDIC2DPairResults(const std::string& mat_path, DIC2DPairResul
             result.Faces.clear();
 
             if (nFaces == 0) {
-                std::cerr << "Faces has unexpected shape (" << rows << "x" << cols
-                          << "), expected Nx3 or 3xN in " << mat_path << '\n';
+                LOG_WARN << "Faces has unexpected shape (" << rows << "x" << cols
+                         << "), expected Nx3 or 3xN in " << mat_path;
             } else {
                 result.Faces.reserve(nFaces * 3);
 
@@ -1153,8 +1154,8 @@ bool MatReader::readDIC2DPairResults(const std::string& mat_path, DIC2DPairResul
                 } else if (faces_var->class_type == MAT_C_INT32) {
                     pushFaces(static_cast<const int32_t*>(faces_var->data));
                 } else {
-                    std::cerr << "Faces has unsupported type (class_type=" << faces_var->class_type
-                              << ") in " << mat_path << '\n';
+                    LOG_WARN << "Faces has unsupported type (class_type=" << faces_var->class_type
+                             << ") in " << mat_path;
                 }
             }
         }
@@ -1242,13 +1243,13 @@ bool MatReader::readDIC2DPairResults(const std::string& mat_path, DIC2DPairResul
         }
     }
 
-    std::cout << "Loaded DIC2DPairResults: "
-              << "nCamRef=" << result.nCamRef
-              << ", nCamDef=" << result.nCamDef
-              << ", nImages=" << result.nImages
-              << ", pairOrder=" << result.pairOrder.size()
-              << ", " << result.Points.size() << " frames"
-              << ", " << result.Faces.size() / 3 << " faces\n";
+    LOG_INFO << "Loaded DIC2DPairResults: "
+             << "nCamRef=" << result.nCamRef
+             << ", nCamDef=" << result.nCamDef
+             << ", nImages=" << result.nImages
+             << ", pairOrder=" << result.pairOrder.size()
+             << ", " << result.Points.size() << " frames"
+             << ", " << result.Faces.size() / 3 << " faces";
 
     return true;
 }

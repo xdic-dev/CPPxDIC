@@ -3,6 +3,7 @@
  */
 
 #include "config.h"
+#include "logging.h"
 #include <iostream>
 #include <filesystem>
 #include <fstream>
@@ -29,10 +30,10 @@ void Config::updateVariables() {
         material = frictional_conditions[material_id - 1]; // Convert to 0-based index
     } else {
         material = "unknown";
-        std::cerr << "Warning: Invalid material_id " << material_id << std::endl;
+        LOG_WARN << "Invalid material_id " << material_id;
     }
 
-    std::cout << "Variables updated. Material: " << material << std::endl;
+    LOG_INFO << "Variables updated. Material: " << material;
 }
 
 void Config::setDefaultPaths() {
@@ -42,7 +43,7 @@ void Config::setDefaultPaths() {
         base_path = std::filesystem::current_path().string();
     } catch (const std::exception& e) {
         base_path = ".";
-        std::cerr << "Warning: Could not get current path, using '.' as base_path" << std::endl;
+        LOG_WARN << "Could not get current path, using '.' as base_path";
     }
 }
 
@@ -91,7 +92,7 @@ std::vector<int> Config::parseIntList(const std::string& value) {
         try {
             result.push_back(std::stoi(item));
         } catch (...) {
-            std::cerr << "Warning: Could not parse int value: " << item << std::endl;
+            LOG_WARN << "Could not parse int value: " << item;
         }
     }
     return result;
@@ -106,7 +107,7 @@ std::vector<double> Config::parseDoubleList(const std::string& value) {
         try {
             result.push_back(std::stod(item));
         } catch (...) {
-            std::cerr << "Warning: Could not parse double value: " << item << std::endl;
+            LOG_WARN << "Could not parse double value: " << item;
         }
     }
     return result;
@@ -122,17 +123,17 @@ bool Config::parseBool(const std::string& value) {
 // Load DIC parameters from file
 bool Config::loadFromDicParamsFile(const std::string& filepath) {
     if (!std::filesystem::exists(filepath)) {
-        std::cout << "DIC params file not found: " << filepath << ", using defaults" << std::endl;
+        LOG_INFO << "DIC params file not found: " << filepath << ", using defaults";
         return false;
     }
 
     std::ifstream file(filepath);
     if (!file.is_open()) {
-        std::cerr << "Warning: Could not open DIC params file: " << filepath << std::endl;
+        LOG_WARN << "Could not open DIC params file: " << filepath;
         return false;
     }
 
-    std::cout << "Loading DIC parameters from: " << filepath << std::endl;
+    LOG_INFO << "Loading DIC parameters from: " << filepath;
 
     std::string line;
     while (std::getline(file, line)) {
@@ -173,6 +174,10 @@ bool Config::loadFromDicParamsFile(const std::string& filepath) {
             parallel_processing = parseBool(value);
         } else if (!(value = parseConfigValue(line, "debug_mode")).empty()) {
             debug_mode = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "log_level")).empty()) {
+            log_level = value;
+        } else if (!(value = parseConfigValue(line, "log_file")).empty()) {
+            log_file = value;
         }
         // DIC analysis parameters
         else if (!(value = parseConfigValue(line, "subject_id")).empty()) {
@@ -318,24 +323,24 @@ bool Config::loadFromDicParamsFile(const std::string& filepath) {
     }
 
     file.close();
-    std::cout << "DIC parameters loaded from file" << std::endl;
+    LOG_INFO << "DIC parameters loaded from file";
     return true;
 }
 
 // Load NCorr parameters from file (overrides DIC params where applicable)
 bool Config::loadFromNcorrParamsFile(const std::string& filepath) {
     if (!std::filesystem::exists(filepath)) {
-        std::cout << "NCorr params file not found: " << filepath << ", skipping" << std::endl;
+        LOG_INFO << "NCorr params file not found: " << filepath << ", skipping";
         return false;
     }
 
     std::ifstream file(filepath);
     if (!file.is_open()) {
-        std::cerr << "Warning: Could not open NCorr params file: " << filepath << std::endl;
+        LOG_WARN << "Could not open NCorr params file: " << filepath;
         return false;
     }
 
-    std::cout << "Loading NCorr parameters from: " << filepath << std::endl;
+    LOG_INFO << "Loading NCorr parameters from: " << filepath;
 
     std::string line;
     while (std::getline(file, line)) {
@@ -389,25 +394,24 @@ bool Config::loadFromNcorrParamsFile(const std::string& filepath) {
     }
 
     file.close();
-    std::cout << "NCorr parameters loaded from file" << std::endl;
+    LOG_INFO << "NCorr parameters loaded from file";
     return true;
 }
 
 // Load visualization parameters from file
 bool Config::loadFromVisualizationParamsFile(const std::string& filepath) {
     if (!std::filesystem::exists(filepath)) {
-        std::cout << "Visualization params file not found: " << filepath << ", using defaults"
-                  << std::endl;
+        LOG_INFO << "Visualization params file not found: " << filepath << ", using defaults";
         return false;
     }
 
     std::ifstream file(filepath);
     if (!file.is_open()) {
-        std::cerr << "Warning: Could not open visualization params file: " << filepath << std::endl;
+        LOG_WARN << "Could not open visualization params file: " << filepath;
         return false;
     }
 
-    std::cout << "Loading visualization parameters from: " << filepath << std::endl;
+    LOG_INFO << "Loading visualization parameters from: " << filepath;
 
     std::string line;
     while (std::getline(file, line)) {
@@ -552,7 +556,7 @@ bool Config::loadFromVisualizationParamsFile(const std::string& filepath) {
     }
 
     file.close();
-    std::cout << "Visualization parameters loaded from file" << std::endl;
+    LOG_INFO << "Visualization parameters loaded from file";
     return true;
 }
 
@@ -561,11 +565,11 @@ bool Config::loadFromVisualizationParamsFile(const std::string& filepath) {
 // unified file containing any mix of DIC / NCorr / visualization keys is parsed correctly.
 bool Config::loadFromConfigFile(const std::string& filepath) {
     if (!std::filesystem::exists(filepath)) {
-        std::cout << "Config file not found: " << filepath
-                  << ", using compiled defaults / per-file params" << std::endl;
+        LOG_INFO << "Config file not found: " << filepath
+                 << ", using compiled defaults / per-file params";
         return false;
     }
-    std::cout << "Loading unified config file: " << filepath << std::endl;
+    LOG_INFO << "Loading unified config file: " << filepath;
     // Order does not matter: the loaders key on disjoint parameter names.
     loadFromDicParamsFile(filepath);
     loadFromNcorrParamsFile(filepath);
@@ -576,11 +580,11 @@ bool Config::loadFromConfigFile(const std::string& filepath) {
 // Override subject from command line
 void Config::overrideSubject(const std::string& subject) {
     subject_id = subject;
-    std::cout << "Subject overridden to: " << subject_id << std::endl;
+    LOG_INFO << "Subject overridden to: " << subject_id;
 }
 
 // Override reference trial from command line
 void Config::overrideRefTrial(int trial) {
     ref_trial_id = trial;
-    std::cout << "Reference trial overridden to: " << ref_trial_id << std::endl;
+    LOG_INFO << "Reference trial overridden to: " << ref_trial_id;
 }

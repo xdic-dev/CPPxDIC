@@ -5,6 +5,7 @@
 #include "data_serializer.h"
 #include "mat_writer.h"
 #include "mat_reader.h"
+#include "logging.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -67,7 +68,7 @@ bool BinarySerializer::saveDIC3Dcombined(const std::string& path, const DIC3Dcom
         data.saveBinary(path);
         return true;
     } catch (const std::exception& e) {
-        std::cerr << "BinarySerializer: Failed to save DIC3Dcombined: " << e.what() << std::endl;
+        LOG_ERROR << "BinarySerializer: Failed to save DIC3Dcombined: " << e.what();
         return false;
     }
 }
@@ -77,7 +78,7 @@ bool BinarySerializer::loadDIC3Dcombined(const std::string& path, DIC3Dcombined&
         data = DIC3Dcombined::loadBinary(path);
         return true;
     } catch (const std::exception& e) {
-        std::cerr << "BinarySerializer: Failed to load DIC3Dcombined: " << e.what() << std::endl;
+        LOG_ERROR << "BinarySerializer: Failed to load DIC3Dcombined: " << e.what();
         return false;
     }
 }
@@ -87,7 +88,7 @@ bool BinarySerializer::saveDIC3DPPresults(const std::string& path, const DIC3DPP
         data.saveBinary(path);
         return true;
     } catch (const std::exception& e) {
-        std::cerr << "BinarySerializer: Failed to save DIC3DPPresults: " << e.what() << std::endl;
+        LOG_ERROR << "BinarySerializer: Failed to save DIC3DPPresults: " << e.what();
         return false;
     }
 }
@@ -152,7 +153,7 @@ bool BinarySerializer::saveDIC2DPairResults(const std::string& path, const DIC2D
         
         return ofs.good();
     } catch (const std::exception& e) {
-        std::cerr << "BinarySerializer: Failed to save DIC2DPairResults: " << e.what() << std::endl;
+        LOG_ERROR << "BinarySerializer: Failed to save DIC2DPairResults: " << e.what();
         return false;
     }
 }
@@ -221,7 +222,7 @@ bool BinarySerializer::loadDIC2DPairResults(const std::string& path, DIC2DPairRe
         
         return ifs.good();
     } catch (const std::exception& e) {
-        std::cerr << "BinarySerializer: Failed to load DIC2DPairResults: " << e.what() << std::endl;
+        LOG_ERROR << "BinarySerializer: Failed to load DIC2DPairResults: " << e.what();
         return false;
     }
 }
@@ -289,7 +290,7 @@ bool JsonSerializer::saveDIC3Dcombined(const std::string& path, const DIC3Dcombi
         ofs << j.dump(2) << std::endl;
         return ofs.good();
     } catch (const std::exception& e) {
-        std::cerr << "JsonSerializer: Failed to save DIC3Dcombined: " << e.what() << std::endl;
+        LOG_ERROR << "JsonSerializer: Failed to save DIC3Dcombined: " << e.what();
         return false;
     }
 }
@@ -340,7 +341,7 @@ bool JsonSerializer::loadDIC3Dcombined(const std::string& path, DIC3Dcombined& d
         
         return true;
     } catch (const std::exception& e) {
-        std::cerr << "JsonSerializer: Failed to load DIC3Dcombined: " << e.what() << std::endl;
+        LOG_ERROR << "JsonSerializer: Failed to load DIC3Dcombined: " << e.what();
         return false;
     }
 }
@@ -432,7 +433,7 @@ bool JsonSerializer::saveDIC3DPPresults(const std::string& path, const DIC3DPPre
         ofs << j.dump(2) << std::endl;
         return ofs.good();
     } catch (const std::exception& e) {
-        std::cerr << "JsonSerializer: Failed to save DIC3DPPresults: " << e.what() << std::endl;
+        LOG_ERROR << "JsonSerializer: Failed to save DIC3DPPresults: " << e.what();
         return false;
     }
 }
@@ -466,7 +467,7 @@ bool JsonSerializer::saveDIC2DPairResults(const std::string& path, const DIC2DPa
         ofs << j.dump(2) << std::endl;
         return ofs.good();
     } catch (const std::exception& e) {
-        std::cerr << "JsonSerializer: Failed to save DIC2DPairResults: " << e.what() << std::endl;
+        LOG_ERROR << "JsonSerializer: Failed to save DIC2DPairResults: " << e.what();
         return false;
     }
 }
@@ -500,7 +501,7 @@ bool JsonSerializer::loadDIC2DPairResults(const std::string& path, DIC2DPairResu
         
         return true;
     } catch (const std::exception& e) {
-        std::cerr << "JsonSerializer: Failed to load DIC2DPairResults: " << e.what() << std::endl;
+        LOG_ERROR << "JsonSerializer: Failed to load DIC2DPairResults: " << e.what();
         return false;
     }
 }

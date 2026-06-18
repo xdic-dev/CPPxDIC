@@ -3,6 +3,7 @@
  */
 
 #include "utils.h"
+#include "logging.h"
 #include <iostream>
 #include <filesystem>
 #include <regex>
@@ -19,13 +20,13 @@
 #include <string_view>
 
 bool Utils::dicCheck(const Config& config) {
-    std::cout << "Checking data and protocol..." << std::endl;
+    LOG_INFO << "Checking data and protocol...";
 
     bool success = true;
 
     // Check parallel processing requirements
     if (config.parallel_processing) {
-        std::cout << "Parallel processing is enabled" << std::endl;
+        LOG_INFO << "Parallel processing is enabled";
 
         if (!checkROIReferences(config)) {
             success = false;
@@ -47,7 +48,7 @@ bool Utils::dicCheck(const Config& config) {
     }
 
     if (success) {
-        std::cout << "...done Checking." << std::endl;
+        LOG_INFO << "...done Checking.";
     }
 
     return success;
@@ -57,7 +58,7 @@ bool Utils::checkCalibrationFiles(const Config& config) {
     try {
         std::string calib_dir = Utils::buildCalibDir(config);
         if (!std::filesystem::exists(calib_dir)) {
-            std::cerr << "Calibration directory not found: " << calib_dir << std::endl;
+            LOG_ERROR << "Calibration directory not found: " << calib_dir;
             return false;
         }
 
@@ -85,27 +86,27 @@ bool Utils::checkCalibrationFiles(const Config& config) {
         bool all_found = true;
         for (int cam_id = 1; cam_id <= config.num_pair * 2; ++cam_id) {
             if (!cam_found[cam_id - 1]) {
-                std::cerr << "Camera " << cam_id << " calibration file missing" << std::endl;
+                LOG_ERROR << "Camera " << cam_id << " calibration file missing";
                 all_found = false;
             }
         }
 
         if (!all_found) {
-            std::cerr << "Some calibration files missing in " << calib_dir << std::endl;
+            LOG_ERROR << "Some calibration files missing in " << calib_dir;
             return false;
         }
 
-        std::cout << "Calibration files found for all " << (config.num_pair * 2) << " cameras in "
-                  << calib_dir << std::endl;
+        LOG_INFO << "Calibration files found for all " << (config.num_pair * 2) << " cameras in "
+                 << calib_dir;
         return true;
     } catch (...) {
-        std::cerr << "Error while checking calibration files" << std::endl;
+        LOG_ERROR << "Error while checking calibration files";
         return false;
     }
 }
 
 bool Utils::checkROIReferences(const Config& config) {
-    std::cout << "Checking ROI References..." << std::endl;
+    LOG_INFO << "Checking ROI References...";
 
     for (int pair_i = 1; pair_i <= config.num_pair; ++pair_i) {
         std::ostringstream ref_trial_id_oss;
@@ -116,12 +117,12 @@ bool Utils::checkROIReferences(const Config& config) {
                                config.phase_id, pair_i, ".mat");
 
         if (!fileExists(roifile)) {
-            std::cerr << "This file " << roifile
-                      << " must exist to be able to run DIC analysis in parallel." << std::endl;
-            std::cerr << "This file comes from Drawing Reference ROI process." << std::endl;
-            std::cerr << "Error: ROI file for the stereopair " << pair_i
-                      << " from the Reference Trial " << config.ref_trial_id << " for the subject "
-                      << config.subject_id << " not found." << std::endl;
+            LOG_ERROR << "This file " << roifile
+                      << " must exist to be able to run DIC analysis in parallel."
+                      << " This file comes from Drawing Reference ROI process."
+                      << " ROI file for the stereopair " << pair_i << " from the Reference Trial "
+                      << config.ref_trial_id << " for the subject " << config.subject_id
+                      << " not found.";
             return false;
         }
     }
@@ -130,7 +131,7 @@ bool Utils::checkROIReferences(const Config& config) {
 }
 
 bool Utils::checkSeedReferences(const Config& config) {
-    std::cout << "Checking SEED References..." << std::endl;
+    LOG_INFO << "Checking SEED References...";
 
     for (int pair_i = 1; pair_i <= config.num_pair; ++pair_i) {
         std::ostringstream ref_trial_id_oss;
@@ -141,12 +142,12 @@ bool Utils::checkSeedReferences(const Config& config) {
                                 config.phase_id, pair_i, ".mat");
 
         if (!fileExists(seedfile)) {
-            std::cerr << "This file " << seedfile
-                      << " must exist to be able to run DIC analysis in parallel." << std::endl;
-            std::cerr << "This file comes from Selecting the seed of ROI process." << std::endl;
-            std::cerr << "Error: SEED file for the stereopair " << pair_i
-                      << " from the Reference Trial " << config.ref_trial_id << " for the subject "
-                      << config.subject_id << " not found." << std::endl;
+            LOG_ERROR << "This file " << seedfile
+                      << " must exist to be able to run DIC analysis in parallel."
+                      << " This file comes from Selecting the seed of ROI process."
+                      << " SEED file for the stereopair " << pair_i << " from the Reference Trial "
+                      << config.ref_trial_id << " for the subject " << config.subject_id
+                      << " not found.";
             return false;
         }
     }
@@ -160,9 +161,8 @@ bool Utils::checkProtocolFiles(const Config& config) {
     auto protocol_files = findFiles(protocol_dir, "*.mat");
 
     if (protocol_files.empty()) {
-        std::cerr << "Protocol files in " << protocol_dir
-                  << " must exist to be able to run DIC analysis." << std::endl;
-        std::cerr << "Error: Protocol not found." << std::endl;
+        LOG_ERROR << "Protocol files in " << protocol_dir
+                  << " must exist to be able to run DIC analysis. Protocol not found.";
         return false;
     }
 
@@ -202,7 +202,7 @@ std::vector<std::string> Utils::findFiles(const std::string& directory,
             }
         }
     } catch (const std::exception& e) {
-        std::cerr << "Error searching for files: " << e.what() << std::endl;
+        LOG_ERROR << "Error searching for files: " << e.what();
     }
 
     return files;
@@ -326,21 +326,20 @@ bool Utils::importRawVid(const Config& config, int trial, int stereopair, int fr
         std::string vid2 =
             find_video_file(video_dir, config.subject_id, config.material, trialname, cam_second);
         if (vid1.empty() || vid2.empty()) {
-            std::cerr << "Video files not found for trial=" << trial << " pair=" << stereopair
-                      << std::endl;
+            LOG_ERROR << "Video files not found for trial=" << trial << " pair=" << stereopair;
             return false;
         }
 
         cv::VideoCapture cap1(vid1);
         cv::VideoCapture cap2(vid2);
         if (!cap1.isOpened() || !cap2.isOpened()) {
-            std::cerr << "Failed to open video files: " << vid1 << " or " << vid2 << std::endl;
+            LOG_ERROR << "Failed to open video files: " << vid1 << " or " << vid2;
             return false;
         }
 
-        std::cout << "Video loaded successfully." << std::endl;
-        std::cout << "Video 1: " << vid1 << std::endl;
-        std::cout << "Video 2: " << vid2 << std::endl;
+        LOG_INFO << "Video loaded successfully.";
+        LOG_INFO << "Video 1: " << vid1;
+        LOG_INFO << "Video 2: " << vid2;
 
         int total1 = static_cast<int>(cap1.get(cv::CAP_PROP_FRAME_COUNT));
         int total2 = static_cast<int>(cap2.get(cv::CAP_PROP_FRAME_COUNT));
@@ -357,7 +356,7 @@ bool Utils::importRawVid(const Config& config, int trial, int stereopair, int fr
         std::string cam1_dir = base_dir + "cam" + std::to_string(cam_first);
         std::string cam2_dir = base_dir + "cam" + std::to_string(cam_second);
         if (!ensure_dir(cam1_dir) || !ensure_dir(cam2_dir)) {
-            std::cerr << "Failed to create frame directories" << std::endl;
+            LOG_ERROR << "Failed to create frame directories";
             return false;
         }
 
@@ -399,7 +398,7 @@ bool Utils::importRawVid(const Config& config, int trial, int stereopair, int fr
 
         return !cam1Frames.empty() && !cam2Frames.empty();
     } catch (const std::exception& e) {
-        std::cerr << "importRawVid error: " << e.what() << std::endl;
+        LOG_ERROR << "importRawVid error: " << e.what();
         return false;
     }
 }
@@ -736,21 +735,21 @@ bool Utils::loadCameraParameters(const std::string& mat_path, CameraParameters& 
     params.is_valid = false;
 
     if (!fileExists(mat_path)) {
-        std::cerr << "Camera parameters file not found: " << mat_path << std::endl;
+        LOG_ERROR << "Camera parameters file not found: " << mat_path;
         return false;
     }
 
     try {
         mat_t* mat_file = Mat_Open(mat_path.c_str(), MAT_ACC_RDONLY);
         if (!mat_file) {
-            std::cerr << "Failed to open MAT file: " << mat_path << std::endl;
+            LOG_ERROR << "Failed to open MAT file: " << mat_path;
             return false;
         }
 
         // Read 'cameraCBparameters' structure
         matvar_t* cb_struct = Mat_VarRead(mat_file, "cameraCBparameters");
         if (!cb_struct || cb_struct->class_type != MAT_C_STRUCT) {
-            std::cerr << "Variable 'cameraCBparameters' not found or not a struct" << std::endl;
+            LOG_ERROR << "Variable 'cameraCBparameters' not found or not a struct";
             Mat_Close(mat_file);
             return false;
         }
@@ -758,7 +757,7 @@ bool Utils::loadCameraParameters(const std::string& mat_path, CameraParameters& 
         // Get 'cameraParameters' field
         matvar_t* cam_params = Mat_VarGetStructFieldByName(cb_struct, "cameraParameters", 0);
         if (!cam_params || cam_params->class_type != MAT_C_STRUCT) {
-            std::cerr << "Field 'cameraParameters' not found or not a struct" << std::endl;
+            LOG_ERROR << "Field 'cameraParameters' not found or not a struct";
             Mat_VarFree(cb_struct);
             Mat_Close(mat_file);
             return false;
@@ -781,7 +780,7 @@ bool Utils::loadCameraParameters(const std::string& mat_path, CameraParameters& 
             params.camera_matrix.at<double>(2, 1) = data[5]; // 0
             params.camera_matrix.at<double>(2, 2) = data[8]; // 1
         } else {
-            std::cerr << "IntrinsicMatrix not found or invalid" << std::endl;
+            LOG_ERROR << "IntrinsicMatrix not found or invalid";
             Mat_VarFree(cb_struct);
             Mat_Close(mat_file);
             return false;
@@ -827,14 +826,14 @@ bool Utils::loadCameraParameters(const std::string& mat_path, CameraParameters& 
         Mat_Close(mat_file);
 
         params.is_valid = true;
-        std::cout << "Loaded camera parameters from: " << mat_path << std::endl;
-        std::cout << "  Intrinsic matrix: " << params.camera_matrix << std::endl;
-        std::cout << "  Distortion coeffs: " << params.distortion_coeffs << std::endl;
+        LOG_INFO << "Loaded camera parameters from: " << mat_path;
+        LOG_DEBUG << "  Intrinsic matrix: " << params.camera_matrix;
+        LOG_DEBUG << "  Distortion coeffs: " << params.distortion_coeffs;
 
         return true;
 
     } catch (const std::exception& e) {
-        std::cerr << "Exception loading camera parameters: " << e.what() << std::endl;
+        LOG_ERROR << "Exception loading camera parameters: " << e.what();
         return false;
     }
 }
@@ -842,7 +841,7 @@ bool Utils::loadCameraParameters(const std::string& mat_path, CameraParameters& 
 void Utils::undistortPoints(const std::vector<cv::Point2d>& points_in,
                             const CameraParameters& params, std::vector<cv::Point2d>& points_out) {
     if (!params.is_valid) {
-        std::cerr << "Warning: Invalid camera parameters, cannot undistort points" << std::endl;
+        LOG_WARN << "Invalid camera parameters, cannot undistort points";
         points_out = points_in;
         return;
     }
@@ -929,8 +928,7 @@ cv::Point2d Utils::undistortPoint(const cv::Point2d& point_in, const CameraParam
 
 bool Utils::DLT11Calibration(const double* P2, const double* P3, size_t N, std::vector<double>& L) {
     if (N < 6) {
-        std::cerr << "DLT11Calibration: need at least 6 point correspondences, got " << N
-                  << std::endl;
+        LOG_ERROR << "DLT11Calibration: need at least 6 point correspondences, got " << N;
         return false;
     }
 
@@ -995,13 +993,12 @@ bool Utils::computeRigidTransform(const std::vector<Eigen::Vector3d>& points_fro
     transform.is_valid = false;
 
     if (points_from.size() != points_to.size()) {
-        std::cerr << "Error: Point clouds must have same size for rigid transformation"
-                  << std::endl;
+        LOG_ERROR << "Point clouds must have same size for rigid transformation";
         return false;
     }
 
     if (points_from.size() < 3) {
-        std::cerr << "Error: Need at least 3 points for rigid transformation" << std::endl;
+        LOG_ERROR << "Need at least 3 points for rigid transformation";
         return false;
     }
 
@@ -1015,10 +1012,9 @@ bool Utils::computeRigidTransform(const std::vector<Eigen::Vector3d>& points_fro
     }
 
     if (from_no_nan.size() < 3) {
-        std::cerr << "Error: Too few valid points after removing NaNs (" << from_no_nan.size()
-                  << " of " << points_from.size() << " points valid, need at least 3)" << std::endl;
-        std::cerr << "       This usually indicates poor correlation/tracking in the DIC analysis"
-                  << std::endl;
+        LOG_ERROR << "Too few valid points after removing NaNs (" << from_no_nan.size() << " of "
+                  << points_from.size() << " points valid, need at least 3)."
+                  << " This usually indicates poor correlation/tracking in the DIC analysis";
         return false;
     }
 
@@ -1077,7 +1073,7 @@ std::vector<Eigen::Vector3d> Utils::applyRigidTransform(
     points_out.reserve(points_in.size());
 
     if (!transform.is_valid) {
-        std::cerr << "Warning: Invalid transform, returning original points" << std::endl;
+        LOG_WARN << "Invalid transform, returning original points";
         return points_in;
     }
 

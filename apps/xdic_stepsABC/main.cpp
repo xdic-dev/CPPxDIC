@@ -23,6 +23,7 @@
 
 #include <opencv2/opencv.hpp>
 
+#include "logging.h"
 #include "stepsABC/mask_seed_setup.h"
 #include "stepsABC/stereo_calibration.h"
 
@@ -72,7 +73,7 @@ int runMaskSeed(bool gui, const std::string& image_path, const std::string& mask
     if (!image_path.empty()) {
         ref = cv::imread(image_path, cv::IMREAD_GRAYSCALE);
         if (ref.empty()) {
-            std::cerr << "Error: cannot read reference image: " << image_path << "\n";
+            LOG_ERROR << "cannot read reference image: " << image_path;
             return 1;
         }
     }
@@ -80,19 +81,19 @@ int runMaskSeed(bool gui, const std::string& image_path, const std::string& mask
     MaskSeedResult result;
     if (gui) {
         if (!MaskSeedSetup::guiAvailable()) {
-            std::cerr << "Error: --gui requested but this binary was built without GUI "
+            LOG_ERROR << "--gui requested but this binary was built without GUI "
                          "support (XDIC_STEPSABC_GUI=OFF). Use --no-gui with --mask/--seed, "
-                         "or rebuild with -DXDIC_STEPSABC_GUI=ON on a machine with a display.\n";
+                         "or rebuild with -DXDIC_STEPSABC_GUI=ON on a machine with a display.";
             return 2;
         }
         if (ref.empty()) {
-            std::cerr << "Error: --gui requires --image <path>.\n";
+            LOG_ERROR << "--gui requires --image <path>.";
             return 1;
         }
         result = MaskSeedSetup::runGui(ref, num_seeds, err);
     } else {
         if (mask_path.empty() || seed_path.empty()) {
-            std::cerr << "Error: --no-gui requires --mask and --seed.\n";
+            LOG_ERROR << "--no-gui requires --mask and --seed.";
             return 1;
         }
         cv::Size size = ref.empty() ? cv::Size(0, 0) : ref.size();
@@ -100,40 +101,40 @@ int runMaskSeed(bool gui, const std::string& image_path, const std::string& mask
     }
 
     if (!result.valid) {
-        std::cerr << "Error: mask/seed setup failed: " << err << "\n";
+        LOG_ERROR << "mask/seed setup failed: " << err;
         return 1;
     }
 
-    std::cout << "Mask polygon vertices: " << result.polygon.size() << "\n";
-    std::cout << "Seed points: " << result.seeds.size() << "\n";
+    LOG_INFO << "Mask polygon vertices: " << result.polygon.size();
+    LOG_INFO << "Seed points: " << result.seeds.size();
     for (size_t i = 0; i < result.seeds.size(); ++i) {
-        std::cout << "  seed[" << i << "] = (" << result.seeds[i].pw[0] << ", "
-                  << result.seeds[i].pw[1] << ")\n";
+        LOG_INFO << "  seed[" << i << "] = (" << result.seeds[i].pw[0] << ", "
+                 << result.seeds[i].pw[1] << ")";
     }
 
     if (!out_prefix.empty()) {
         if (!MaskSeedSetup::save(result, out_prefix, err)) {
-            std::cerr << "Error: failed to save: " << err << "\n";
+            LOG_ERROR << "failed to save: " << err;
             return 1;
         }
-        std::cout << "Saved: " << out_prefix << ".poly, " << out_prefix << "_mask.png, "
-                  << out_prefix << ".seed\n";
+        LOG_INFO << "Saved: " << out_prefix << ".poly, " << out_prefix << "_mask.png, "
+                 << out_prefix << ".seed";
     }
     return 0;
 }
 
 int runGenObject(const CylinderCalibSpec& spec, const std::string& out_path) {
     if (out_path.empty()) {
-        std::cerr << "Error: gen-object requires --object-out <path>.\n";
+        LOG_ERROR << "gen-object requires --object-out <path>.";
         return 1;
     }
     auto pts = StereoCalibration::generateCylindricalObject(spec);
     std::string err;
     if (!StereoCalibration::writeObjectFile(pts, out_path, err)) {
-        std::cerr << "Error: " << err << "\n";
+        LOG_ERROR << err;
         return 1;
     }
-    std::cout << "Generated " << pts.size() << " calibration points -> " << out_path << "\n";
+    LOG_INFO << "Generated " << pts.size() << " calibration points -> " << out_path;
     return 0;
 }
 
@@ -142,21 +143,21 @@ int runStepC(const std::string& object_path, int cam1, int cam2, const std::stri
     std::string err;
     auto object_points = StereoCalibration::readObjectFile(object_path, err);
     if (object_points.empty()) {
-        std::cerr << "Error: " << (err.empty() ? "no object points loaded" : err) << "\n";
+        LOG_ERROR << (err.empty() ? "no object points loaded" : err);
         return 1;
     }
     auto img1 = StereoCalibration::readImagePointsFile(img1_path, err);
     auto img2 = StereoCalibration::readImagePointsFile(img2_path, err);
     if (img1.empty() || img2.empty()) {
-        std::cerr << "Error: failed to load image-point files (" << img1_path << ", " << img2_path
-                  << "): " << err << "\n";
+        LOG_ERROR << "failed to load image-point files (" << img1_path << ", " << img2_path
+                  << "): " << err;
         return 1;
     }
 
     auto result =
         StereoCalibration::calibrateStereoPair(cam1, img1, cam2, img2, object_points, err);
     if (!result.valid) {
-        std::cerr << "Error: StepC calibration failed: " << err << "\n";
+        LOG_ERROR << "StepC calibration failed: " << err;
         return 1;
     }
 
@@ -170,12 +171,12 @@ int runStepC(const std::string& object_path, int cam1, int cam2, const std::stri
            << " rms=" << result.recon_error.rms << " max=" << result.recon_error.max
            << " std=" << result.recon_error.std << "\n";
 
-    std::cout << report.str();
+    LOG_INFO << report.str();
 
     if (!result_out.empty()) {
         std::ofstream ofs(result_out);
         if (!ofs) {
-            std::cerr << "Error: cannot write result file: " << result_out << "\n";
+            LOG_ERROR << "cannot write result file: " << result_out;
             return 1;
         }
         ofs << report.str();
@@ -183,7 +184,7 @@ int runStepC(const std::string& object_path, int cam1, int cam2, const std::stri
         for (double v : result.cam_first.L) ofs << v << "\n";
         ofs << "# DLT parameters cam " << result.cam_second.camera_id << "\n";
         for (double v : result.cam_second.L) ofs << v << "\n";
-        std::cout << "Wrote report -> " << result_out << "\n";
+        LOG_INFO << "Wrote report -> " << result_out;
     }
     return 0;
 }
@@ -334,7 +335,7 @@ int main(int argc, char* argv[]) {
         return runStepC(object_path, cam1, cam2, img1_path, img2_path, result_out);
     }
 
-    std::cerr << "Unknown command: " << command << "\n\n";
+    LOG_ERROR << "Unknown command: " << command;
     printUsage(argv[0]);
     return 1;
 }

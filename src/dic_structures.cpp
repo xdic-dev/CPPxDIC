@@ -3,6 +3,7 @@
  */
 
 #include "dic_structures.h"
+#include "logging.h"
 #include <fstream>
 #include <stdexcept>
 #include <iostream>
@@ -268,7 +269,7 @@ void DIC3Dcombined::saveBinary(const std::string& filepath) const {
     }
     
     ofs.close();
-    std::cout << "[DEBUG] DIC3Dcombined saved to binary: " << filepath << std::endl;
+    LOG_DEBUG << "DIC3Dcombined saved to binary: " << filepath;
 }
 
 DIC3Dcombined DIC3Dcombined::loadBinary(const std::string& filepath) {
@@ -322,11 +323,11 @@ DIC3Dcombined DIC3Dcombined::loadBinary(const std::string& filepath) {
     }
     
     ifs.close();
-    std::cout << "[DEBUG] DIC3Dcombined loaded from binary: " << filepath << std::endl;
-    std::cout << "[DEBUG]   - Frames: " << combined.Points3D.size() 
+    LOG_DEBUG << "DIC3Dcombined loaded from binary: " << filepath;
+    LOG_DEBUG << "  - Frames: " << combined.Points3D.size()
               << ", Points: " << (combined.Points3D.empty() ? 0 : combined.Points3D[0].x.size())
-              << ", Faces: " << (combined.Faces.size() / 3) << std::endl;
-    
+              << ", Faces: " << (combined.Faces.size() / 3);
+
     return combined;
 }
 

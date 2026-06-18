@@ -3,6 +3,7 @@
  */
 
 #include "dic_analysis.h"
+#include "profiling.h"
 #include "mat_reader.h"
 #include "utils.h"
 #include "step_d_workflow.h"
@@ -12,6 +13,7 @@
 #include "temporal_filter.h"
 #include "face_isotropy.h"
 #include "visualization.h"
+#include "logging.h"
 #include <iostream>
 #include <chrono>
 #include <filesystem>
@@ -34,8 +36,8 @@ DicAnalysis::DicAnalysis(const Config& config) : config_(config) {
 }
 
 bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
-    std::cout << "Starting Deformation/Strain Analysis (Step F)..." << std::endl;
-    std::cout << "NOTE: This requires DIC3Dcombined from Step E" << std::endl;
+    LOG_INFO << "Starting Deformation/Strain Analysis (Step F)...";
+    LOG_INFO << "NOTE: This requires DIC3Dcombined from Step E";
     
     try {
         for (int trial : trial_target) {
@@ -47,34 +49,33 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
             std::string dic3d_file = Utils::buildDic3DCombinedFilePath(output_dir, config_.num_pair, serializer->extension());
             
             if (!std::filesystem::exists(dic3d_file)) {
-                std::cerr << "ERROR: DIC3Dcombined file not found: " << dic3d_file << std::endl;
-                std::cerr << "You must run Step E (dic3DReconstruction) first!" << std::endl;
+                LOG_ERROR << "DIC3Dcombined file not found: " << dic3d_file;
+                LOG_ERROR << "You must run Step E (dic3DReconstruction) first!";
                 return false;
             }
-            
-            std::cout << "Loading DIC3Dcombined from: " << dic3d_file << std::endl;
-            
+
+            LOG_INFO << "Loading DIC3Dcombined from: " << dic3d_file;
+
             DIC3Dcombined dic3d;
             if (!serializer->loadDIC3Dcombined(dic3d_file, dic3d)) {
-                std::cerr << "Failed to load DIC3Dcombined structure" << std::endl;
+                LOG_ERROR << "Failed to load DIC3Dcombined structure";
                 return false;
             }
-            
+
             if (dic3d.Points3D.empty() || dic3d.Faces.empty()) {
-                std::cerr << "DIC3Dcombined has no 3D data" << std::endl;
+                LOG_ERROR << "DIC3Dcombined has no 3D data";
                 return false;
             }
-            
-            std::cout << "  Loaded: " << dic3d.Points3D.size() << " frames, "
+
+            LOG_INFO << "  Loaded: " << dic3d.Points3D.size() << " frames, "
                       << dic3d.Points3D[0].x.size() << " points, "
-                      << dic3d.Faces.size() / 3 << " faces" << std::endl;
-            std::cout << "  corrComb: " << dic3d.corrComb.size() << " frames"
-                      << (dic3d.corrComb.empty() ? "" : " (" + std::to_string(dic3d.corrComb[0].size()) + " per frame)")
-                      << std::endl;
-            std::cout << "  FaceCorrComb: " << dic3d.FaceCorrComb.size() << " frames" << std::endl;
-            std::cout << "  FaceCentroids: " << dic3d.FaceCentroids.size() << " frames" << std::endl;
-            std::cout << "  Disp.DispVec: " << dic3d.Disp.DispVec.size() << " frames" << std::endl;
-            std::cout << "  Disp.DispMgn: " << dic3d.Disp.DispMgn.size() << " frames" << std::endl;
+                      << dic3d.Faces.size() / 3 << " faces";
+            LOG_INFO << "  corrComb: " << dic3d.corrComb.size() << " frames"
+                      << (dic3d.corrComb.empty() ? "" : " (" + std::to_string(dic3d.corrComb[0].size()) + " per frame)");
+            LOG_INFO << "  FaceCorrComb: " << dic3d.FaceCorrComb.size() << " frames";
+            LOG_INFO << "  FaceCentroids: " << dic3d.FaceCentroids.size() << " frames";
+            LOG_INFO << "  Disp.DispVec: " << dic3d.Disp.DispVec.size() << " frames";
+            LOG_INFO << "  Disp.DispMgn: " << dic3d.Disp.DispMgn.size() << " frames";
             
             // Diagnostic: check for NaN/Inf in Points3D and face validity
             {
@@ -89,7 +90,7 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                         if (std::isinf(dic3d.Points3D[f].x[i]) || std::isinf(dic3d.Points3D[f].y[i]) || std::isinf(dic3d.Points3D[f].z[i]))
                             inf_pts_total++;
                     }
-                    std::cout << "  [diag] Frame " << f << ": " << nan_pts << "/" << nP << " NaN points" << std::endl;
+                    LOG_DEBUG << "  [diag] Frame " << f << ": " << nan_pts << "/" << nP << " NaN points";
                 }
                 size_t nF = dic3d.Faces.size() / 3;
                 for (size_t i = 0; i < nF; ++i) {
@@ -98,13 +99,13 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                         bad_face_total++;
                 }
                 if (bad_face_total > 0)
-                    std::cerr << "  [diag] WARNING: " << bad_face_total << "/" << nF << " faces have out-of-bounds vertex indices!" << std::endl;
+                    LOG_WARN << "  [diag] " << bad_face_total << "/" << nF << " faces have out-of-bounds vertex indices!";
                 if (inf_pts_total > 0)
-                    std::cerr << "  [diag] WARNING: " << inf_pts_total << " Inf values in Points3D!" << std::endl;
+                    LOG_WARN << "  [diag] " << inf_pts_total << " Inf values in Points3D!";
             }
             
             // Convert Points3D to Eigen::Vector3d format for deformation computation
-            std::cout << "\nConverting data to Eigen format..." << std::endl;
+            LOG_INFO << "\nConverting data to Eigen format...";
             
             // Reference frame (frame 0)
             std::vector<Eigen::Vector3d> vertices_ref;
@@ -135,7 +136,7 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                 vertices_all_frames.push_back(std::move(frame_verts));
             }
             
-            std::cout << "  Converted " << vertices_all_frames.size() << " frames" << std::endl;
+            LOG_INFO << "  Converted " << vertices_all_frames.size() << " frames";
             
             auto count_nan_points = [](const std::vector<std::vector<Eigen::Vector3d>>& frames) {
                 std::vector<size_t> counts;
@@ -214,21 +215,21 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
             const size_t raw_any_nan_points = count_points_with_any_nan(vertices_all_frames);
             const auto raw_nan_counts = count_nan_points(vertices_all_frames);
             const double raw_max_disp = compute_max_displacement(vertices_all_frames, vertices_ref);
-            std::cout << "  Raw points with any NaN over time: " << raw_any_nan_points
-                      << "/" << nPoints << std::endl;
+            LOG_DEBUG << "  Raw points with any NaN over time: " << raw_any_nan_points
+                      << "/" << nPoints;
             if (!raw_nan_counts.empty()) {
-                std::cout << "  Raw NaN points in frame 0: " << raw_nan_counts[0]
-                          << "/" << nPoints << std::endl;
+                LOG_DEBUG << "  Raw NaN points in frame 0: " << raw_nan_counts[0]
+                          << "/" << nPoints;
             }
-            std::cout << "  Raw valid faces in frame 0: "
+            LOG_DEBUG << "  Raw valid faces in frame 0: "
                       << count_valid_faces(vertices_all_frames[0])
-                      << "/" << nFaces << std::endl;
-            std::cout << "  Raw max displacement magnitude: " << raw_max_disp << std::endl;
+                      << "/" << nFaces;
+            LOG_DEBUG << "  Raw max displacement magnitude: " << raw_max_disp;
 
             // Apply temporal filtering to displacement fields
             bool used_temporal_filtering = false;
             if (config_.step_f_temporal_filtering && vertices_all_frames.size() > 3) {
-                std::cout << "\nApplying temporal filtering..." << std::endl;
+                LOG_INFO << "\nApplying temporal filtering...";
                 
                 // Organize data for filtering: nPoints x nFrames
                 size_t nFrames = vertices_all_frames.size();
@@ -267,15 +268,15 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                     !std::isfinite(filtered_max_disp) ||
                     filtered_max_disp > std::max(1.0, raw_max_disp) * 100.0;
 
-                std::cout << "  Filtered points with any NaN over time: " << filtered_any_nan_points
-                          << "/" << nPoints << std::endl;
+                LOG_DEBUG << "  Filtered points with any NaN over time: " << filtered_any_nan_points
+                          << "/" << nPoints;
                 if (!filtered_nan_counts.empty()) {
-                    std::cout << "  Filtered NaN points in frame 0: " << filtered_nan_counts[0]
-                              << "/" << nPoints << std::endl;
+                    LOG_DEBUG << "  Filtered NaN points in frame 0: " << filtered_nan_counts[0]
+                              << "/" << nPoints;
                 }
-                std::cout << "  Filtered valid faces in frame 0: "
-                          << filtered_valid_faces << "/" << nFaces << std::endl;
-                std::cout << "  Filtered max displacement magnitude: " << filtered_max_disp << std::endl;
+                LOG_DEBUG << "  Filtered valid faces in frame 0: "
+                          << filtered_valid_faces << "/" << nFaces;
+                LOG_DEBUG << "  Filtered max displacement magnitude: " << filtered_max_disp;
 
                 // MATLAB's filter only keeps point tracks that are valid for the whole time series.
                 // On stitched C++ reconstructions this can erase nearly the entire mesh, leaving
@@ -283,26 +284,26 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                 // unstable and amplify otherwise small motions into absurd coordinates. In either
                 // case we keep the raw geometry instead of feeding corrupted data into Step F.
                 if (filtered_valid_faces == 0 || filtered_valid_faces * 20 < nFaces || filtered_exploded) {
-                    std::cout << "  Warning: Temporal filtering produced unusable geometry; "
-                              << "keeping unfiltered geometry for Step F" << std::endl;
+                    LOG_WARN << "  Temporal filtering produced unusable geometry; "
+                              << "keeping unfiltered geometry for Step F";
                 } else {
                     vertices_all_frames = std::move(vertices_filtered);
                     for (size_t ipt = 0; ipt < nPoints; ++ipt) {
                         vertices_ref[ipt] = vertices_all_frames[0][ipt];
                     }
                     used_temporal_filtering = true;
-                    std::cout << "  ✓ Temporal filtering applied (freqFilt=" << freq_filt
-                              << " Hz, freqAcq=" << freq_acq << " Hz)" << std::endl;
+                    LOG_INFO << "  ✓ Temporal filtering applied (freqFilt=" << freq_filt
+                              << " Hz, freqAcq=" << freq_acq << " Hz)";
                 }
             } else if (config_.step_f_temporal_filtering) {
-                std::cout << "\nSkipping temporal filtering (too few frames: " 
-                          << vertices_all_frames.size() << ")" << std::endl;
+                LOG_INFO << "\nSkipping temporal filtering (too few frames: "
+                          << vertices_all_frames.size() << ")";
             } else {
-                std::cout << "\nTemporal filtering disabled (step_f_temporal_filtering=false)" << std::endl;
+                LOG_INFO << "\nTemporal filtering disabled (step_f_temporal_filtering=false)";
             }
-            
+
             // Update Points3D with filtered data (matching MATLAB line 115)
-            std::cout << "\nUpdating Points3D with filtered data..." << std::endl;
+            LOG_INFO << "\nUpdating Points3D with filtered data...";
             dic3d.Points3D.clear();
             dic3d.Points3D.resize(vertices_all_frames.size());
             for (size_t iframe = 0; iframe < vertices_all_frames.size(); ++iframe) {
@@ -317,13 +318,13 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                 }
             }
             if (used_temporal_filtering) {
-                std::cout << "  ✓ Points3D updated with filtered data" << std::endl;
+                LOG_INFO << "  ✓ Points3D updated with filtered data";
             } else {
-                std::cout << "  ✓ Points3D kept from unfiltered geometry" << std::endl;
+                LOG_INFO << "  ✓ Points3D kept from unfiltered geometry";
             }
-            
+
             // Recompute displacement based on filtered Points3D (matching MATLAB lines 69-71)
-            std::cout << "\nRecomputing displacement after filtering..." << std::endl;
+            LOG_INFO << "\nRecomputing displacement after filtering...";
             dic3d.Disp.DispVec.clear();
             dic3d.Disp.DispMgn.clear();
             dic3d.Disp.DispVec.resize(vertices_all_frames.size());
@@ -348,10 +349,10 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                     disp_mgn[ipt] = std::sqrt(dx*dx + dy*dy + dz*dz);
                 }
             }
-            std::cout << "  ✓ Displacement recomputed for " << vertices_all_frames.size() << " frames" << std::endl;
-            
+            LOG_INFO << "  ✓ Displacement recomputed for " << vertices_all_frames.size() << " frames";
+
             // Recompute face centroids based on filtered Points3D (matching MATLAB lines 64-66)
-            std::cout << "\nRecomputing face centroids after filtering..." << std::endl;
+            LOG_INFO << "\nRecomputing face centroids after filtering...";
             dic3d.FaceCentroids.clear();
             dic3d.FaceCentroids.resize(vertices_all_frames.size());
             
@@ -388,11 +389,11 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                     }
                 }
             }
-            std::cout << "  ✓ Face centroids recomputed for " << vertices_all_frames.size() << " frames" << std::endl;
+            LOG_INFO << "  ✓ Face centroids recomputed for " << vertices_all_frames.size() << " frames";
             
             // Recompute face correlation (worst of 3 vertices) (matching MATLAB line 61)
             // MATLAB: DIC3D.FaceCorrComb{ii} = max(DIC3D.corrComb{ii}(F), [], 2);
-            std::cout << "\nRecomputing face correlation after filtering..." << std::endl;
+            LOG_INFO << "\nRecomputing face correlation after filtering...";
             if (!dic3d.corrComb.empty() && dic3d.corrComb.size() >= vertices_all_frames.size()) {
                 dic3d.FaceCorrComb.clear();
                 dic3d.FaceCorrComb.resize(vertices_all_frames.size());
@@ -418,9 +419,9 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                         }
                     }
                 }
-                std::cout << "  ✓ Face correlation recomputed for " << vertices_all_frames.size() << " frames" << std::endl;
+                LOG_INFO << "  ✓ Face correlation recomputed for " << vertices_all_frames.size() << " frames";
             } else {
-                std::cout << "  ⚠ corrComb not available (empty or frame count mismatch), skipping face correlation" << std::endl;
+                LOG_WARN << "  ⚠ corrComb not available (empty or frame count mismatch), skipping face correlation";
             }
             
             // Compute RBM if enabled
@@ -428,7 +429,7 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
             std::vector<std::vector<Eigen::Vector3d>> vertices_all_frames_ARBM;
             
             if (config_.step_f_compute_rbm) {
-                std::cout << "\nComputing rigid body motion (RBM) transformations..." << std::endl;
+                LOG_INFO << "\nComputing rigid body motion (RBM) transformations...";
                 rbm_transforms.resize(vertices_all_frames.size());
                 vertices_all_frames_ARBM.reserve(vertices_all_frames.size());
                 
@@ -446,19 +447,19 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                         auto verts_arbm = Utils::applyRigidTransform(vertices_all_frames[iframe], transform);
                         vertices_all_frames_ARBM.push_back(verts_arbm);
                     } else {
-                        std::cerr << "  Warning: RBM computation failed for frame " << iframe << std::endl;
+                        LOG_WARN << "  RBM computation failed for frame " << iframe;
                         vertices_all_frames_ARBM.push_back(vertices_all_frames[iframe]);
                     }
                 }
-                std::cout << "  ✓ RBM transformations computed for " << vertices_all_frames.size() << " frames" << std::endl;
+                LOG_INFO << "  ✓ RBM transformations computed for " << vertices_all_frames.size() << " frames";
             } else {
-                std::cout << "\nRBM/ARBM computation disabled (step_f_compute_rbm=false)" << std::endl;
+                LOG_INFO << "\nRBM/ARBM computation disabled (step_f_compute_rbm=false)";
             }
-            
+
             // Compute 3D deformation and strain
-            std::cout << "\nComputing 3D surface deformation..." << std::endl;
-            std::cout << "  Method: Triangular Cosserat Point Elements (TCPE)" << std::endl;
-            std::cout << "  Deformation type: Cumulative (reference = frame 1)" << std::endl;
+            LOG_INFO << "\nComputing 3D surface deformation...";
+            LOG_INFO << "  Method: Triangular Cosserat Point Elements (TCPE)";
+            LOG_INFO << "  Deformation type: Cumulative (reference = frame 1)";
             
             FrameDeformationResult deform_result = computeTriSurfaceDeformation(
                 dic3d.Faces,
@@ -467,7 +468,7 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                 true  // cumulative: use frame 1 as reference for all frames
             );
             
-            std::cout << "  ✓ Deformation computation complete" << std::endl;
+            LOG_INFO << "  ✓ Deformation computation complete";
             
             // Diagnostic: report deformation result quality for first few frames
             {
@@ -482,34 +483,34 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                         if (fr.Emgn.size() > i && std::isfinite(fr.Emgn[i]) && std::abs(fr.Emgn[i]) > 1.0)
                             large_count++;
                     }
-                    std::cout << "  [diag] Deform frame " << iframe << ": "
+                    LOG_DEBUG << "  [diag] Deform frame " << iframe << ": "
                               << "NaN_F=" << nan_F << " NaN_E=" << nan_E << " NaN_J=" << nan_J
                               << " Inf=" << inf_count << " |Emgn|>1=" << large_count
-                              << " / " << fr.Fmat.size() << " faces" << std::endl;
+                              << " / " << fr.Fmat.size() << " faces";
                 }
             }
             
             FrameDeformationResult deform_result_ARBM;
             if (config_.step_f_compute_rbm) {
-                std::cout << "\nComputing 3D surface deformation (after RBM removal)..." << std::endl;
+                LOG_INFO << "\nComputing 3D surface deformation (after RBM removal)...";
                 deform_result_ARBM = computeTriSurfaceDeformation(
                     dic3d.Faces,
                     vertices_all_frames_ARBM[0],
                     vertices_all_frames_ARBM,
                     true  // cumulative
                 );
-                std::cout << "  ✓ Deformation computation complete (ARBM)" << std::endl;
+                LOG_INFO << "  ✓ Deformation computation complete (ARBM)";
             }
-            
+
             // Build DIC3DPPresults structure
-            std::cout << "\nBuilding DIC3DPPresults structure..." << std::endl;
+            LOG_INFO << "\nBuilding DIC3DPPresults structure...";
             DIC3DPPresults ppresults;
             
             // Store full deformation result for MAT file writing (all 36 fields)
             ppresults.deform_full = deform_result;
             
             // Compute face isotropy index for each frame
-            std::cout << "\nComputing face isotropy index..." << std::endl;
+            LOG_INFO << "\nComputing face isotropy index...";
             ppresults.FaceIsoInd.resize(vertices_all_frames.size());
             for (size_t iframe = 0; iframe < vertices_all_frames.size(); ++iframe) {
                 ppresults.FaceIsoInd[iframe] = computeFaceIsotropyIndex(
@@ -517,7 +518,7 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                     vertices_all_frames[iframe]
                 );
             }
-            std::cout << "  ✓ Face isotropy index computed for " << vertices_all_frames.size() << " frames" << std::endl;
+            LOG_INFO << "  ✓ Face isotropy index computed for " << vertices_all_frames.size() << " frames";
             
             // Copy all fields from DIC3Dcombined (inheritance)
             ppresults.pairIndices = dic3d.pairIndices;
@@ -612,11 +613,11 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                 maxShear = frame.EShearMax;
             }
             
-            std::cout << "  Populated deformation data for " << ppresults.n_frames << " frames" << std::endl;
-            
+            LOG_INFO << "  Populated deformation data for " << ppresults.n_frames << " frames";
+
             if (config_.step_f_compute_rbm) {
                 // Populate ARBM deformation data (after rigid body motion removal)
-                std::cout << "  Populating ARBM deformation data..." << std::endl;
+                LOG_INFO << "  Populating ARBM deformation data...";
                 ppresults.Deform_ARBM.F.resize(deform_result_ARBM.n_frames);
                 ppresults.Deform_ARBM.strain.resize(deform_result_ARBM.n_frames);
                 ppresults.Deform_ARBM.princStrain.resize(deform_result_ARBM.n_frames);
@@ -696,7 +697,7 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                     }
                 }
                 
-                std::cout << "  ✓ Populated all deformation data (with RBM and ARBM)" << std::endl;
+                LOG_INFO << "  ✓ Populated all deformation data (with RBM and ARBM)";
             }
             
             // Save DIC3DPPresults using configured format
@@ -705,20 +706,20 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                 std::string ppout = Utils::buildDic3DPPresultsFilePath(output_dir, config_.num_pair, config_.fileversion, pp_serializer->extension());
                 
                 if (std::filesystem::exists(ppout)) {
-                    std::cout << "\nCheckpoint found: " << ppout << " (skipping)" << std::endl;
+                    LOG_INFO << "\nCheckpoint found: " << ppout << " (skipping)";
                 } else {
-                    std::cout << "\nWriting DIC3DPPresults to: " << ppout << std::endl;
+                    LOG_INFO << "\nWriting DIC3DPPresults to: " << ppout;
                     if (!pp_serializer->saveDIC3DPPresults(ppout, ppresults)) {
-                        std::cerr << "ERROR: Failed to write DIC3DPPresults" << std::endl;
+                        LOG_ERROR << "Failed to write DIC3DPPresults";
                         return false;
                     }
-                    std::cout << "✓ Saved DIC3DPPresults: " << ppout << std::endl;
+                    LOG_INFO << "✓ Saved DIC3DPPresults: " << ppout;
                 }
             }
             
             // Generate visualization exports if enabled
             if (config_.mapLogic) {
-                std::cout << "\n=== Generating Visualization Exports ===" << std::endl;
+                LOG_INFO << "\n=== Generating Visualization Exports ===";
                 try {
                     cppxdic::Visualization viz(config_);
                     
@@ -744,7 +745,7 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                     
                     // Generate videos if enabled
                     if (config_.generate_videos) {
-                        std::cout << "\n--- Generating Videos ---" << std::endl;
+                        LOG_INFO << "\n--- Generating Videos ---";
                         for (const auto& field : config_.plotopt) {
                             std::string video_path = output_dir + "viz/" + field + "_video.avi";
                             viz.generateVideo(vis_data, video_path, field);
@@ -758,27 +759,27 @@ bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
                         }
                     }
                     
-                    std::cout << "✓ Visualization exports complete" << std::endl;
-                    
+                    LOG_INFO << "✓ Visualization exports complete";
+
                 } catch (const std::exception& e) {
-                    std::cerr << "Warning: Visualization export failed: " << e.what() << std::endl;
-                    std::cerr << "  (Continuing anyway...)" << std::endl;
+                    LOG_WARN << "Visualization export failed: " << e.what();
+                    LOG_WARN << "  (Continuing anyway...)";
                 }
             }
-            
-            std::cout << "\n=== Step F Complete ==="  << std::endl;
-            std::cout << "✓ 3D deformation and strain analysis finished for trial " << trial << std::endl;
+
+            LOG_INFO << "\n=== Step F Complete ===";
+            LOG_INFO << "✓ 3D deformation and strain analysis finished for trial " << trial;
         }
         
         return true;
         
     } catch (const std::exception& e) {
-        std::cerr << "ERROR in Deformation/Strain Analysis: " << e.what() << std::endl;
+        LOG_ERROR << "in Deformation/Strain Analysis: " << e.what();
         return false;
     }
 }
 bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
-    std::cout << "Starting 3D Reconstruction (Step E)..." << std::endl;
+    LOG_INFO << "Starting 3D Reconstruction (Step E)...";
     try {
 
         auto solve_3d = [](const std::vector<double>& L1, const std::vector<double>& L2, double x1, double y1, double x2, double y2){
@@ -852,8 +853,8 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 }
                 
                 if (dlt_path.empty()) {
-                    std::cerr << "ERROR - DLT calibration file not found for camera " << cam_id
-                              << " in " << calib_dir << std::endl;
+                    LOG_ERROR << "DLT calibration file not found for camera " << cam_id
+                              << " in " << calib_dir;
                     continue;
                 }
                 
@@ -861,15 +862,15 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 if (cppxdic::MatReader::loadDLTCalibration(dlt_path, calib)) {
                     dlt_all_cams[cam_id] = std::move(calib);
                 } else {
-                    std::cerr << "ERROR - Failed to load DLT calibration for camera " << cam_id << std::endl;
+                    LOG_ERROR << "Failed to load DLT calibration for camera " << cam_id;
                 }
             }
-            
+
             if (dlt_all_cams.empty()) {
-                std::cerr << "ERROR - No DLT calibrations loaded. Cannot proceed with 3D reconstruction." << std::endl;
+                LOG_ERROR << "No DLT calibrations loaded. Cannot proceed with 3D reconstruction.";
                 continue;
             }
-            std::cout << "INFO - Loaded DLT calibrations for " << dlt_all_cams.size() << " cameras" << std::endl;
+            LOG_INFO << "Loaded DLT calibrations for " << dlt_all_cams.size() << " cameras";
             
             // ------------------------------------------------------------------
             // Load distortion parameters for all cameras (if available)
@@ -898,7 +899,7 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
             }
             bool use_distortion_removal = config_.step_e_distortion_removal;
             if (use_distortion_removal) {
-                std::cout << "INFO - Distortion removal enabled for all " << unique_cams.size() << " cameras" << std::endl;
+                LOG_INFO << "Distortion removal enabled for all " << unique_cams.size() << " cameras";
                 
                 // ------------------------------------------------------------------
                 // Recalculate DLT parameters from undistorted calibration centroids
@@ -914,8 +915,8 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     const auto& dist = distortion_all_cams[cam_id];
                     
                     if (dlt.imageCentroids.empty() || dlt.C3Dtrue.empty() || dlt.columns.empty()) {
-                        std::cout << "ERROR - Camera " << cam_id << ": missing calibration data for DLT recalculation, "
-                                  << "using original DLT params with per-point undistortion fallback" << std::endl;
+                        LOG_ERROR << "Camera " << cam_id << ": missing calibration data for DLT recalculation, "
+                                  << "using original DLT params with per-point undistortion fallback";
                         continue;
                     }
                     
@@ -955,8 +956,8 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     
                     size_t nPoints = d0 * nCols;
                     if (nPoints != nCentroids) {
-                        std::cerr << "ERROR - Camera " << cam_id << ": centroid count (" << nCentroids
-                                  << ") != C3D point count (" << nPoints << "), skipping DLT recalculation" << std::endl;
+                        LOG_ERROR << "Camera " << cam_id << ": centroid count (" << nCentroids
+                                  << ") != C3D point count (" << nPoints << "), skipping DLT recalculation";
                         continue;
                     }
                     
@@ -964,15 +965,15 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     std::vector<double> L_new;
                     if (Utils::DLT11Calibration(P2D.data(), P3D.data(), nPoints, L_new)) {
                         dlt.DLTparams = L_new;
-                        std::cout << "INFO - Camera " << cam_id << ": DLT params recalculated from " 
-                                  << nPoints << " undistorted calibration points" << std::endl;
+                        LOG_INFO << "Camera " << cam_id << ": DLT params recalculated from "
+                                  << nPoints << " undistorted calibration points";
                     } else {
-                        std::cerr << "ERROR - Camera " << cam_id << ": DLT11Calibration failed" << std::endl;
+                        LOG_ERROR << "Camera " << cam_id << ": DLT11Calibration failed";
                     }
                 }
             } else if (!distortion_all_cams.empty()) {
-                std::cout << "Distortion parameters found for " << distortion_all_cams.size() 
-                          << "/" << unique_cams.size() << " cameras (disabled - need all)" << std::endl;
+                LOG_INFO << "Distortion parameters found for " << distortion_all_cams.size()
+                          << "/" << unique_cams.size() << " cameras (disabled - need all)";
                 use_distortion_removal = false;
             }
             
@@ -980,7 +981,7 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
             // Process each stereo pair
             // ------------------------------------------------------------------
             for (int pair = 1; pair <= config_.num_pair; ++pair) {
-                std::cout << "\n=== Processing Pair " << pair << " ===" << std::endl;
+                LOG_INFO << "\n=== Processing Pair " << pair << " ===";
                 
                 // Get camera numbers for this pair
                 int cam_1, cam_2;
@@ -989,8 +990,8 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 // Look up DLT parameters for this pair's cameras
                 if (dlt_all_cams.find(cam_1) == dlt_all_cams.end() ||
                     dlt_all_cams.find(cam_2) == dlt_all_cams.end()) {
-                    std::cerr << "Missing DLT calibration for pair " << pair 
-                              << " (cam " << cam_1 << " or " << cam_2 << "). Skipping." << std::endl;
+                    LOG_ERROR << "Missing DLT calibration for pair " << pair
+                              << " (cam " << cam_1 << " or " << cam_2 << "). Skipping.";
                     continue;
                 }
                 const auto& dlt_cam1 = dlt_all_cams[cam_1];
@@ -1008,23 +1009,23 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 std::string dic2d_file = Utils::buildDic2DPairResultsFilePath(output_dir, cam_1, cam_2, d_serializer->extension());
                 
                 if (!std::filesystem::exists(dic2d_file)) {
-                    std::cerr << "ERROR - Missing DIC2DPairResults for trial " << trial << ", pair " << pair << ". Skipping." << std::endl;
-                    std::cerr << "  Expected: " << dic2d_file << std::endl;
+                    LOG_ERROR << "Missing DIC2DPairResults for trial " << trial << ", pair " << pair << ". Skipping.";
+                    LOG_ERROR << "  Expected: " << dic2d_file;
                     continue;
                 }
                 
                 DIC2DPairResults DIC2D;
                 if (!d_serializer->loadDIC2DPairResults(dic2d_file, DIC2D)) {
-                    std::cerr << "ERROR - Failed to load DIC2DPairResults: " << dic2d_file << ". Skipping." << std::endl;
+                    LOG_ERROR << "Failed to load DIC2DPairResults: " << dic2d_file << ". Skipping.";
                     continue;
                 }
                 
                 if (config_.debug_mode) {
-                    std::cout << "[DEBUG] Loaded DIC2DPairResults from: " << dic2d_file << std::endl;
-                    std::cout << "[DEBUG]   nImages=" << DIC2D.nImages << ", Points=" << DIC2D.Points.size()
-                              << ", Faces=" << DIC2D.Faces.size()/3 << std::endl;
-                    std::cout << "[DEBUG]   DLT cam" << cam_1 << ": " << dlt_cam1.filePath << std::endl;
-                    std::cout << "[DEBUG]   DLT cam" << cam_2 << ": " << dlt_cam2.filePath << std::endl;
+                    LOG_DEBUG << "Loaded DIC2DPairResults from: " << dic2d_file;
+                    LOG_DEBUG << "  nImages=" << DIC2D.nImages << ", Points=" << DIC2D.Points.size()
+                              << ", Faces=" << DIC2D.Faces.size()/3;
+                    LOG_DEBUG << "  DLT cam" << cam_1 << ": " << dlt_cam1.filePath;
+                    LOG_DEBUG << "  DLT cam" << cam_2 << ": " << dlt_cam2.filePath;
                 }
 
                 // Extract information from 2D-DIC results (MATLAB step3 lines 130-134)
@@ -1132,16 +1133,16 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 all_pairs.push_back(pair_result);
                 dic2d_info.push_back(std::move(DIC2D));
                 
-                std::cout << "✓ Pair " << pair << " complete: " 
+                LOG_INFO << "✓ Pair " << pair << " complete: "
                           << pair_result.Points3D[0].x.size() << " points, "
-                          << nFaces << " faces" << std::endl;
+                          << nFaces << " faces";
             }
-            
+
             // Stitch all pairs together
-            std::cout << "\n=== Stitching " << all_pairs.size() << " pairs ===" << std::endl;
+            LOG_INFO << "\n=== Stitching " << all_pairs.size() << " pairs ===";
             DIC3Dcombined stitched;
             if (all_pairs.empty()) {
-                std::cerr << "ERROR - No pairs successfully reconstructed for trial " << trial << std::endl;
+                LOG_ERROR << "No pairs successfully reconstructed for trial " << trial;
                 continue;
             } else {
                 std::vector<int> stitch_pair_order;
@@ -1151,25 +1152,25 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
 
                 for (const auto& dic2d : dic2d_info) {
                     if (dic2d.pairOrder.empty()) {
-                        std::cerr << "ERROR - Empty pairOrder in DIC2D for trial " << trial << std::endl;
+                        LOG_ERROR << "Empty pairOrder in DIC2D for trial " << trial;
                         continue;
                     }
                     if (!have_stitch_metadata) {
-                        std::cout << "WARNING - Using first pair's stitch metadata for trial " << trial << std::endl;
+                        LOG_WARN << "Using first pair's stitch metadata for trial " << trial;
                         stitch_pair_order = dic2d.pairOrder;
                         stitch_pair_forced = dic2d.pairForced;
                         have_stitch_metadata = true;
                     } else if (dic2d.pairOrder != stitch_pair_order ||
                                dic2d.pairForced != stitch_pair_forced) {
-                        std::cerr << "ERROR - Inconsistent DIC2D stitch metadata across pairs for trial "
-                                  << trial << ". Skipping trial." << std::endl;
+                        LOG_ERROR << "Inconsistent DIC2D stitch metadata across pairs for trial "
+                                  << trial << ". Skipping trial.";
                         stitch_metadata_mismatch = true;
                         break;
                     }
                 }
 
                 if (stitch_metadata_mismatch) {
-                    std::cerr << "WARNING - Skipping trial " << trial << " due to stitch metadata mismatch" << std::endl;
+                    LOG_WARN << "Skipping trial " << trial << " due to stitch metadata mismatch";
                     continue;
                 }
 
@@ -1212,25 +1213,25 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                                 }
                             }
                         }
-                        std::cout << "  Stitch metadata missing from DIC2D results; using legacy fallback"
-                                  << std::endl;
+                        LOG_INFO << "  Stitch metadata missing from DIC2D results; using legacy fallback";
                     }
 
-                    std::cout << "  Stitch order: ";
-                    for (size_t i = 0; i < stitch_pair_order.size(); ++i) {
-                        if (i > 0) std::cout << ", ";
-                        std::cout << stitch_pair_order[i];
+                    {
+                        std::ostringstream stitch_order_oss;
+                        for (size_t i = 0; i < stitch_pair_order.size(); ++i) {
+                            if (i > 0) stitch_order_oss << ", ";
+                            stitch_order_oss << stitch_pair_order[i];
+                        }
+                        LOG_INFO << "  Stitch order: " << stitch_order_oss.str();
                     }
-                    std::cout << std::endl;
-                    std::cout << "  Pair forced metadata: " << (stitch_pair_forced ? "true" : "false")
-                              << std::endl;
+                    LOG_INFO << "  Pair forced metadata: " << (stitch_pair_forced ? "true" : "false");
                     stitched = stitchPairsGeometric(all_pairs, stitch_pair_order, stitch_pair_forced);
-                    std::cout << "INFO - Geometric Stitching done!" << std::endl;
+                    LOG_INFO << "Geometric Stitching done!";
                 } else {
                     if (all_pairs.size() > 1) {
-                        std::cout << "  Falling back to simple append stitching because only "
+                        LOG_INFO << "  Falling back to simple append stitching because only "
                                   << all_pairs.size() << "/" << config_.num_pair
-                                  << " pairs were reconstructed" << std::endl;
+                                  << " pairs were reconstructed";
                     }
                     stitched = stitchPairsSimple(all_pairs);
                 }
@@ -1240,7 +1241,7 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 
                 // DIC2D pair results already collected during per-pair processing (MATLAB step3 line 268)
                 stitched.DIC2Dinfo = dic2d_info;
-                std::cout << "  Stored " << stitched.DIC2Dinfo.size() << " DIC2D pair results" << std::endl;
+                LOG_INFO << "  Stored " << stitched.DIC2Dinfo.size() << " DIC2D pair results";
             }
             
             // Save DIC3Dcombined using configured format
@@ -1250,20 +1251,20 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                 std::string e_out = Utils::buildDic3DCombinedFilePath(output_dir, config_.num_pair, e_serializer->extension());
                 
                 if (std::filesystem::exists(e_out)) {
-                    std::cout << "Checkpoint found: " << e_out << " (skipping)" << std::endl;
+                    LOG_INFO << "Checkpoint found: " << e_out << " (skipping)";
                 } else {
-                    std::cout << "Writing DIC3Dcombined to: " << e_out << std::endl;
+                    LOG_INFO << "Writing DIC3Dcombined to: " << e_out;
                     if (!e_serializer->saveDIC3Dcombined(e_out, stitched)) {
-                        std::cerr << "Failed to write DIC3Dcombined" << std::endl;
+                        LOG_ERROR << "Failed to write DIC3Dcombined";
                     } else {
-                        std::cout << "✓ Saved DIC3Dcombined: " << e_out << std::endl;
+                        LOG_INFO << "✓ Saved DIC3Dcombined: " << e_out;
                     }
                 }
             }
         }
         return true;
     } catch (const std::exception& e) {
-        std::cerr << "Error in 3D Reconstruction: " << e.what() << std::endl;
+        LOG_ERROR << "in 3D Reconstruction: " << e.what();
         return false;
     }
 }
@@ -1273,7 +1274,7 @@ bool DicAnalysis::setupNcorrAnalysis(const std::vector<std::string>& images,
                                     DIC_analysis_input& dic_input) {
     try {
         if (images.size() < 2) {
-            std::cerr << "Need at least 2 images for DIC analysis" << std::endl;
+            LOG_ERROR << "Need at least 2 images for DIC analysis";
             return false;
         }
 
@@ -1301,7 +1302,7 @@ bool DicAnalysis::setupNcorrAnalysis(const std::vector<std::string>& images,
         return true;
 
     } catch (const std::exception& e) {
-        std::cerr << "Error setting up ncorr analysis with ROI mask: " << e.what() << std::endl;
+        LOG_ERROR << "setting up ncorr analysis with ROI mask: " << e.what();
         return false;
     }
 }
@@ -1314,12 +1315,16 @@ bool DicAnalysis::run() {
 }
 
 bool DicAnalysis::run(const std::vector<int>& trial_target) {
-    std::cout << "Trial target set: [";
-    for (size_t i = 0; i < trial_target.size(); ++i) {
-        std::cout << trial_target[i];
-        if (i < trial_target.size() - 1) std::cout << ", ";
+    {
+        std::ostringstream trial_target_oss;
+        trial_target_oss << "[";
+        for (size_t i = 0; i < trial_target.size(); ++i) {
+            trial_target_oss << trial_target[i];
+            if (i < trial_target.size() - 1) trial_target_oss << ", ";
+        }
+        trial_target_oss << "]";
+        LOG_INFO << "Trial target set: " << trial_target_oss.str();
     }
-    std::cout << "]" << std::endl;
     
     // Create serializer for format-aware checkpoint checks
     auto serializer = cppxdic::DataSerializer::create(config_.data_format);
@@ -1369,76 +1374,79 @@ bool DicAnalysis::run(const std::vector<int>& trial_target) {
     // STEP D: 2D-DIC
     bool step_d_complete = check_2d_outputs_exist();
     if (step_d_complete) {
-        std::cout << "\n=== STEP D: 2D-DIC ===" << std::endl;
-        std::cout << "✓ Checkpoint detected: All 2D DIC output files exist" << std::endl;
-        std::cout << "  Skipping 2D analysis (use existing results)" << std::endl;
+        LOG_INFO << "\n=== STEP D: 2D-DIC ===";
+        LOG_INFO << "✓ Checkpoint detected: All 2D DIC output files exist";
+        LOG_INFO << "  Skipping 2D analysis (use existing results)";
     } else {
-        std::cout << "\n=== STEP D: 2D-DIC ===" << std::endl;
-        std::cout << "Running 2D DIC analysis..." << std::endl;
+        LOG_INFO << "\n=== STEP D: 2D-DIC ===";
+        LOG_INFO << "Running 2D DIC analysis...";
         auto start = std::chrono::high_resolution_clock::now();
-        bool success = dic2DAnalysis(trial_target);
+        bool success;
+        { XPROF_SCOPE("STEP_D_total"); success = dic2DAnalysis(trial_target); }
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
         
         if (!success) {
-            std::cerr << "2D DIC Analysis failed!" << std::endl;
+            LOG_ERROR << "2D DIC Analysis failed!";
             return false;
         }
-        
-        std::cout << "✓ DIC 2D Analysis done in " << duration.count() / 1000.0 << " s" << std::endl;
+
+        LOG_INFO << "✓ DIC 2D Analysis done in " << duration.count() / 1000.0 << " s";
     }
     
     // STEP E: 3D Reconstruction
     bool step_e_complete = check_3d_outputs_exist();
     if (step_e_complete) {
-        std::cout << "\n=== STEP E: 3D Reconstruction ===" << std::endl;
-        std::cout << "✓ Checkpoint detected: All 3D reconstruction output files exist" << std::endl;
-        std::cout << "  Skipping 3D reconstruction (use existing results)" << std::endl;
+        LOG_INFO << "\n=== STEP E: 3D Reconstruction ===";
+        LOG_INFO << "✓ Checkpoint detected: All 3D reconstruction output files exist";
+        LOG_INFO << "  Skipping 3D reconstruction (use existing results)";
     } else {
         if (!step_d_complete) {
-            std::cout << "\n=== STEP E: 3D Reconstruction ===" << std::endl;
+            LOG_INFO << "\n=== STEP E: 3D Reconstruction ===";
         }
-        std::cout << "Running 3D reconstruction..." << std::endl;
+        LOG_INFO << "Running 3D reconstruction...";
         auto start = std::chrono::high_resolution_clock::now();
-        bool success = dic3DReconstruction(trial_target);
+        bool success;
+        { XPROF_SCOPE("STEP_E_total"); success = dic3DReconstruction(trial_target); }
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
         
         if (!success) {
-            std::cerr << "3D Reconstruction failed!" << std::endl;
+            LOG_ERROR << "3D Reconstruction failed!";
             return false;
         }
-        
-        std::cout << "✓ DIC 3D Reconstruction done in " << duration.count() / 1000.0 << " s" << std::endl;
+
+        LOG_INFO << "✓ DIC 3D Reconstruction done in " << duration.count() / 1000.0 << " s";
     }
     
     // STEP F: Deformation analysis
     bool step_f_complete = check_deformation_outputs_exist();
     if (step_f_complete) {
-        std::cout << "\n=== STEP F: Deformation Analysis ===" << std::endl;
-        std::cout << "✓ Checkpoint detected: Deformation analysis output exists" << std::endl;
-        std::cout << "  Skipping deformation analysis (use existing results)" << std::endl;
+        LOG_INFO << "\n=== STEP F: Deformation Analysis ===";
+        LOG_INFO << "✓ Checkpoint detected: Deformation analysis output exists";
+        LOG_INFO << "  Skipping deformation analysis (use existing results)";
     } else {
         if (!step_e_complete) {
-            std::cout << "\n=== STEP F: Deformation Analysis ===" << std::endl;
+            LOG_INFO << "\n=== STEP F: Deformation Analysis ===";
         }
-        std::cout << "Running deformation analysis..." << std::endl;
+        LOG_INFO << "Running deformation analysis...";
         auto start = std::chrono::high_resolution_clock::now();
-        bool success = dicDeformationAnalysis(trial_target);
+        bool success;
+        { XPROF_SCOPE("STEP_F_total"); success = dicDeformationAnalysis(trial_target); }
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
         
         if (!success) {
-            std::cerr << "Deformation Analysis failed!" << std::endl;
+            LOG_ERROR << "Deformation Analysis failed!";
             return false;
         }
-        
-        std::cout << "✓ DIC Deformation Analysis done in " << duration.count() / 1000.0 << " s" << std::endl;
+
+        LOG_INFO << "✓ DIC Deformation Analysis done in " << duration.count() / 1000.0 << " s";
     }
-    
-    std::cout << "\n========================================" << std::endl;
-    std::cout << "✓ All DIC analysis steps complete!" << std::endl;
-    std::cout << "========================================" << std::endl;
+
+    LOG_INFO << "\n========================================";
+    LOG_INFO << "✓ All DIC analysis steps complete!";
+    LOG_INFO << "========================================";
     
     return true;
 }
@@ -1463,7 +1471,7 @@ std::vector<int> DicAnalysis::searchTrialTarget(const std::string& subject) {
     // Find protocol .mat file
     auto protos = Utils::findFiles(protocol_dir, "*.mat");
     if (protos.empty()) {
-        std::cerr << "Protocol file not found in: " << protocol_dir << std::endl;
+        LOG_ERROR << "Protocol file not found in: " << protocol_dir;
         // Fallback to reference + next
         trials.push_back(cfg.ref_trial_id);
         trials.push_back(cfg.ref_trial_id + 1);
@@ -1475,7 +1483,7 @@ std::vector<int> DicAnalysis::searchTrialTarget(const std::string& subject) {
     // Open MAT file
     mat_t *matfp = Mat_Open(proto_file.c_str(), MAT_ACC_RDONLY);
     if (!matfp) {
-        std::cerr << "Failed to open MAT file: " << proto_file << std::endl;
+        LOG_ERROR << "Failed to open MAT file: " << proto_file;
         trials.push_back(cfg.ref_trial_id);
         trials.push_back(cfg.ref_trial_id + 1);
         return trials;
@@ -1486,7 +1494,7 @@ std::vector<int> DicAnalysis::searchTrialTarget(const std::string& subject) {
     if (!cond || cond->class_type != MAT_C_STRUCT) {
         if (cond) Mat_VarFree(cond);
         Mat_Close(matfp);
-        std::cerr << "Variable 'cond' not found or not a struct in: " << proto_file << std::endl;
+        LOG_ERROR << "Variable 'cond' not found or not a struct in: " << proto_file;
         trials.push_back(cfg.ref_trial_id);
         trials.push_back(cfg.ref_trial_id + 1);
         return trials;
@@ -1498,7 +1506,7 @@ std::vector<int> DicAnalysis::searchTrialTarget(const std::string& subject) {
     if (!titles || titles->class_type != MAT_C_CELL || !table || table->class_type != MAT_C_CELL) {
         if (cond) Mat_VarFree(cond);
         Mat_Close(matfp);
-        std::cerr << "Fields 'titles' or 'table' missing or of wrong type in 'cond'" << std::endl;
+        LOG_ERROR << "Fields 'titles' or 'table' missing or of wrong type in 'cond'";
         trials.push_back(cfg.ref_trial_id);
         trials.push_back(cfg.ref_trial_id + 1);
         return trials;
@@ -1533,7 +1541,7 @@ std::vector<int> DicAnalysis::searchTrialTarget(const std::string& subject) {
     if (dir_idx < 0 || nf_idx < 0 || spd_idx < 0) {
         if (cond) Mat_VarFree(cond);
         Mat_Close(matfp);
-        std::cerr << "Required columns not found in titles (need 'dir','nf','spddxl')" << std::endl;
+        LOG_ERROR << "Required columns not found in titles (need 'dir','nf','spddxl')";
         trials.push_back(cfg.ref_trial_id);
         trials.push_back(cfg.ref_trial_id + 1);
         return trials;
@@ -1644,7 +1652,7 @@ std::vector<int> DicAnalysis::searchTrialTarget(const std::string& subject) {
 }
 
 bool DicAnalysis::dic2DAnalysis(const std::vector<int>& trial_target) {
-    std::cout << "Starting 2D DIC Analysis (using StepDWorkflow)..." << std::endl;
+    LOG_INFO << "Starting 2D DIC Analysis (using StepDWorkflow)...";
     
     try {
         // Create workflow instance
@@ -1657,30 +1665,30 @@ bool DicAnalysis::dic2DAnalysis(const std::vector<int>& trial_target) {
                 std::ostringstream trial_str;
                 trial_str << std::setw(3) << std::setfill('0') << trial;
                 
-                std::cout << "\n========================================" << std::endl;
-                std::cout << "Processing Trial " << trial << ", Pair " << pair << std::endl;
-                std::cout << "========================================" << std::endl;
+                LOG_INFO << "\n========================================";
+                LOG_INFO << "Processing Trial " << trial << ", Pair " << pair;
+                LOG_INFO << "========================================";
                 
                 // Execute workflow
                 auto [outputPath, pairOrder, pairForced] = workflow.execute(trial_str.str(), pair);
                 
                 if (outputPath.empty()) {
-                    std::cerr << "Workflow failed for trial " << trial << ", pair " << pair << std::endl;
+                    LOG_ERROR << "Workflow failed for trial " << trial << ", pair " << pair;
                     return false;
                 }
-                
-                std::cout << "✓ Trial " << trial << ", pair " << pair << " completed successfully." << std::endl;
-                std::cout << "  Output path: " << outputPath << std::endl;
-                std::cout << "  Pair order: [" << pairOrder[0] << ", " << pairOrder[1] << "]" << std::endl;
-                std::cout << "  Pair forced: " << (pairForced ? "true" : "false") << std::endl;
+
+                LOG_INFO << "✓ Trial " << trial << ", pair " << pair << " completed successfully.";
+                LOG_INFO << "  Output path: " << outputPath;
+                LOG_INFO << "  Pair order: [" << pairOrder[0] << ", " << pairOrder[1] << "]";
+                LOG_INFO << "  Pair forced: " << (pairForced ? "true" : "false");
             }
         }
-        
-        std::cout << "\n✓ All 2D DIC Analysis completed successfully!" << std::endl;
+
+        LOG_INFO << "\n✓ All 2D DIC Analysis completed successfully!";
         return true;
-        
+
     } catch (const std::exception& e) {
-        std::cerr << "Error in 2D DIC Analysis: " << e.what() << std::endl;
+        LOG_ERROR << "in 2D DIC Analysis: " << e.what();
         return false;
     }
 }
@@ -1712,7 +1720,7 @@ std::vector<std::string> DicAnalysis::loadImageSequence(const std::string& trial
         std::sort(images.begin(), images.end());
         
     } catch (const std::exception& e) {
-        std::cerr << "Error loading image sequence: " << e.what() << std::endl;
+        LOG_ERROR << "loading image sequence: " << e.what();
     }
     
     return images;
@@ -1722,10 +1730,10 @@ bool DicAnalysis::setupNcorrAnalysis(const std::vector<std::string>& images,
                                    DIC_analysis_input& dic_input) {
     try {
         if (images.size() < 2) {
-            std::cerr << "Need at least 2 images for DIC analysis" << std::endl;
+            LOG_ERROR << "Need at least 2 images for DIC analysis";
             return false;
         }
-        
+
         // Convert string paths to Image2D objects
         std::vector<Image2D> ncorr_images;
         for (const auto& img_path : images) {
@@ -1751,7 +1759,7 @@ bool DicAnalysis::setupNcorrAnalysis(const std::vector<std::string>& images,
         return true;
         
     } catch (const std::exception& e) {
-        std::cerr << "Error setting up ncorr analysis: " << e.what() << std::endl;
+        LOG_ERROR << "setting up ncorr analysis: " << e.what();
         return false;
     }
 }
