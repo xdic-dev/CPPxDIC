@@ -1,0 +1,18 @@
+# Keep the Docker build context small: exclude local build trees, outputs,
+# scratch and VCS data. Source + Tools submodules are still shipped.
+build/
+build_newver/
+build_tests/
+tests/build/
+tests/test_output/
+outputs/
+reports/
+newreport/
+test_output/
+.git/
+.claude/
+.devin/
+**/*.o
+**/*.a
+compile_commands.json
+xprof_out/

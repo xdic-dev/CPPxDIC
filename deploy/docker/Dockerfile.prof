@@ -1,0 +1,43 @@
+# Profiling variant of deploy/docker/Dockerfile.
+# Builds ONLY the `cppxdic` target (skips the `generate_ncorr_bin` helper, which
+# fails to compile against Ubuntu 22.04's HDF5 headers — unrelated to the
+# pipeline being profiled). Otherwise identical to the production image.
+
+# --------------- Stage 1: build ---------------
+FROM ubuntu:22.04 AS builder
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake g++ git pkg-config ca-certificates wget \
+        libopencv-dev libfftw3-dev libmatio-dev libhdf5-dev libcgal-dev \
+        libeigen3-dev libsuitesparse-dev liblapack-dev libblas-dev \
+        libopenblas-dev libomp-dev nlohmann-json3-dev \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+COPY . /opt/cppxdic/src
+WORKDIR /opt/cppxdic/src
+RUN rm -rf build tests/build Tools/CppNCorr/lib compile_commands.json \
+    && mkdir -p build && cd build \
+    && cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 \
+    && make -j$(nproc) cppxdic \
+    && mkdir -p /opt/cppxdic/bin \
+    && cp cppxdic /opt/cppxdic/bin/cppxdic
+
+# --------------- Stage 2: runtime ---------------
+FROM ubuntu:22.04 AS runtime
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libopencv-core4.5d libopencv-imgproc4.5d libopencv-imgcodecs4.5d \
+        libopencv-highgui4.5d libopencv-videoio4.5d \
+        libfftw3-3 libmatio11 libhdf5-103-1 libcgal-dev libeigen3-dev \
+        libsuitesparseconfig5 libspqr2 libcholmod3 libamd2 libcolamd2 \
+        liblapack3 libblas3 libopenblas0 libomp5 libgomp1 \
+        time procps \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/cppxdic/bin /opt/cppxdic/bin
+ENV PATH=/opt/cppxdic/bin:$PATH
+ENV LC_ALL=C LANG=C OMP_NUM_THREADS=4
+RUN mkdir -p /configs /data /output
+WORKDIR /output
+ENTRYPOINT ["/opt/cppxdic/bin/cppxdic"]
+CMD ["--help"]
