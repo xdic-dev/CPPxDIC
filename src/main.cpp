@@ -17,6 +17,7 @@
 #include "trial_selection.h"
 #include "utils.h"
 #include "xdic/xdic_mode.h"
+#include "profiling.h"
 
 // Mode-specific dispatch headers (stubs for non-default modes).
 #if defined(XDIC_MODE_MIRRORED)
@@ -394,6 +395,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    ::xprof::Profiler::I().dump();
     LOG_INFO << "End of script";
     return 0;
 }

@@ -5,6 +5,7 @@
  */
 
 #include "step_d_workflow.h"
+#include "profiling.h"
 #include "Array2D.h"
 #include "mat_writer.h"
 #include "mat_reader.h"
@@ -132,7 +133,10 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     // 3. Import video frames
     std::vector<cv::Mat> cam_first_raw, cam_second_raw;
     LOG_INFO << "Reading video data... ";
-    if (!importVideoFrames(trial, stereopair, cam_first_raw, cam_second_raw)) {
+    bool import_ok;
+    { XPROF_SCOPE("D.preproc.import_video");
+      import_ok = importVideoFrames(trial, stereopair, cam_first_raw, cam_second_raw); }
+    if (!import_ok) {
         LOG_ERROR << "Failed to import video frames";
         return {"", {}, false};
     }
@@ -149,14 +153,18 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     // 5. Saturation
     std::vector<cv::Mat> cam_first_satur, cam_second_satur;
     LOG_INFO << "Applying saturation...";
-    performSaturation(cam_first_raw, cam_second_raw, cam_first_satur, cam_second_satur);
+    { XPROF_SCOPE("D.preproc.saturation");
+      performSaturation(cam_first_raw, cam_second_raw, cam_first_satur, cam_second_satur); }
     
     // II. ROI, Seed, and Matching REF to Trial at frame 1
     cv::Mat refmask_REF, refmask_trial;
     SeedPoint ref_seed_point, initial_seed_point_set1;
     LOG_INFO << "Initializing ROI, seed, and matching REF to Trial...";
-    if (!initializeROIAndSeed(cam_first_satur, refmask_REF, refmask_trial,
-                             ref_seed_point, initial_seed_point_set1)) {
+    bool roi_ok;
+    { XPROF_SCOPE("D.preproc.roi_seed_match");
+      roi_ok = initializeROIAndSeed(cam_first_satur, refmask_REF, refmask_trial,
+                                    ref_seed_point, initial_seed_point_set1); }
+    if (!roi_ok) {
         LOG_ERROR << "Failed to initialize ROI and seed";
         return {"", {}, false};
     }
@@ -169,8 +177,9 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     std::vector<cv::Mat> cam_first, cam_second;
     if(config_.im_filter_mode) {
         LOG_INFO << "Applying image filtering...";
-        applyImageFiltering(cam_first_satur, cam_second_satur, refmask_trial,
-                           cam_first, cam_second);
+        { XPROF_SCOPE("D.preproc.filtering");
+          applyImageFiltering(cam_first_satur, cam_second_satur, refmask_trial,
+                             cam_first, cam_second); }
         LOG_INFO << "--> STEP: filtering done";
     } else {
         LOG_INFO << "Skipping image filtering";
@@ -182,9 +191,12 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     cv::Mat refmask_trial_matched;
     SeedPoint initial_seed_point_set2;
     LOG_INFO << "\nPerforming camera matching...";
-    if (!performMatching(cam_first_satur, cam_second_satur, refmask_trial,
-                        initial_seed_point_set1, refmask_trial_matched,
-                        initial_seed_point_set2)) {
+    bool match_ok;
+    { XPROF_SCOPE("D.matching_cams");
+      match_ok = performMatching(cam_first_satur, cam_second_satur, refmask_trial,
+                                 initial_seed_point_set1, refmask_trial_matched,
+                                 initial_seed_point_set2); }
+    if (!match_ok) {
         LOG_ERROR << "Failed matching step";
         return {"", {}, false};
     }
@@ -194,14 +206,20 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     
     // V. Tracking camera 1
     LOG_INFO << "\nPerforming tracking camera 1...";
-    if (!performTracking1(cam_first, refmask_trial, initial_seed_point_set1)) {
+    bool track1_ok;
+    { XPROF_SCOPE("D.tracking1");
+      track1_ok = performTracking1(cam_first, refmask_trial, initial_seed_point_set1); }
+    if (!track1_ok) {
         LOG_ERROR << "Failed tracking1 step";
         return {"", {}, false};
     }
     
     // VI. Tracking camera 2
     LOG_INFO << "\nPerforming tracking camera 2...";
-    if (!performTracking2(cam_second, refmask_trial_matched, initial_seed_point_set2)) {
+    bool track2_ok;
+    { XPROF_SCOPE("D.tracking2");
+      track2_ok = performTracking2(cam_second, refmask_trial_matched, initial_seed_point_set2); }
+    if (!track2_ok) {
         LOG_ERROR << "Failed tracking2 step";
         return {"", {}, false};
     }
@@ -218,7 +236,8 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     }
 
     // Post-preps. Format output
-    formatOutput(trial, stereopair, pairOrder, pairForced);
+    { XPROF_SCOPE("D.format_output");
+      formatOutput(trial, stereopair, pairOrder, pairForced); }
     
     LOG_INFO << "--> STEP: Ncorr analysis completed";
 
