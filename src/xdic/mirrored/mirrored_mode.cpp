@@ -24,6 +24,7 @@
 #include "utils.h"
 #include "image_processor.h"
 #include "roi_manager.h"
+#include "logging.h"
 
 #include <ncorr.h>
 #include <opencv2/opencv.hpp>
@@ -199,19 +200,19 @@ bool importRawViewMirrored(const Config& config, int trial, const ViewInfo& view
         const std::string vid =
             findCameraVideo(video_dir, config.subject_id, config.material, trialname, view.cam_nbr);
         if (vid.empty()) {
-            std::cerr << "mirrored: video not found for trial=" << trial << " cam=" << view.cam_nbr
-                      << " in " << video_dir << std::endl;
+            LOG_ERROR << "mirrored: video not found for trial=" << trial << " cam=" << view.cam_nbr
+                      << " in " << video_dir;
             return false;
         }
 
         cv::VideoCapture cap(vid);
         if (!cap.isOpened()) {
-            std::cerr << "mirrored: failed to open video: " << vid << std::endl;
+            LOG_ERROR << "mirrored: failed to open video: " << vid;
             return false;
         }
 
-        std::cout << "  view " << view.view_nbr << " (cam " << view.cam_nbr << ", half "
-                  << (view.half == MaskHalf::Left ? "L" : "R") << ") <- " << vid << std::endl;
+        LOG_INFO << "  view " << view.view_nbr << " (cam " << view.cam_nbr << ", half "
+                 << (view.half == MaskHalf::Left ? "L" : "R") << ") <- " << vid;
 
         const int total = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_COUNT));
         if (frameEnd <= 0) frameEnd = total;
@@ -225,7 +226,7 @@ bool importRawViewMirrored(const Config& config, int trial, const ViewInfo& view
              << "/tmp_frames_mirrored/T" << trial << "/pair_unset/view" << view.view_nbr;
         const std::string view_dir = odir.str();
         if (!ensureDir(view_dir)) {
-            std::cerr << "mirrored: cannot create frame dir " << view_dir << std::endl;
+            LOG_ERROR << "mirrored: cannot create frame dir " << view_dir;
             return false;
         }
 
@@ -243,7 +244,7 @@ bool importRawViewMirrored(const Config& config, int trial, const ViewInfo& view
 
         return !out_frames.empty();
     } catch (const std::exception& e) {
-        std::cerr << "mirrored: importRawViewMirrored error: " << e.what() << std::endl;
+        LOG_ERROR << "mirrored: importRawViewMirrored error: " << e.what();
         return false;
     }
 }
@@ -291,32 +292,32 @@ ncorr::DIC_analysis_output runViewDic(const Config& config, const cv::Mat& ref_i
     // Persist the raw (pixel) displacements, matching StepDWorkflow's convention.
     // `save` is a friend free function found via ADL on the ncorr argument type.
     save(dic_out, output_path);
-    std::cout << "    DIC saved: " << output_path << std::endl;
+    LOG_INFO << "    DIC saved: " << output_path;
     return dic_out;
 }
 
 // Process one stereopair end-to-end for one trial.
 bool processPair(const Config& config, int trial, const ViewPair& vp, int frameStart, int frameEnd,
                  int frameJump) {
-    std::cout << "\n--- Trial " << trial << " stereopair " << vp.stereopair << " (views "
-              << vp.view1.view_nbr << " & " << vp.view2.view_nbr << ") ---" << std::endl;
+    LOG_INFO << "--- Trial " << trial << " stereopair " << vp.stereopair << " (views "
+             << vp.view1.view_nbr << " & " << vp.view2.view_nbr << ") ---";
 
     // 1. Mask-extract both views as full frames (import_raw_vid_MNG.m).
     std::vector<std::string> view1_paths, view2_paths;
     if (!importRawViewMirrored(config, trial, vp.view1, frameStart, frameEnd, frameJump,
                                view1_paths)) {
-        std::cerr << "mirrored: failed to extract view " << vp.view1.view_nbr << std::endl;
+        LOG_ERROR << "mirrored: failed to extract view " << vp.view1.view_nbr;
         return false;
     }
     if (!importRawViewMirrored(config, trial, vp.view2, frameStart, frameEnd, frameJump,
                                view2_paths)) {
-        std::cerr << "mirrored: failed to extract view " << vp.view2.view_nbr << std::endl;
+        LOG_ERROR << "mirrored: failed to extract view " << vp.view2.view_nbr;
         return false;
     }
 
     const std::size_t n = std::min(view1_paths.size(), view2_paths.size());
     if (n == 0) {
-        std::cerr << "mirrored: no frames extracted for pair " << vp.stereopair << std::endl;
+        LOG_ERROR << "mirrored: no frames extracted for pair " << vp.stereopair;
         return false;
     }
 
@@ -328,7 +329,7 @@ bool processPair(const Config& config, int trial, const ViewPair& vp, int frameS
         cv::Mat a = cv::imread(view1_paths[i], cv::IMREAD_GRAYSCALE);
         cv::Mat b = cv::imread(view2_paths[i], cv::IMREAD_GRAYSCALE);
         if (a.empty() || b.empty()) {
-            std::cerr << "mirrored: failed to read extracted frame " << i << std::endl;
+            LOG_ERROR << "mirrored: failed to read extracted frame " << i;
             return false;
         }
         view1_satur.push_back(cppxdic::ImageProcessor::saturate(a, kLimitGrayscale, "high"));
@@ -405,17 +406,16 @@ bool processPair(const Config& config, int trial, const ViewPair& vp, int frameS
                    out_dir + "/tmp_ncorr_view2", track2_out);
     }
 
-    std::cout << "--- pair " << vp.stereopair << " done; results in " << out_dir << " ---"
-              << std::endl;
+    LOG_INFO << "--- pair " << vp.stereopair << " done; results in " << out_dir << " ---";
     return true;
 }
 
 } // namespace
 
 bool run(const Config& config) {
-    std::cout << "-------------------------------------------" << std::endl;
-    std::cout << "xDIC mirrored-camera (MNG) mode" << std::endl;
-    std::cout << "-------------------------------------------" << std::endl;
+    LOG_INFO << "-------------------------------------------";
+    LOG_INFO << "xDIC mirrored-camera (MNG) mode";
+    LOG_INFO << "-------------------------------------------";
 
     // Number of stereopairs: prefer the config value, fall back to the MNG default (7).
     const int num_pair = (config.num_pair > 0) ? config.num_pair : kDefaultNumPair;
@@ -426,8 +426,8 @@ bool run(const Config& config) {
     const int frameEnd = config.idx_frame_end;
     const int frameJump = (config.frame_jump > 0) ? config.frame_jump : 1;
     const double true_fps = static_cast<double>(kMngFps) / frameJump;
-    std::cout << "True FPS: " << true_fps << ", frames " << frameStart << ".." << frameEnd
-              << " jump " << frameJump << std::endl;
+    LOG_INFO << "True FPS: " << true_fps << ", frames " << frameStart << ".." << frameEnd
+             << " jump " << frameJump;
 
     const int trial = config.ref_trial_id; // single-trial entry, as in the MATLAB script
 
@@ -437,20 +437,20 @@ bool run(const Config& config) {
         try {
             vp = resolveViewPair(pair, kDefaultCamOrder);
         } catch (const std::exception& e) {
-            std::cerr << "mirrored: " << e.what() << " (skipping pair " << pair << ")" << std::endl;
+            LOG_ERROR << "mirrored: " << e.what() << " (skipping pair " << pair << ")";
             all_ok = false;
             continue;
         }
         if (!processPair(config, trial, vp, frameStart, frameEnd, frameJump)) {
-            std::cerr << "mirrored: pair " << pair << " failed" << std::endl;
+            LOG_ERROR << "mirrored: pair " << pair << " failed";
             all_ok = false;
         }
     }
 
     if (all_ok) {
-        std::cout << "\nMirrored-camera analysis completed." << std::endl;
+        LOG_INFO << "Mirrored-camera analysis completed.";
     } else {
-        std::cerr << "\nMirrored-camera analysis completed with errors." << std::endl;
+        LOG_ERROR << "Mirrored-camera analysis completed with errors.";
     }
     return all_ok;
 }

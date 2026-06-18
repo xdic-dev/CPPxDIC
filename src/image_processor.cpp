@@ -5,6 +5,7 @@
  */
 
 #include "image_processor.h"
+#include "logging.h"
 #include <iostream>
 #include <algorithm>
 #include <cmath>
@@ -30,7 +31,7 @@ cv::Mat ImageProcessor::saturate(const cv::Mat& input, int level, const std::str
     // Convert to grayscale if needed
     cv::Mat gray;
     if (input.channels() == 3) {
-        std::cout << "Warning - Converting to grayscale" << std::endl;
+        LOG_WARN << "Converting to grayscale";
         cv::cvtColor(input, gray, cv::COLOR_BGR2GRAY);
     } else {
         gray = input.clone();
@@ -38,7 +39,7 @@ cv::Mat ImageProcessor::saturate(const cv::Mat& input, int level, const std::str
     
     // Ensure uint8 format
     if (gray.type() != CV_8UC1) {
-        std::cout << "Warning - Converting to uint8" << std::endl;
+        LOG_WARN << "Converting to uint8";
         gray.convertTo(gray, CV_8UC1);
     }
     
@@ -72,7 +73,7 @@ ImageProcessor::filterLikeBen(const std::vector<cv::Mat>& input,
     // Compute boundaries from FIRST FILTERED image using percentiles (5th, 95th) if not provided
     if (gs_boundaries == nullptr) {
         boundaries = computePercentileBoundaries(filtered_images[0], mask, 5.0, 95.0);
-        std::cout << "  Computed filter boundaries: [" << boundaries.first << ", " << boundaries.second << "]" << std::endl;
+        LOG_DEBUG << "  Computed filter boundaries: [" << boundaries.first << ", " << boundaries.second << "]";
     } else {
         boundaries = *gs_boundaries;
     }
@@ -200,7 +201,7 @@ std::pair<double, double> ImageProcessor::computePercentileBoundaries(const cv::
     }
     
     if (values.empty()) {
-        std::cerr << "Warning: No pixels in mask for percentile computation" << std::endl;
+        LOG_WARN << "No pixels in mask for percentile computation";
         return {0.0, 255.0};
     }
     
@@ -257,7 +258,7 @@ std::vector<cv::Mat> ImageProcessor::loadImages(const std::vector<std::string>& 
     for (const auto& path : paths) {
         cv::Mat img = cv::imread(path, grayscale ? cv::IMREAD_GRAYSCALE : cv::IMREAD_COLOR);
         if (img.empty()) {
-            std::cerr << "Failed to load image: " << path << std::endl;
+            LOG_ERROR << "Failed to load image: " << path;
             continue;
         }
         images.push_back(img);
@@ -274,7 +275,7 @@ bool ImageProcessor::saveImages(const std::vector<cv::Mat>& images,
         filename << base_path << "/" << prefix << "_" << std::setw(6) << std::setfill('0') << i << ".png";
         
         if (!cv::imwrite(filename.str(), images[i])) {
-            std::cerr << "Failed to save image: " << filename.str() << std::endl;
+            LOG_ERROR << "Failed to save image: " << filename.str();
             return false;
         }
     }

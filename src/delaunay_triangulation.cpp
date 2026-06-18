@@ -3,6 +3,7 @@
  */
 
 #include "delaunay_triangulation.h"
+#include "logging.h"
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
 #include <CGAL/Delaunay_triangulation_2.h>
 #include <CGAL/Triangulation_vertex_base_with_info_2.h>
@@ -23,7 +24,7 @@ std::vector<int> DelaunayTriangulation::compute(const std::vector<cv::Point2f>& 
     std::vector<int> faces;
     
     if (points.size() < 3) {
-        std::cerr << "Error: Need at least 3 points for triangulation" << std::endl;
+        LOG_ERROR << "Need at least 3 points for triangulation";
         return faces;
     }
     
@@ -54,8 +55,8 @@ std::vector<int> DelaunayTriangulation::compute(const std::vector<cv::Point2f>& 
         faces.push_back(v2);
     }
     
-    std::cout << "Delaunay triangulation: " << points.size() << " points -> " 
-              << (faces.size() / 3) << " triangles" << std::endl;
+    LOG_INFO << "Delaunay triangulation: " << points.size() << " points -> "
+             << (faces.size() / 3) << " triangles";
     
     return faces;
 }
@@ -68,7 +69,7 @@ std::vector<int> DelaunayTriangulation::filterByEdgeLength(
     std::vector<int> filtered_faces;
     
     if (faces.size() % 3 != 0) {
-        std::cerr << "Error: Faces array size must be multiple of 3" << std::endl;
+        LOG_ERROR << "Faces array size must be multiple of 3";
         return filtered_faces;
     }
     
@@ -84,9 +85,9 @@ std::vector<int> DelaunayTriangulation::filterByEdgeLength(
         if (v0 < 0 || v1 < 0 || v2 < 0 ||
             static_cast<size_t>(v0) >= vertices.size() || static_cast<size_t>(v1) >= vertices.size() || static_cast<size_t>(v2) >= vertices.size()) {
             if (i < 5) {
-                std::cerr << "Warning: Invalid vertex index in triangle " << i 
-                          << " (v0=" << v0 << " v1=" << v1 << " v2=" << v2 
-                          << ", nVerts=" << vertices.size() << ")" << std::endl;
+                LOG_WARN << "Invalid vertex index in triangle " << i
+                         << " (v0=" << v0 << " v1=" << v1 << " v2=" << v2
+                         << ", nVerts=" << vertices.size() << ")";
             }
             continue;
         }
@@ -112,8 +113,8 @@ std::vector<int> DelaunayTriangulation::filterByEdgeLength(
     
     size_t removed = n_triangles - (filtered_faces.size() / 3);
     if (removed > 0) {
-        std::cout << "Filtered " << removed << " irregular triangles (edge > " 
-                  << max_edge_threshold << ")" << std::endl;
+        LOG_INFO << "Filtered " << removed << " irregular triangles (edge > "
+                 << max_edge_threshold << ")";
     }
     
     return filtered_faces;
@@ -126,7 +127,7 @@ std::vector<double> DelaunayTriangulation::computeEdgeLengths(
     std::vector<double> edge_lengths;
     
     if (faces.size() % 3 != 0) {
-        std::cerr << "Error: Faces array size must be multiple of 3" << std::endl;
+        LOG_ERROR << "Faces array size must be multiple of 3";
         return edge_lengths;
     }
     
@@ -167,7 +168,7 @@ std::vector<int> DelaunayTriangulation::flipOrientation(const std::vector<int>& 
     std::vector<int> flipped;
     
     if (faces.size() % 3 != 0) {
-        std::cerr << "Error: Faces array size must be multiple of 3" << std::endl;
+        LOG_ERROR << "Faces array size must be multiple of 3";
         return flipped;
     }
     
@@ -190,7 +191,7 @@ std::vector<cv::Point2f> DelaunayTriangulation::computeCentroids(
     std::vector<cv::Point2f> centroids;
     
     if (faces.size() % 3 != 0) {
-        std::cerr << "Error: Faces array size must be multiple of 3" << std::endl;
+        LOG_ERROR << "Faces array size must be multiple of 3";
         return centroids;
     }
     
@@ -229,7 +230,7 @@ std::vector<double> DelaunayTriangulation::computeAreas(
     std::vector<double> areas;
     
     if (faces.size() % 3 != 0) {
-        std::cerr << "Error: Faces array size must be multiple of 3" << std::endl;
+        LOG_ERROR << "Faces array size must be multiple of 3";
         return areas;
     }
     

@@ -5,6 +5,7 @@
 #include "visualization.h"
 #include "dic_structures.h"
 #include "strain_computation.h"
+#include "logging.h"
 #include <fstream>
 #include <iostream>
 #include <iomanip>
@@ -32,13 +33,13 @@ ExportFormat Visualization::parseExportFormat(const std::string& format_str) {
     } else if (format_str == "csv" || format_str == "CSV") {
         return ExportFormat::CSV;
     }
-    std::cerr << "Warning: Unknown export format '" << format_str 
-              << "', defaulting to VTK" << std::endl;
+    LOG_WARN << "Unknown export format '" << format_str
+             << "', defaulting to VTK";
     return ExportFormat::VTK;
 }
 
 DIC3DPPresults Visualization::loadFromBinaryCache(const std::string& filepath) {
-    std::cout << "Loading DIC results from binary cache: " << filepath << std::endl;
+    LOG_INFO << "Loading DIC results from binary cache: " << filepath;
     
     if (!std::filesystem::exists(filepath)) {
         throw std::runtime_error("Binary cache file not found: " + filepath);
@@ -52,25 +53,25 @@ DIC3DPPresults Visualization::loadFromBinaryCache(const std::string& filepath) {
     // Copy base class data
     static_cast<DIC3Dcombined&>(results) = combined;
     
-    std::cout << "Loaded " << results.Points3D.size() << " frames" << std::endl;
+    LOG_INFO << "Loaded " << results.Points3D.size() << " frames";
     
     return results;
 }
 
 void Visualization::applyTemporalFilter(DIC3DPPresults& results) {
     if (!config_.smoothTimeLogic) {
-        std::cout << "Temporal filtering disabled" << std::endl;
+        LOG_INFO << "Temporal filtering disabled";
         return;
     }
     
-    std::cout << "Applying temporal filter (cutoff: " << config_.filterFreq 
-              << " Hz, fs: " << config_.vid_sample_freq << " Hz)..." << std::endl;
+    LOG_INFO << "Applying temporal filter (cutoff: " << config_.filterFreq
+             << " Hz, fs: " << config_.vid_sample_freq << " Hz)...";
     
     // Filter displacement vectors if needed
     for (const auto& plot_field : config_.plotopt) {
         if (plot_field == "DispX" || plot_field == "DispY" || plot_field == "DispZ") {
             if (!results.Disp.DispVec.empty()) {
-                std::cout << "  Filtering displacement vector (" << plot_field << ")" << std::endl;
+                LOG_INFO << "  Filtering displacement vector (" << plot_field << ")";
                 results.Disp.DispVec = butterworthFilter(
                     results.Disp.DispVec, 
                     config_.filterFreq, 
@@ -78,7 +79,7 @@ void Visualization::applyTemporalFilter(DIC3DPPresults& results) {
             }
         } else if (plot_field == "DispMgn") {
             if (!results.Disp.DispMgn.empty()) {
-                std::cout << "  Filtering displacement magnitude" << std::endl;
+                LOG_INFO << "  Filtering displacement magnitude";
                 results.Disp.DispMgn = butterworthFilter(
                     results.Disp.DispMgn, 
                     config_.filterFreq, 
@@ -89,14 +90,14 @@ void Visualization::applyTemporalFilter(DIC3DPPresults& results) {
     
     // Filter correlation coefficients
     if (!results.FaceCorrComb.empty()) {
-        std::cout << "  Filtering face correlation" << std::endl;
+        LOG_INFO << "  Filtering face correlation";
         results.FaceCorrComb = butterworthFilter(
             results.FaceCorrComb, 
             config_.filterFreq, 
             config_.vid_sample_freq);
     }
     
-    std::cout << "Temporal filtering complete" << std::endl;
+    LOG_INFO << "Temporal filtering complete";
 }
 
 /**
@@ -256,15 +257,15 @@ std::vector<double> Visualization::applySpatialSmooth(
     
     // Verify faces array size
     if (faces.size() < n_faces * 3) {
-        std::cerr << "  Warning: Faces array too small for spatial smoothing" << std::endl;
+        LOG_WARN << "Faces array too small for spatial smoothing";
         return face_data;
     }
     
     int num_neighbors = config_.smoothPar_n;      // Number of neighbors (default: 30)
     double sigma = config_.smoothPar_sigma;        // Gaussian sigma (default: 2.0)
     
-    std::cout << "  Applying spatial smoothing (n=" << num_neighbors 
-              << ", sigma=" << sigma << ")..." << std::endl;
+    LOG_INFO << "  Applying spatial smoothing (n=" << num_neighbors
+             << ", sigma=" << sigma << ")...";
     
     // Build face adjacency graph
     auto adjacency = buildFaceAdjacency(faces, n_faces);
@@ -301,7 +302,7 @@ std::vector<double> Visualization::applySpatialSmooth(
         }
     }
     
-    std::cout << "  Spatial smoothing complete" << std::endl;
+    LOG_INFO << "  Spatial smoothing complete";
     
     return smoothed;
 }
@@ -314,7 +315,7 @@ std::vector<std::vector<double>> Visualization::extractScalarField(
     size_t n_frames = results.Points3D.size();
     
     if (n_frames == 0) {
-        std::cerr << "Warning: No frames in results" << std::endl;
+        LOG_WARN << "No frames in results";
         return field_data;
     }
     
@@ -381,10 +382,10 @@ std::vector<std::vector<double>> Visualization::extractScalarField(
                 field_data.push_back(accessor(results.deform_full.frames[i]));
             }
         } else {
-            std::cerr << "Warning: Unknown deformation field '" << field_name << "'" << std::endl;
+            LOG_WARN << "Unknown deformation field '" << field_name << "'";
         }
     } else {
-        std::cerr << "Warning: No deformation data available for field '" << field_name << "'" << std::endl;
+        LOG_WARN << "No deformation data available for field '" << field_name << "'";
     }
     
     return field_data;
@@ -398,8 +399,8 @@ void Visualization::applyCorrelationFilter(
         return;
     }
     
-    std::cout << "Applying correlation filter (max coeff: " 
-              << config_.maxCorrCoeff << ")" << std::endl;
+    LOG_INFO << "Applying correlation filter (max coeff: "
+             << config_.maxCorrCoeff << ")";
     
     for (size_t frame = 0; frame < face_data.size() && frame < corr_data.size(); ++frame) {
         for (size_t i = 0; i < face_data[frame].size() && i < corr_data[frame].size(); ++i) {
@@ -418,7 +419,7 @@ void Visualization::applyGapFilter(
         return;
     }
     
-    std::cout << "Applying gap filter (suppressing stitched boundaries)" << std::endl;
+    LOG_INFO << "Applying gap filter (suppressing stitched boundaries)";
     
     // MATLAB anim8_rewrited.m line 336: FCnow(data.FacePairInds==3)=NaN
     // FacePairInds==3 identifies faces at the stitched boundary between pairs
@@ -434,7 +435,7 @@ void Visualization::applyGapFilter(
 }
 
 VisData Visualization::prepareVisualizationData(const DIC3DPPresults& results) {
-    std::cout << "Preparing visualization data..." << std::endl;
+    LOG_INFO << "Preparing visualization data...";
     
     VisData vis_data;
     vis_data.Points3D = results.Points3D;
@@ -444,7 +445,7 @@ VisData Visualization::prepareVisualizationData(const DIC3DPPresults& results) {
     
     // Extract requested scalar fields
     for (const auto& field_name : config_.plotopt) {
-        std::cout << "  Extracting field: " << field_name << std::endl;
+        LOG_DEBUG << "  Extracting field: " << field_name;
         auto field_data = extractScalarField(results, field_name);
         
         if (!field_data.empty()) {
@@ -468,8 +469,8 @@ VisData Visualization::prepareVisualizationData(const DIC3DPPresults& results) {
         }
     }
     
-    std::cout << "Visualization data prepared (" << vis_data.n_frames 
-              << " frames, " << vis_data.FaceScalars.size() << " fields)" << std::endl;
+    LOG_INFO << "Visualization data prepared (" << vis_data.n_frames
+             << " frames, " << vis_data.FaceScalars.size() << " fields)";
     
     return vis_data;
 }
@@ -497,7 +498,7 @@ void Visualization::exportData(
     // Export each frame
     for (int frame : frames_to_export) {
         if (frame < 0 || frame >= static_cast<int>(vis_data.n_frames)) {
-            std::cerr << "Warning: Frame " << frame << " out of range" << std::endl;
+            LOG_WARN << "Frame " << frame << " out of range";
             continue;
         }
         
@@ -525,7 +526,7 @@ void Visualization::exportFrameVTK(
     const std::string& filepath, 
     int frame_idx) {
     
-    std::cout << "Exporting frame " << frame_idx << " to VTK: " << filepath << std::endl;
+    LOG_INFO << "Exporting frame " << frame_idx << " to VTK: " << filepath;
     
     std::ofstream ofs(filepath);
     if (!ofs) {
@@ -565,9 +566,9 @@ void Visualization::exportFrameVTK(
             
             const auto& frame_data = field_data[frame_idx];
             if (frame_data.size() != n_faces) {
-                std::cerr << "Warning: Field " << field_name 
-                          << " size mismatch (" << frame_data.size() 
-                          << " vs " << n_faces << ")" << std::endl;
+                LOG_WARN << "Field " << field_name
+                         << " size mismatch (" << frame_data.size()
+                         << " vs " << n_faces << ")";
                 continue;
             }
             
@@ -580,8 +581,8 @@ void Visualization::exportFrameVTK(
     }
     
     ofs.close();
-    std::cout << "  VTK export complete: " << n_points << " points, " 
-              << n_faces << " faces" << std::endl;
+    LOG_INFO << "  VTK export complete: " << n_points << " points, "
+             << n_faces << " faces";
 }
 
 void Visualization::exportFramePLY(
@@ -589,7 +590,7 @@ void Visualization::exportFramePLY(
     const std::string& filepath, 
     int frame_idx) {
     
-    std::cout << "Exporting frame " << frame_idx << " to PLY: " << filepath << std::endl;
+    LOG_INFO << "Exporting frame " << frame_idx << " to PLY: " << filepath;
     
     std::ofstream ofs(filepath);
     if (!ofs) {
@@ -626,7 +627,7 @@ void Visualization::exportFramePLY(
     }
     
     ofs.close();
-    std::cout << "  PLY export complete" << std::endl;
+    LOG_INFO << "  PLY export complete";
 }
 
 void Visualization::exportFrameCSV(
@@ -634,7 +635,7 @@ void Visualization::exportFrameCSV(
     const std::string& filepath, 
     int frame_idx) {
     
-    std::cout << "Exporting frame " << frame_idx << " to CSV: " << filepath << std::endl;
+    LOG_INFO << "Exporting frame " << frame_idx << " to CSV: " << filepath;
     
     std::ofstream ofs(filepath);
     if (!ofs) {
@@ -665,14 +666,14 @@ void Visualization::exportFrameCSV(
     }
     
     ofs.close();
-    std::cout << "  CSV export complete" << std::endl;
+    LOG_INFO << "  CSV export complete";
 }
 
 void Visualization::generateSummaryStats(
     const DIC3DPPresults& results, 
     const std::string& output_path) {
     
-    std::cout << "Generating summary statistics..." << std::endl;
+    LOG_INFO << "Generating summary statistics...";
     
     std::ofstream ofs(output_path);
     if (!ofs) {
@@ -803,20 +804,20 @@ void Visualization::generateSummaryStats(
     }
     
     ofs.close();
-    std::cout << "Summary statistics written to: " << output_path << std::endl;
+    LOG_INFO << "Summary statistics written to: " << output_path;
 }
 
 void Visualization::printTrialInfo(const DIC3DPPresults& results) {
-    std::cout << "\n========================================\n";
-    std::cout << "DIC 3D Post-Processing Results Info\n";
-    std::cout << "========================================\n";
-    std::cout << "Subject: " << config_.subject_id << "\n";
-    std::cout << "Phase: " << config_.phase_id << "\n";
-    std::cout << "Material: " << config_.material << "\n";
-    std::cout << "Number of frames: " << results.Points3D.size() << "\n";
-    std::cout << "Number of pairs: " << config_.num_pair << "\n";
-    std::cout << "File version: " << config_.fileversion << "\n";
-    std::cout << "========================================\n\n";
+    LOG_INFO << "========================================";
+    LOG_INFO << "DIC 3D Post-Processing Results Info";
+    LOG_INFO << "========================================";
+    LOG_INFO << "Subject: " << config_.subject_id;
+    LOG_INFO << "Phase: " << config_.phase_id;
+    LOG_INFO << "Material: " << config_.material;
+    LOG_INFO << "Number of frames: " << results.Points3D.size();
+    LOG_INFO << "Number of pairs: " << config_.num_pair;
+    LOG_INFO << "File version: " << config_.fileversion;
+    LOG_INFO << "========================================";
 }
 
 /**
@@ -1014,9 +1015,9 @@ std::vector<std::vector<double>> Visualization::butterworthFilter(
     // Validate frequencies
     double nyquist = sample_freq / 2.0;
     if (cutoff_freq <= 0 || cutoff_freq >= nyquist) {
-        std::cerr << "  Warning: Invalid cutoff frequency (" << cutoff_freq 
-                  << " Hz), must be between 0 and Nyquist (" << nyquist 
-                  << " Hz). Returning unfiltered data." << std::endl;
+        LOG_WARN << "Invalid cutoff frequency (" << cutoff_freq
+                 << " Hz), must be between 0 and Nyquist (" << nyquist
+                 << " Hz). Returning unfiltered data.";
         return data;
     }
     
@@ -1027,8 +1028,8 @@ std::vector<std::vector<double>> Visualization::butterworthFilter(
     std::vector<double> b, a;
     designButterworth4(Wn, b, a);
     
-    std::cout << "  Applying 4th order Butterworth filter (fc=" << cutoff_freq 
-              << " Hz, fs=" << sample_freq << " Hz, Wn=" << Wn << ")" << std::endl;
+    LOG_INFO << "  Applying 4th order Butterworth filter (fc=" << cutoff_freq
+             << " Hz, fs=" << sample_freq << " Hz, Wn=" << Wn << ")";
     
     // Transpose data: from [frame][point] to [point][frame] for temporal filtering
     std::vector<std::vector<double>> transposed(n_points, std::vector<double>(n_frames));
@@ -1068,8 +1069,8 @@ std::vector<std::vector<double>> Visualization::butterworthFilter(
         }
     }
     
-    std::cout << "  Filtered " << filtered_count << "/" << n_points 
-              << " point time series" << std::endl;
+    LOG_INFO << "  Filtered " << filtered_count << "/" << n_points
+             << " point time series";
     
     return result;
 }
@@ -1244,7 +1245,7 @@ void Visualization::generateVideo(const VisData& vis_data,
                                    const std::string& output_path,
                                    const std::string& field_name) {
     if (vis_data.n_frames == 0) {
-        std::cerr << "Warning: No frames to generate video" << std::endl;
+        LOG_WARN << "No frames to generate video";
         return;
     }
     
@@ -1290,16 +1291,16 @@ void Visualization::generateVideo(const VisData& vis_data,
         data_max = config_.colormap_max;
     }
     
-    std::cout << "Generating video: " << output_path 
-              << " (" << vis_data.n_frames << " frames, " << fps << " fps, field=" 
-              << active_field << ", range=[" << data_min << ", " << data_max << "])" << std::endl;
+    LOG_INFO << "Generating video: " << output_path
+             << " (" << vis_data.n_frames << " frames, " << fps << " fps, field="
+             << active_field << ", range=[" << data_min << ", " << data_max << "])";
     
     // Create output directory if needed
     std::filesystem::create_directories(std::filesystem::path(output_path).parent_path());
     
     cv::VideoWriter writer(output_path, fourcc, fps, cv::Size(width, height));
     if (!writer.isOpened()) {
-        std::cerr << "Error: Failed to open video writer: " << output_path << std::endl;
+        LOG_ERROR << "Failed to open video writer: " << output_path;
         return;
     }
     
@@ -1311,7 +1312,7 @@ void Visualization::generateVideo(const VisData& vis_data,
     }
     
     writer.release();
-    std::cout << "✓ Video saved: " << output_path << std::endl;
+    LOG_INFO << "Video saved: " << output_path;
 }
 
 } // namespace cppxdic

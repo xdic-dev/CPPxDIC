@@ -15,6 +15,14 @@ include_directories(Tools/CppNCorr/include)
 # Build NCorr from source so local workflow changes are linked into cppxdic
 add_subdirectory(Tools/CppNCorr)
 
+# Lightweight, dependency-free logging facility (see include/logging.h). Built as
+# a small static library and linked into every cppxdic target via link_libraries()
+# below, including the test suite and optional apps added as subdirectories after
+# this point. (ncorr above has its own logger and is intentionally unaffected.)
+add_library(cppxdic_log STATIC src/logging.cpp)
+target_include_directories(cppxdic_log PUBLIC include)
+link_libraries(cppxdic_log)
+
 # Add executable with new source files
 add_executable(cppxdic
     src/main.cpp

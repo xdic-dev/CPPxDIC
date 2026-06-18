@@ -30,6 +30,7 @@
 
 #include "ncorr.h"
 #include "mat_reader.h"
+#include "logging.h"
 
 using namespace ncorr;
 using namespace cppxdic;
@@ -127,7 +128,7 @@ static Array2D<bool> h5ReadMask2D(hid_t file_id, const hobj_ref_t& ref) {
                 mask(static_cast<std::ptrdiff_t>(r),
                      static_cast<std::ptrdiff_t>(c)) = (buf[c * rows + r] != 0.0);
     } else {
-        std::cerr << "Warning: unsupported HDF5 type class " << tclass << " for ROI mask\n";
+        LOG_WARN << "unsupported HDF5 type class " << tclass << " for ROI mask";
     }
 
     H5Dclose(obj_id);
@@ -187,25 +188,25 @@ int main(int argc, char* argv[]) {
     }
 
     if (!std::filesystem::exists(input_path)) {
-        std::cerr << "Error: input file not found: " << input_path << "\n";
+        LOG_ERROR << "input file not found: " << input_path;
         return 1;
     }
 
-    std::cout << "Input:  " << input_path << "\n";
-    std::cout << "Output: " << output_path << "\n";
+    LOG_INFO << "Input:  " << input_path;
+    LOG_INFO << "Output: " << output_path;
 
     // -----------------------------------------------------------------------
     // Open MAT file via matio (for dispinfo scalars/strings)
     // -----------------------------------------------------------------------
     auto matfp = MatReader::openMat(input_path);
     if (!matfp) {
-        std::cerr << "Error: failed to open MAT file: " << input_path << "\n";
+        LOG_ERROR << "failed to open MAT file: " << input_path;
         return 1;
     }
 
     auto data_dic_save = MatReader::readVar(matfp.get(), "data_dic_save");
     if (!data_dic_save || data_dic_save->class_type != MAT_C_STRUCT) {
-        std::cerr << "Error: 'data_dic_save' not found or not a struct\n";
+        LOG_ERROR << "'data_dic_save' not found or not a struct";
         return 1;
     }
 
@@ -214,7 +215,7 @@ int main(int argc, char* argv[]) {
     // -----------------------------------------------------------------------
     matvar_t* dispinfo = getField(data_dic_save.get(), "dispinfo");
     if (!dispinfo || dispinfo->class_type != MAT_C_STRUCT) {
-        std::cerr << "Error: 'data_dic_save.dispinfo' not found\n";
+        LOG_ERROR << "'data_dic_save.dispinfo' not found";
         return 1;
     }
 
@@ -245,10 +246,10 @@ int main(int argc, char* argv[]) {
         perspective = PERSPECTIVE::EULERIAN;
     }
 
-    std::cout << "  spacing=" << spacing << " (scalefactor=" << scalefactor << ")\n";
-    std::cout << "  pixtounits=" << pixtounits << "\n";
-    std::cout << "  units=\"" << units << "\"\n";
-    std::cout << "  type=\"" << type_str << "\"\n";
+    LOG_INFO << "  spacing=" << spacing << " (scalefactor=" << scalefactor << ")";
+    LOG_INFO << "  pixtounits=" << pixtounits;
+    LOG_INFO << "  units=\"" << units << "\"";
+    LOG_INFO << "  type=\"" << type_str << "\"";
 
     // Close matio handle before opening HDF5 directly
     data_dic_save.reset();
@@ -259,7 +260,7 @@ int main(int argc, char* argv[]) {
     // -----------------------------------------------------------------------
     hid_t file_id = H5Fopen(input_path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
     if (file_id < 0) {
-        std::cerr << "Error: failed to open HDF5 file: " << input_path << "\n";
+        LOG_ERROR << "failed to open HDF5 file: " << input_path;
         return 1;
     }
 
@@ -271,11 +272,11 @@ int main(int argc, char* argv[]) {
     size_t nFrames = 0;
     auto u_refs = h5ReadObjRefArray(file_id, u_path, nFrames);
     if (nFrames == 0) {
-        std::cerr << "Error: plot_u_dic has 0 references\n";
+        LOG_ERROR << "plot_u_dic has 0 references";
         H5Fclose(file_id);
         return 1;
     }
-    std::cout << "  nFrames=" << nFrames << "\n";
+    LOG_INFO << "  nFrames=" << nFrames;
 
     size_t nV = 0, nCC = 0, nROI = 0;
     auto v_refs   = h5ReadObjRefArray(file_id, v_path, nV);
@@ -283,7 +284,7 @@ int main(int argc, char* argv[]) {
     auto roi_refs = h5ReadObjRefArray(file_id, roi_path, nROI);
 
     if (nV != nFrames) {
-        std::cerr << "Error: plot_v_dic has " << nV << " refs (expected " << nFrames << ")\n";
+        LOG_ERROR << "plot_v_dic has " << nV << " refs (expected " << nFrames << ")";
         H5Fclose(file_id);
         return 1;
     }
@@ -305,8 +306,8 @@ int main(int argc, char* argv[]) {
         }
     }
     if (!roi_usable && nROI > 0) {
-        std::cout << "  Note: roi_dic contains ncorr_class_roi objects (not simple masks).\n"
-                  << "        Using all-true ROI masks — non-ROI pixels have zero displacement.\n";
+        LOG_INFO << "  Note: roi_dic contains ncorr_class_roi objects (not simple masks). "
+                 << "Using all-true ROI masks — non-ROI pixels have zero displacement.";
     }
 
     // -----------------------------------------------------------------------
@@ -321,7 +322,7 @@ int main(int argc, char* argv[]) {
         Array2D<double> v_arr = h5ReadDoubleArray2D(file_id, v_refs[f]);
 
         if (u_arr.empty() || v_arr.empty()) {
-            std::cerr << "Warning: frame " << f << " has empty u or v array, skipping\n";
+            LOG_WARN << "frame " << f << " has empty u or v array, skipping";
             ++skipped;
             disps.emplace_back();
             continue;
@@ -347,9 +348,9 @@ int main(int argc, char* argv[]) {
 
         // Validate u/v dimensions
         if (u_arr.height() != v_arr.height() || u_arr.width() != v_arr.width()) {
-            std::cerr << "Warning: frame " << f << " u/v dimension mismatch ("
-                      << u_arr.height() << "x" << u_arr.width() << " vs "
-                      << v_arr.height() << "x" << v_arr.width() << ")\n";
+            LOG_WARN << "frame " << f << " u/v dimension mismatch ("
+                     << u_arr.height() << "x" << u_arr.width() << " vs "
+                     << v_arr.height() << "x" << v_arr.width() << ")";
             ++skipped;
             disps.emplace_back();
             continue;
@@ -360,19 +361,18 @@ int main(int argc, char* argv[]) {
                            roi, scalefactor);
 
         if (f == 0) {
-            std::cout << "  Frame 0 size: "
-                      << disps.back().data_height() << "x"
-                      << disps.back().data_width()
-                      << ", ROI regions: " << disps.back().get_roi().size_regions()
-                      << ", scalefactor: " << disps.back().get_scalefactor()
-                      << "\n";
+            LOG_INFO << "  Frame 0 size: "
+                     << disps.back().data_height() << "x"
+                     << disps.back().data_width()
+                     << ", ROI regions: " << disps.back().get_roi().size_regions()
+                     << ", scalefactor: " << disps.back().get_scalefactor();
         }
     }
 
     H5Fclose(file_id);
 
-    std::cout << "  Built " << disps.size() << " displacement frames ("
-              << skipped << " skipped)\n";
+    LOG_INFO << "  Built " << disps.size() << " displacement frames ("
+             << skipped << " skipped)";
 
     DIC_analysis_output output(disps, perspective, units, pixtounits);
 
@@ -380,47 +380,46 @@ int main(int argc, char* argv[]) {
     // Save as ncorr native binary
     // -----------------------------------------------------------------------
     save(output, output_path);
-    std::cout << "Saved: " << output_path << "\n";
+    LOG_INFO << "Saved: " << output_path;
 
     // -----------------------------------------------------------------------
     // Verification: reload and compare
     // -----------------------------------------------------------------------
-    std::cout << "Verifying round-trip...\n";
+    LOG_INFO << "Verifying round-trip...";
     auto reloaded = DIC_analysis_output::load(output_path);
     bool ok = true;
     if (reloaded.disps.size() != output.disps.size()) {
-        std::cerr << "FAIL: frame count mismatch: " << reloaded.disps.size()
-                  << " vs " << output.disps.size() << "\n";
+        LOG_ERROR << "FAIL: frame count mismatch: " << reloaded.disps.size()
+                  << " vs " << output.disps.size();
         ok = false;
     }
     if (reloaded.units != output.units) {
-        std::cerr << "FAIL: units mismatch: \"" << reloaded.units
-                  << "\" vs \"" << output.units << "\"\n";
+        LOG_ERROR << "FAIL: units mismatch: \"" << reloaded.units
+                  << "\" vs \"" << output.units << "\"";
         ok = false;
     }
     if (std::abs(reloaded.units_per_pixel - output.units_per_pixel) > 1e-12) {
-        std::cerr << "FAIL: units_per_pixel mismatch: " << reloaded.units_per_pixel
-                  << " vs " << output.units_per_pixel << "\n";
+        LOG_ERROR << "FAIL: units_per_pixel mismatch: " << reloaded.units_per_pixel
+                  << " vs " << output.units_per_pixel;
         ok = false;
     }
     if (ok && !reloaded.disps.empty()) {
         for (size_t f = 0; f < reloaded.disps.size(); ++f) {
             if (reloaded.disps[f].data_height() > 0) {
-                std::cout << "  Reloaded frame " << f << " size: "
-                          << reloaded.disps[f].data_height() << "x"
-                          << reloaded.disps[f].data_width()
-                          << ", ROI regions: " << reloaded.disps[f].get_roi().size_regions()
-                          << ", scalefactor: " << reloaded.disps[f].get_scalefactor()
-                          << "\n";
+                LOG_INFO << "  Reloaded frame " << f << " size: "
+                         << reloaded.disps[f].data_height() << "x"
+                         << reloaded.disps[f].data_width()
+                         << ", ROI regions: " << reloaded.disps[f].get_roi().size_regions()
+                         << ", scalefactor: " << reloaded.disps[f].get_scalefactor();
                 break;
             }
         }
     }
 
     if (ok) {
-        std::cout << "Verification OK\n";
+        LOG_INFO << "Verification OK";
     } else {
-        std::cerr << "Verification FAILED\n";
+        LOG_ERROR << "Verification FAILED";
         return 1;
     }
 

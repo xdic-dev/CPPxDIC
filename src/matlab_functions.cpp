@@ -4,6 +4,7 @@
  */
 
 #include "matlab_functions.h"
+#include "logging.h"
 #include <opencv2/imgproc.hpp>
 #include <iostream>
 #include <cmath>
@@ -169,8 +170,8 @@ int matlab_replacebadcorr(ncorr::DIC_analysis_output& data,
     const int H = data.disps[0].data_height();
     const int W = data.disps[0].data_width();
 
-    std::cout << "  matlab_replacebadcorr: " << Nframe << " frames, "
-              << H << "x" << W << " grid, cc_threshold=" << level_corr_coef << std::endl;
+    LOG_DEBUG << "  matlab_replacebadcorr: " << Nframe << " frames, "
+              << H << "x" << W << " grid, cc_threshold=" << level_corr_coef;
 
     // Step 1: Stack displacement fields into 3D volumes (H x W x Nframe)
     std::vector<cv::Mat> u_vol(Nframe), v_vol(Nframe), cc_vol(Nframe);
@@ -289,8 +290,8 @@ int matlab_replacebadcorr(ncorr::DIC_analysis_output& data,
         );
     }
 
-    std::cout << "  matlab_replacebadcorr: replaced " << total_replaced
-              << " subsets across " << Nframe << " frames" << std::endl;
+    LOG_DEBUG << "  matlab_replacebadcorr: replaced " << total_replaced
+              << " subsets across " << Nframe << " frames";
 
     return total_replaced;
 }

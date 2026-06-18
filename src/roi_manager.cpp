@@ -6,6 +6,7 @@
 
 #include "roi_manager.h"
 #include "mat_reader.h"
+#include "logging.h"
 #include <matio.h>
 #include <iostream>
 #include <filesystem>
@@ -16,10 +17,10 @@ namespace cppxdic {
 cv::Mat ROIManager::loadOrCreateROI(const BaseParameters& params,
                                    const cv::Mat& reference_image) {
     if (std::filesystem::exists(params.roifile)) {
-        std::cout << "Loading ROI from: " << params.roifile << std::endl;
+        LOG_INFO << "Loading ROI from: " << params.roifile;
         return loadROIFromMat(params.roifile);
     } else {
-        std::cout << "Warning: ROI file not found, creating full ROI" << std::endl;
+        LOG_WARN << "ROI file not found, creating full ROI";
         return createFullROI(reference_image.size());
     }
 }
@@ -27,14 +28,14 @@ cv::Mat ROIManager::loadOrCreateROI(const BaseParameters& params,
 cv::Mat ROIManager::loadROIFromMat(const std::string& roi_file) {
     mat_t* matfp = Mat_Open(roi_file.c_str(), MAT_ACC_RDONLY);
     if (!matfp) {
-        std::cerr << "Failed to open ROI file: " << roi_file << std::endl;
+        LOG_ERROR << "Failed to open ROI file: " << roi_file;
         return cv::Mat();
     }
-    
+
     // Read 'refmask' variable
     matvar_t* refmask_var = Mat_VarRead(matfp, "refmask");
     if (!refmask_var) {
-        std::cerr << "Variable 'refmask' not found in " << roi_file << std::endl;
+        LOG_ERROR << "Variable 'refmask' not found in " << roi_file;
         Mat_Close(matfp);
         return cv::Mat();
     }
@@ -61,11 +62,11 @@ cv::Mat ROIManager::loadROIFromMat(const std::string& roi_file) {
         }
         
         if (is_logical) {
-            std::cout << "  Loaded logical mask (scaled 0/1 to 0/255)" << std::endl;
+            LOG_DEBUG << "  Loaded logical mask (scaled 0/1 to 0/255)";
         }
     } else {
-        std::cerr << "Warning: Unexpected refmask type (class=" << refmask_var->class_type 
-                  << ", rank=" << refmask_var->rank << ")" << std::endl;
+        LOG_WARN << "Unexpected refmask type (class=" << refmask_var->class_type
+                 << ", rank=" << refmask_var->rank << ")";
     }
     
     Mat_VarFree(refmask_var);
@@ -79,14 +80,14 @@ SeedPoint ROIManager::loadSeedFromMat(const std::string& seed_file) {
     
     mat_t* matfp = Mat_Open(seed_file.c_str(), MAT_ACC_RDONLY);
     if (!matfp) {
-        std::cerr << "Failed to open seed file: " << seed_file << std::endl;
+        LOG_ERROR << "Failed to open seed file: " << seed_file;
         return seed;
     }
-    
+
     // Read 'seed_point' variable (can be uint16 or double array [x, y])
     matvar_t* seed_var = Mat_VarRead(matfp, "seed_point");
     if (!seed_var) {
-        std::cerr << "Variable 'seed_point' not found in " << seed_file << std::endl;
+        LOG_ERROR << "Variable 'seed_point' not found in " << seed_file;
         Mat_Close(matfp);
         return seed;
     }
@@ -110,12 +111,12 @@ SeedPoint ROIManager::loadSeedFromMat(const std::string& seed_file) {
                 const float* data = static_cast<const float*>(seed_var->data);
                 seed.pw = {static_cast<int>(data[0]), static_cast<int>(data[1])};
             } else {
-                std::cerr << "Warning: Unexpected seed_point data type: " << seed_var->data_type << std::endl;
+                LOG_WARN << "Unexpected seed_point data type: " << seed_var->data_type;
                 // Try to read as uint16 anyway
                 const uint16_t* data = static_cast<const uint16_t*>(seed_var->data);
                 seed.pw = {static_cast<int>(data[0]), static_cast<int>(data[1])};
             }
-            std::cout << "  Loaded seed point: (" << seed.pw[0] << ", " << seed.pw[1] << ")" << std::endl;
+            LOG_DEBUG << "  Loaded seed point: (" << seed.pw[0] << ", " << seed.pw[1] << ")";
         }
     }
     
@@ -128,10 +129,10 @@ SeedPoint ROIManager::loadSeedFromMat(const std::string& seed_file) {
 SeedPoint ROIManager::loadOrCreateSeed(const BaseParameters& params,
                                       const cv::Mat& roi_mask) {
     if (std::filesystem::exists(params.seedfile)) {
-        std::cout << "Loading seed from: " << params.seedfile << std::endl;
+        LOG_INFO << "Loading seed from: " << params.seedfile;
         return loadSeedFromMat(params.seedfile);
     } else {
-        std::cout << "Warning: Seed file not found, creating default seed at ROI center" << std::endl;
+        LOG_WARN << "Seed file not found, creating default seed at ROI center";
         SeedPoint seed;
         seed.pw = findROICenter(roi_mask);
         return seed;
@@ -170,11 +171,11 @@ std::vector<int> ROIManager::mapPointCoordinate(const std::vector<int>& point_sw
     int x = static_cast<int>(std::round(point_sw[0]));
     int y = static_cast<int>(std::round(point_sw[1]));
 
-    std::cout << "DEBUG - x: " << x << ", y: " << y << std::endl;
-    
+    LOG_DEBUG << "x: " << x << ", y: " << y;
+
     // Bounds checking
     if (x < 0 || x >= U_mapped.cols || y < 0 || y >= U_mapped.rows) {
-        std::cerr << "Point coordinates out of bounds: (" << x << ", " << y << ")" << std::endl;
+        LOG_ERROR << "Point coordinates out of bounds: (" << x << ", " << y << ")";
         return point_sw;
     }
     
@@ -182,7 +183,7 @@ std::vector<int> ROIManager::mapPointCoordinate(const std::vector<int>& point_sw
     double u = U_mapped.at<double>(y, x);
     double v = V_mapped.at<double>(y, x);
     
-    std::cout << "DEBUG - u: " << u << ", v: " << v << std::endl;
+    LOG_DEBUG << "u: " << u << ", v: " << v;
 
     // Add displacement to original point (in subset world coordinates)
     // point_sw is in subset coordinates, u/v are displacements in reduced grid units
@@ -200,32 +201,32 @@ bool ROIManager::loadMatchingResults(const std::string& matching_file,
                                     int subset_spacing) {
     mat_t* matfp = Mat_Open(matching_file.c_str(), MAT_ACC_RDONLY);
     if (!matfp) {
-        std::cerr << "Failed to open matching file: " << matching_file << std::endl;
+        LOG_ERROR << "Failed to open matching file: " << matching_file;
         return false;
     }
-    
-    std::cout << "Loading matching results from: " << matching_file << std::endl;
-    
+
+    LOG_INFO << "Loading matching results from: " << matching_file;
+
     // Load reference mask: reference_save.roi.mask
     matvar_t* ref_roi_mask = MatReader::readNestedField(matfp, "reference_save.roi.mask");
     if (ref_roi_mask) {
         refmask_REF = MatReader::readImage(ref_roi_mask);
         Mat_VarFree(ref_roi_mask);
-        std::cout << "  Loaded reference ROI mask: " << refmask_REF.size() << std::endl;
+        LOG_DEBUG << "  Loaded reference ROI mask: " << refmask_REF.size();
     } else {
-        std::cerr << "  Warning: Could not load reference_save.roi.mask" << std::endl;
+        LOG_WARN << "  Could not load reference_save.roi.mask";
     }
-    
+
     // Load current mask: current_save.roi.mask
     matvar_t* cur_roi_mask = MatReader::readNestedField(matfp, "current_save.roi.mask");
     if (cur_roi_mask) {
         refmask_trial = MatReader::readImage(cur_roi_mask);
         Mat_VarFree(cur_roi_mask);
-        std::cout << "  Loaded current ROI mask: " << refmask_trial.size() << std::endl;
+        LOG_DEBUG << "  Loaded current ROI mask: " << refmask_trial.size();
     } else {
-        std::cerr << "  Warning: Could not load current_save.roi.mask" << std::endl;
+        LOG_WARN << "  Could not load current_save.roi.mask";
     }
-    
+
     // Load displacements: data_dic_save.displacements.plot_u_ref_formatted (cell array)
     matvar_t* u_cell = MatReader::readNestedField(matfp, "data_dic_save.displacements.plot_u_ref_formatted");
     if (u_cell && u_cell->class_type == MAT_C_CELL) {
@@ -233,13 +234,13 @@ bool ROIManager::loadMatchingResults(const std::string& matching_file,
         matvar_t* u_mat = MatReader::getCellElement(u_cell, 0);
         if (u_mat) {
             U_mapped = MatReader::readImage(u_mat);
-            std::cout << "  Loaded U displacements: " << U_mapped.size() << std::endl;
+            LOG_DEBUG << "  Loaded U displacements: " << U_mapped.size();
         }
         Mat_VarFree(u_cell);
     } else {
-        std::cerr << "  Warning: Could not load plot_u_ref_formatted" << std::endl;
+        LOG_WARN << "  Could not load plot_u_ref_formatted";
     }
-    
+
     // Load V displacements: data_dic_save.displacements.plot_v_ref_formatted (cell array)
     matvar_t* v_cell = MatReader::readNestedField(matfp, "data_dic_save.displacements.plot_v_ref_formatted");
     if (v_cell && v_cell->class_type == MAT_C_CELL) {
@@ -247,25 +248,25 @@ bool ROIManager::loadMatchingResults(const std::string& matching_file,
         matvar_t* v_mat = MatReader::getCellElement(v_cell, 0);
         if (v_mat) {
             V_mapped = MatReader::readImage(v_mat);
-            std::cout << "  Loaded V displacements: " << V_mapped.size() << std::endl;
+            LOG_DEBUG << "  Loaded V displacements: " << V_mapped.size();
         }
         Mat_VarFree(v_cell);
     } else {
-        std::cerr << "  Warning: Could not load plot_v_ref_formatted" << std::endl;
+        LOG_WARN << "  Could not load plot_v_ref_formatted";
     }
-    
+
     Mat_Close(matfp);
-    
+
     bool success = !refmask_REF.empty() && !refmask_trial.empty();
     if (success) {
-        std::cout << "Successfully loaded matching results" << std::endl;
+        LOG_INFO << "Successfully loaded matching results";
     }
     return success;
 }
 
 cv::Mat ROIManager::createFullROI(const cv::Size& image_size) {
     // Create full ROI (all pixels valid)
-    std::cout << "Creating full ROI (all pixels valid)" << std::endl;
+    LOG_INFO << "Creating full ROI (all pixels valid)";
     return cv::Mat::ones(image_size, CV_8UC1) * 255;
 }
 

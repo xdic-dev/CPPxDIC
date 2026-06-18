@@ -41,6 +41,7 @@
 
 #include "ncorr.h"
 #include "ncorr/session.h"
+#include "logging.h"
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <fstream>
@@ -531,8 +532,7 @@ static json dic_result_to_json(const ncorr::DICResult& r, int frame_index,
 // Returns 0 on success, non-zero if any frame failed to process.
 static int run_in_memory(const ProxyConfig& config, const std::string& roi_path,
                          const std::string& ref_path, const std::vector<std::string>& frame_paths) {
-    std::cout << "\n[IN-MEMORY MODE] Driving ncorr::NcorrSession (no disk round-trip)\n"
-              << std::endl;
+    LOG_INFO << "[IN-MEMORY MODE] Driving ncorr::NcorrSession (no disk round-trip)";
 
     ncorr::SessionConfig scfg;
     scfg.scalefactor = config.scalefactor;
@@ -546,17 +546,17 @@ static int run_in_memory(const ProxyConfig& config, const std::string& roi_path,
     // Reference frame. Keep the owning Mat alive for the whole session.
     cv::Mat ref_mat = load_mat(ref_path);
     session.set_reference(as_buffer(ref_mat));
-    std::cout << "Reference set: " << ref_path << " (" << ref_mat.cols << "x" << ref_mat.rows
-              << ", " << ref_mat.channels() << "ch)" << std::endl;
+    LOG_INFO << "Reference set: " << ref_path << " (" << ref_mat.cols << "x" << ref_mat.rows
+             << ", " << ref_mat.channels() << "ch)";
 
     // Optional ROI mask (same geometry as the reference).
     cv::Mat roi_mat; // declared here so it outlives set_roi()
     if (!roi_path.empty() && file_exists(roi_path)) {
         roi_mat = load_mat(roi_path);
         session.set_roi(as_buffer(roi_mat));
-        std::cout << "ROI mask set: " << roi_path << std::endl;
+        LOG_INFO << "ROI mask set: " << roi_path;
     } else {
-        std::cout << "No ROI mask; analysing full frame." << std::endl;
+        LOG_INFO << "No ROI mask; analysing full frame.";
     }
 
     system(("mkdir -p " + config.output_dir + "/in_memory").c_str());
@@ -570,11 +570,10 @@ static int run_in_memory(const ProxyConfig& config, const std::string& roi_path,
         ncorr::DICResult result = session.process_frame(as_buffer(def_mat));
 
         if (result.valid) {
-            std::cout << "  [frame " << frame_index << "] " << path << " -> " << result.width << "x"
-                      << result.height << " disp field" << std::endl;
+            LOG_INFO << "  [frame " << frame_index << "] " << path << " -> " << result.width << "x"
+                     << result.height << " disp field";
         } else {
-            std::cerr << "  [frame " << frame_index << "] " << path << " FAILED: " << result.message
-                      << std::endl;
+            LOG_ERROR << "  [frame " << frame_index << "] " << path << " FAILED: " << result.message;
             ++failures;
         }
 
@@ -589,9 +588,8 @@ static int run_in_memory(const ProxyConfig& config, const std::string& roi_path,
         ++frame_index;
     }
 
-    std::cout << "\n[IN-MEMORY MODE] Processed " << frame_index << " frame(s), " << failures
-              << " failure(s). Displacement JSON in: " << config.output_dir << "/in_memory"
-              << std::endl;
+    LOG_INFO << "[IN-MEMORY MODE] Processed " << frame_index << " frame(s), " << failures
+             << " failure(s). Displacement JSON in: " << config.output_dir << "/in_memory";
 
     return failures == 0 ? 0 : 1;
 }
@@ -710,7 +708,7 @@ int main(int argc, char* argv[]) {
 
     // Load config file if specified
     if (!config_file.empty()) {
-        std::cout << "Loading config from: " << config_file << std::endl;
+        LOG_INFO << "Loading config from: " << config_file;
         config = parse_config_file(config_file);
     }
 
@@ -809,26 +807,26 @@ int main(int argc, char* argv[]) {
 
     // Check ROI exists
     if (!file_exists(roi_path)) {
-        std::cerr << "Error: ROI file not found: " << roi_path << std::endl;
+        LOG_ERROR << "ROI file not found: " << roi_path;
         return 1;
     }
 
     // Discover frames
-    std::cout << "Discovering frames in: " << config.folder << std::endl;
+    LOG_INFO << "Discovering frames in: " << config.folder;
     std::vector<std::string> frame_paths;
     try {
         frame_paths = discover_frames(config.folder, config.ref_path, roi_path);
     } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+        LOG_ERROR << e.what();
         return 1;
     }
 
     if (frame_paths.empty()) {
-        std::cerr << "Error: No frames found in folder: " << config.folder << std::endl;
+        LOG_ERROR << "No frames found in folder: " << config.folder;
         return 1;
     }
 
-    std::cout << "Found " << frame_paths.size() << " frames" << std::endl;
+    LOG_INFO << "Found " << frame_paths.size() << " frames";
 
     // Handle reference image
     std::string ref_path = config.ref_path;
@@ -837,11 +835,11 @@ int main(int argc, char* argv[]) {
         std::string default_ref = config.folder + "/ref.png";
         if (file_exists(default_ref)) {
             ref_path = default_ref;
-            std::cout << "Using ref.png as reference image" << std::endl;
+            LOG_INFO << "Using ref.png as reference image";
         } else {
             // Use first frame as reference
             ref_path = frame_paths[0];
-            std::cout << "Using first frame as reference: " << ref_path << std::endl;
+            LOG_INFO << "Using first frame as reference: " << ref_path;
         }
     }
 
@@ -854,44 +852,37 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    std::cout << "Total images for analysis: " << imgs.size() << std::endl;
+    LOG_INFO << "Total images for analysis: " << imgs.size();
 
     // Load seeds if specified
     if (!config.seeds_file.empty()) {
         if (file_exists(config.seeds_file)) {
-            std::cout << "Loading seeds from: " << config.seeds_file << std::endl;
+            LOG_INFO << "Loading seeds from: " << config.seeds_file;
             config.seeds_by_region = load_seeds_from_json(config.seeds_file);
-            std::cout << "Loaded " << config.seeds_by_region.size() << " seed(s)" << std::endl;
+            LOG_INFO << "Loaded " << config.seeds_by_region.size() << " seed(s)";
         } else {
-            std::cerr << "Warning: Seeds file not found: " << config.seeds_file << std::endl;
+            LOG_WARN << "Seeds file not found: " << config.seeds_file;
         }
     }
 
     // Print configuration
-    std::cout << "\n=== Configuration ===" << std::endl;
-    std::cout << "ROI: " << roi_path << std::endl;
-    std::cout << "Reference: " << ref_path << std::endl;
-    std::cout << "Scale factor: " << config.scalefactor << std::endl;
-    std::cout << "Interpolation: " << config.interp_type << std::endl;
-    std::cout << "Subregion: " << config.subregion_type << " (r=" << config.subregion_radius << ")"
-              << std::endl;
-    std::cout << "Threads: " << config.num_threads << std::endl;
-    std::cout << "Algorithm mode: " << config.algorithm_mode << std::endl;
+    LOG_INFO << "=== Configuration ===";
+    LOG_INFO << "ROI: " << roi_path;
+    LOG_INFO << "Reference: " << ref_path;
+    LOG_INFO << "Scale factor: " << config.scalefactor;
+    LOG_INFO << "Interpolation: " << config.interp_type;
+    LOG_INFO << "Subregion: " << config.subregion_type << " (r=" << config.subregion_radius << ")";
+    LOG_INFO << "Threads: " << config.num_threads;
+    LOG_INFO << "Algorithm mode: " << config.algorithm_mode;
     if (!config.seeds_by_region.empty()) {
-        std::cout << "Seeds: " << config.seeds_by_region.size() << " region(s)";
-        if (config.seeds_are_optimized) {
-            std::cout << " (pre-optimized)";
-        } else {
-            std::cout << " (will be optimized)";
-        }
-        std::cout << std::endl;
+        LOG_INFO << "Seeds: " << config.seeds_by_region.size() << " region(s)"
+                 << (config.seeds_are_optimized ? " (pre-optimized)" : " (will be optimized)");
     }
-    std::cout << "Units: " << config.units << " (" << config.units_per_pixel << " per pixel)"
-              << std::endl;
-    std::cout << "Strain subregion: " << config.strain_subregion_type
-              << " (r=" << config.strain_radius << ")" << std::endl;
-    std::cout << "Alpha: " << config.alpha << ", FPS: " << config.fps << std::endl;
-    std::cout << "=====================\n" << std::endl;
+    LOG_INFO << "Units: " << config.units << " (" << config.units_per_pixel << " per pixel)";
+    LOG_INFO << "Strain subregion: " << config.strain_subregion_type
+             << " (r=" << config.strain_radius << ")";
+    LOG_INFO << "Alpha: " << config.alpha << ", FPS: " << config.fps;
+    LOG_INFO << "=====================";
 
     // In-memory pass-through path: drive ncorr::NcorrSession directly and skip
     // the file-based DIC/strain/video pipeline entirely.
@@ -899,7 +890,7 @@ int main(int argc, char* argv[]) {
         try {
             return run_in_memory(config, roi_path, ref_path, frame_paths);
         } catch (const std::exception& e) {
-            std::cerr << "Error during in-memory analysis: " << e.what() << std::endl;
+            LOG_ERROR << "Error during in-memory analysis: " << e.what();
             return 1;
         }
     }
@@ -926,50 +917,44 @@ int main(int argc, char* argv[]) {
         if (effective_mode == "auto") {
             if (has_seeds) {
                 effective_mode = "sequential"; // Use sequential with seeds by default
-                std::cout << "[AUTO MODE] Seeds provided -> using sequential mode with seeds"
-                          << std::endl;
+                LOG_INFO << "[AUTO MODE] Seeds provided -> using sequential mode with seeds";
             } else {
                 effective_mode = "parallel"; // Use parallel (threaded) by default
-                std::cout << "[AUTO MODE] No seeds -> using parallel (threaded) mode" << std::endl;
+                LOG_INFO << "[AUTO MODE] No seeds -> using parallel (threaded) mode";
             }
         }
 
         // Execute based on effective mode
         if (effective_mode == "sequential") {
             if (has_seeds) {
-                std::cout << "[SEQUENTIAL MODE] Performing DIC analysis with "
-                          << config.seeds_by_region.size() << " user-provided seed(s)";
-                if (config.seeds_are_optimized) {
-                    std::cout << " (pre-optimized, skipping optimization step)";
-                }
-                std::cout << "..." << std::endl;
+                LOG_INFO << "[SEQUENTIAL MODE] Performing DIC analysis with "
+                         << config.seeds_by_region.size() << " user-provided seed(s)"
+                         << (config.seeds_are_optimized
+                                 ? " (pre-optimized, skipping optimization step)"
+                                 : "")
+                         << "...";
 
                 // Use the unambiguous 3-arg overload (the 1-arg form is ambiguous
                 // because DIC_analysis_parallel_input converts to DIC_analysis_input).
                 DIC_output = DIC_analysis_sequential(DIC_input, config.seeds_by_region,
                                                      config.seeds_are_optimized);
             } else {
-                std::cout
-                    << "[SEQUENTIAL MODE] Performing DIC analysis with auto-generated seeds..."
-                    << std::endl;
+                LOG_INFO
+                    << "[SEQUENTIAL MODE] Performing DIC analysis with auto-generated seeds...";
                 DIC_output = DIC_analysis_sequential(DIC_input, {}, false);
             }
         } else if (effective_mode == "parallel") {
             if (has_seeds) {
-                std::cout << "[PARALLEL MODE] Performing parallel DIC analysis with "
-                          << config.seeds_by_region.size() << " user-provided seed(s)";
-                if (config.seeds_are_optimized) {
-                    std::cout << " (pre-optimized)";
-                }
-                std::cout << "..." << std::endl;
+                LOG_INFO << "[PARALLEL MODE] Performing parallel DIC analysis with "
+                         << config.seeds_by_region.size() << " user-provided seed(s)"
+                         << (config.seeds_are_optimized ? " (pre-optimized)" : "") << "...";
 
                 DIC_analysis_parallel_input parallel_input(DIC_input, config.seeds_by_region,
                                                            config.seeds_are_optimized);
                 DIC_output = DIC_analysis_parallel(parallel_input);
             } else {
-                std::cout << "[PARALLEL MODE] Performing parallel DIC analysis with auto-generated "
-                             "seeds..."
-                          << std::endl;
+                LOG_INFO << "[PARALLEL MODE] Performing parallel DIC analysis with auto-generated "
+                            "seeds...";
                 DIC_output = DIC_analysis(DIC_input);
             }
         } else {
@@ -978,7 +963,7 @@ int main(int argc, char* argv[]) {
         }
 
         // Convert to Eulerian perspective
-        std::cout << "Converting to Eulerian perspective..." << std::endl;
+        LOG_INFO << "Converting to Eulerian perspective...";
         DIC_output = change_perspective(DIC_output, parse_interp(config.perspective_interp));
 
         // Set units
@@ -990,7 +975,7 @@ int main(int argc, char* argv[]) {
                                              config.strain_radius);
 
         // Perform strain analysis
-        std::cout << "Performing strain analysis..." << std::endl;
+        LOG_INFO << "Performing strain analysis...";
         strain_output = strain_analysis(strain_input);
 
         // Create output directories
@@ -1000,7 +985,7 @@ int main(int argc, char* argv[]) {
 
         // Save outputs
         if (config.save_binary) {
-            std::cout << "Saving binary outputs..." << std::endl;
+            LOG_INFO << "Saving binary outputs...";
             save(DIC_input, config.output_dir + "/save/DIC_input.bin");
             save(DIC_output, config.output_dir + "/save/DIC_output.bin");
             save(strain_input, config.output_dir + "/save/strain_input.bin");
@@ -1008,14 +993,14 @@ int main(int argc, char* argv[]) {
         }
 
         if (config.save_json) {
-            std::cout << "Saving JSON outputs..." << std::endl;
+            LOG_INFO << "Saving JSON outputs...";
             save_as_json(DIC_input, DIC_output, strain_input, strain_output,
                          config.output_dir + "/save_json");
         }
 
         // Create videos
         if (config.save_videos) {
-            std::cout << "Creating videos..." << std::endl;
+            LOG_INFO << "Creating videos...";
 
             save_DIC_video(config.output_dir + "/video/v_eulerian.avi", DIC_input, DIC_output,
                            DISP::V, config.alpha, config.fps);
@@ -1033,10 +1018,10 @@ int main(int argc, char* argv[]) {
                               strain_output, STRAIN::EXX, config.alpha, config.fps);
         }
 
-        std::cout << "\nAnalysis complete! Results saved to: " << config.output_dir << std::endl;
+        LOG_INFO << "Analysis complete! Results saved to: " << config.output_dir;
 
     } catch (const std::exception& e) {
-        std::cerr << "Error during analysis: " << e.what() << std::endl;
+        LOG_ERROR << "Error during analysis: " << e.what();
         return 1;
     }
 

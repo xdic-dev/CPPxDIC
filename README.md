@@ -190,9 +190,42 @@ CPPXDIC offers several performance advantages over the Matlab version:
    - Use a newer compiler (GCC 10+, Clang 12+, MSVC 2019+); the project requires
      C++17 for `std::filesystem` support (set in `CMakeLists.txt`).
 
-### Debug Mode
+## Logging
 
-Enable debug output by setting `debug_mode = true` in the configuration.
+CPPxDIC uses a small, dependency-free leveled logger (`include/logging.h`) instead
+of ad-hoc `std::cout`/`std::cerr`. Messages have a severity — **TRACE, DEBUG, INFO,
+WARN, ERROR** — and are written to the console and, optionally, a full-detail log
+file. INFO/DEBUG/TRACE go to `stdout`; WARN/ERROR go to `stderr`.
+
+**Verbosity vs. debug.** *Verbosity* is the console threshold (only messages at or
+above it are shown). *Debug* additionally turns on rich formatting (timestamp +
+`file:line`). Genuine user-facing CLI output (e.g. `--help`) is always printed
+verbatim and is not affected by the level.
+
+Configuration precedence (low → high): environment → config file → CLI flags.
+
+```bash
+# Command line
+cppxdic -V                 # more verbose (repeatable: -VV for TRACE)
+cppxdic -q                 # quiet: only WARN/ERROR on the console
+cppxdic --log-level debug  # set the console level explicitly
+cppxdic --log-file run.log # also write a full debug-level log to run.log
+cppxdic --debug            # debug console (debug level + source locations)
+
+# Config file (config/default.cfg or dic_params.txt)
+log_level = info           # trace|debug|info|warn|error|off
+log_file  = cppxdic.log    # empty = no file
+debug_mode = true          # equivalent to --debug
+
+# Environment (lowest priority; also honoured by non-CLI tools)
+export CPPXDIC_LOG_LEVEL=warn
+export CPPXDIC_LOG_FILE=/var/log/cppxdic.log
+export CPPXDIC_LOG_CONSOLE=0   # disable console output entirely
+```
+
+The bundled ncorr engine (`Tools/CppNCorr`) has its own matching logger; cppxdic
+propagates its level and log file to it via `NCORR_LOG_LEVEL` / `NCORR_LOG_FILE`
+so engine logs share the same verbosity and destination.
 
 ## Contributing
 

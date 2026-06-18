@@ -4,6 +4,7 @@
  */
 
 #include "strain_computation.h"
+#include "logging.h"
 #include <iostream>
 #include <cmath>
 #include <limits>
@@ -18,7 +19,7 @@ DeformationResult computeSingleFrameDeformation(
     DeformationResult result;
     
     if (faces.size() % 3 != 0) {
-        std::cerr << "Error: Faces must be Nx3 (got " << faces.size() << " elements)" << std::endl;
+        LOG_ERROR << "Faces must be Nx3 (got " << faces.size() << " elements)";
         return result;
     }
     
@@ -77,9 +78,9 @@ DeformationResult computeSingleFrameDeformation(
             static_cast<size_t>(v0) >= vertices_ref.size() || static_cast<size_t>(v1) >= vertices_ref.size() || static_cast<size_t>(v2) >= vertices_ref.size() ||
             static_cast<size_t>(v0) >= vertices_cur.size() || static_cast<size_t>(v1) >= vertices_cur.size() || static_cast<size_t>(v2) >= vertices_cur.size()) {
             if (itri < 5) {
-                std::cerr << "Warning: Invalid vertex index in triangle " << itri 
-                          << " (v0=" << v0 << " v1=" << v1 << " v2=" << v2 
-                          << ", nRef=" << vertices_ref.size() << " nCur=" << vertices_cur.size() << ")" << std::endl;
+                LOG_WARN << "Invalid vertex index in triangle " << itri
+                          << " (v0=" << v0 << " v1=" << v1 << " v2=" << v2
+                          << ", nRef=" << vertices_ref.size() << " nCur=" << vertices_cur.size() << ")";
             }
             // Fill with NaN
             result.Fmat[itri] = Eigen::Matrix3d::Constant(std::nan(""));
@@ -326,8 +327,8 @@ FrameDeformationResult computeTriSurfaceDeformation(
     result.n_faces = faces.size() / 3;
     result.frames.reserve(result.n_frames);
     
-    std::cout << "Computing deformation for " << result.n_frames << " frames, " 
-              << result.n_faces << " faces" << std::endl;
+    LOG_INFO << "Computing deformation for " << result.n_frames << " frames, "
+              << result.n_faces << " faces";
     
     // Process each frame
     for (size_t itime = 0; itime < result.n_frames; ++itime) {
@@ -356,7 +357,7 @@ FrameDeformationResult computeTriSurfaceDeformation(
         result.frames.push_back(std::move(frame_result));
         
         if ((itime + 1) % 10 == 0 || itime == result.n_frames - 1) {
-            std::cout << "  Processed frame " << (itime + 1) << "/" << result.n_frames << std::endl;
+            LOG_INFO << "  Processed frame " << (itime + 1) << "/" << result.n_frames;
         }
     }
     

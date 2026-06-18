@@ -5,6 +5,7 @@
 
 #include "dic_structures.h"
 #include "surface_stitching.h"
+#include "logging.h"
 #include <vector>
 #include <algorithm>
 #include <cmath>
@@ -78,7 +79,7 @@ DIC3Dcombined stitchPairsSimple(const std::vector<DIC3DpairResults>& all_pairs) 
         stitched.pairIndices[1] = first_pair.cameraPairInd[1];
     }
     
-    std::cout << "  Pair 1: " << nPoints << " points, " << nFaces << " faces" << std::endl;
+    LOG_INFO << "  Pair 1: " << nPoints << " points, " << nFaces << " faces";
     
     // Append subsequent pairs
     for (size_t ipair = 1; ipair < all_pairs.size(); ++ipair) {
@@ -184,8 +185,8 @@ DIC3Dcombined stitchPairsSimple(const std::vector<DIC3DpairResults>& all_pairs) 
             stitched.pairIndices[(ipair) * 2 + 1] = pair.cameraPairInd[1];
         }
         
-        std::cout << "  Pair " << (ipair + 1) << ": " << pair_nPoints << " points, " 
-                  << pair_nFaces << " faces (appended)" << std::endl;
+        LOG_INFO << "  Pair " << (ipair + 1) << ": " << pair_nPoints << " points, "
+                 << pair_nFaces << " faces (appended)";
     }
     
     // Merge calibration data from individual pairs
@@ -204,8 +205,8 @@ DIC3Dcombined stitchPairsSimple(const std::vector<DIC3DpairResults>& all_pairs) 
     
     size_t total_points = stitched.Points3D[0].x.size();
     size_t total_faces = stitched.Faces.size() / 3;
-    std::cout << "  Total stitched: " << total_points << " points, " 
-              << total_faces << " faces" << std::endl;
+    LOG_INFO << "  Total stitched: " << total_points << " points, "
+             << total_faces << " faces";
     
     return stitched;
 }
@@ -217,7 +218,7 @@ DIC3Dcombined stitchPairsSimple(const std::vector<DIC3DpairResults>& all_pairs) 
 std::vector<int> computeMeshBoundary(const std::vector<int>& faces,
                                       const std::vector<Eigen::Vector3d>& vertices) {
     if (faces.size() % 3 != 0) {
-        std::cerr << "Error: faces must be divisible by 3" << std::endl;
+        LOG_ERROR << "faces must be divisible by 3";
         return {};
     }
     
@@ -695,11 +696,11 @@ std::pair<std::vector<bool>, std::vector<bool>> removeOverlapSurfaces(
         }
     }
 
-    std::cout << "    removeOverlapSurfaces: phase1 removed " << removed_phase1_s1
+    LOG_DEBUG << "    removeOverlapSurfaces: phase1 removed " << removed_phase1_s1
               << " faces from S1, " << removed_phase1_s2 << " from S2;"
               << " phase2 removed " << removed_phase2_s1 << " from S1, "
               << removed_phase2_s2 << " from S2 (meanEdge=" << meanEdge
-              << ", minGap=" << min_gap << ")" << std::endl;
+              << ", minGap=" << min_gap << ")";
 
     return {CT1, CT2};
 }
@@ -902,19 +903,21 @@ DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3DpairResults>& all_pair
     }
     
     if (pair_order.empty()) {
-        std::cout << "  Warning: Empty pair order, using simple stitching" << std::endl;
+        LOG_WARN << "Empty pair order, using simple stitching";
         return stitchPairsSimple(all_pairs);
     }
     
-    std::cout << "\n=== Geometric Stitching (with overlap removal) ===" << std::endl;
-    std::cout << "  Stitching order: ";
-    for (int idx : pair_order) std::cout << idx << " ";
-    std::cout << std::endl;
-    std::cout << "  pair_forced=" << (pair_forced ? "true" : "false") << std::endl;
+    LOG_INFO << "=== Geometric Stitching (with overlap removal) ===";
+    {
+        std::ostringstream order_oss;
+        for (int idx : pair_order) order_oss << idx << " ";
+        LOG_INFO << "  Stitching order: " << order_oss.str();
+    }
+    LOG_INFO << "  pair_forced=" << (pair_forced ? "true" : "false");
     
     size_t first_idx = pair_order[0] - 1;
     if (first_idx >= all_pairs.size()) {
-        std::cerr << "Error: Invalid pair index in pair_order" << std::endl;
+        LOG_ERROR << "Invalid pair index in pair_order";
         return DIC3Dcombined();
     }
     
@@ -941,15 +944,15 @@ DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3DpairResults>& all_pair
         pairIndices[first_idx * 2 + 1] = all_pairs[first_idx].cameraPairInd[1];
     }
     
-    std::cout << "  Pair " << pair_order[0] << " (base): "
-              << cur_pts3d[0].x.size() << " points, "
-              << cur_faces.size() / 3 << " faces" << std::endl;
+    LOG_INFO << "  Pair " << pair_order[0] << " (base): "
+             << cur_pts3d[0].x.size() << " points, "
+             << cur_faces.size() / 3 << " faces";
     
     // === Iteratively stitch remaining pairs ===
     for (size_t ipair = 1; ipair < pair_order.size(); ++ipair) {
         size_t pair_idx = pair_order[ipair] - 1;
         if (pair_idx >= all_pairs.size()) {
-            std::cerr << "Error: Invalid pair index " << pair_order[ipair] << std::endl;
+            LOG_ERROR << "Invalid pair index " << pair_order[ipair];
             continue;
         }
         
@@ -1012,7 +1015,7 @@ DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3DpairResults>& all_pair
         
         size_t rem1 = std::count(keep1.begin(), keep1.end(), false);
         size_t rem2 = std::count(keep2.begin(), keep2.end(), false);
-        std::cout << "    Overlap removal: " << rem1 << " faces from S1, " << rem2 << " from S2" << std::endl;
+        LOG_DEBUG << "    Overlap removal: " << rem1 << " faces from S1, " << rem2 << " from S2";
         
         // Apply overlap filter
         cur_faces = filterFaces(cur_faces, keep1);
@@ -1030,7 +1033,7 @@ DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3DpairResults>& all_pair
                 cur_faces = filterFaces(cur_faces, abf1);
                 cur_faceColors = filterByMask(cur_faceColors, abf1);
                 cur_facePairInds = filterByMask(cur_facePairInds, abf1);
-                std::cout << "    Removed " << remB1 << " all-boundary faces from S1" << std::endl;
+                LOG_DEBUG << "    Removed " << remB1 << " all-boundary faces from S1";
             }
         }
         {
@@ -1040,7 +1043,7 @@ DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3DpairResults>& all_pair
             if (remB2 > 0) {
                 next_faces = filterFaces(next_faces, abf2);
                 next_faceColors = filterByMask(next_faceColors, abf2);
-                std::cout << "    Removed " << remB2 << " all-boundary faces from S2" << std::endl;
+                LOG_DEBUG << "    Removed " << remB2 << " all-boundary faces from S2";
             }
         }
         
@@ -1185,7 +1188,7 @@ DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3DpairResults>& all_pair
         
         size_t nZipFaces = zip_faces.size() / 3;
         if (nZipFaces > 0) {
-            std::cout << "    Zipped " << nZipFaces << " new faces between boundaries" << std::endl;
+            LOG_DEBUG << "    Zipped " << nZipFaces << " new faces between boundaries";
         }
         
         // ---- Step 5: Combine everything ----
@@ -1266,9 +1269,9 @@ DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3DpairResults>& all_pair
             pairIndices[pair_idx * 2 + 1] = next.cameraPairInd[1];
         }
         
-        std::cout << "  Pair " << pair_order[ipair] << " stitched: "
-                  << cur_pts3d[0].x.size() << " points, "
-                  << cur_faces.size() / 3 << " faces" << std::endl;
+        LOG_INFO << "  Pair " << pair_order[ipair] << " stitched: "
+                 << cur_pts3d[0].x.size() << " points, "
+                 << cur_faces.size() / 3 << " faces";
     }
     
     // ---- Step 6: Fill single-triangle holes ----
@@ -1322,7 +1325,7 @@ DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3DpairResults>& all_pair
             }
         }
         if (filled > 0) {
-            std::cout << "  Filled " << filled << " single-triangle holes" << std::endl;
+            LOG_DEBUG << "  Filled " << filled << " single-triangle holes";
         }
     }
     
@@ -1360,8 +1363,8 @@ DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3DpairResults>& all_pair
             pairIndices[ip * 2 + 1] = extra.cameraPairInd[1];
         }
         
-        std::cout << "  Pair " << pairId << " appended (not stitched): "
-                  << extra_nVerts << " points, " << extra_nFaces << " faces" << std::endl;
+        LOG_INFO << "  Pair " << pairId << " appended (not stitched): "
+                 << extra_nVerts << " points, " << extra_nFaces << " faces";
     }
     
     // ---- Build final DIC3Dcombined ----
@@ -1430,8 +1433,8 @@ DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3DpairResults>& all_pair
         result.distortion.distortion_paths.push_back(pair.distortionPath);
     }
     
-    std::cout << "\n  ✓ Geometric stitching complete: " 
-              << total_points << " points, " << total_faces << " faces" << std::endl;
+    LOG_INFO << "  Geometric stitching complete: "
+             << total_points << " points, " << total_faces << " faces";
     
     return result;
 }

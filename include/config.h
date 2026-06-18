@@ -70,6 +70,10 @@ public:
     bool showvisu = false;   // Boolean for visualization
     bool debug_mode = false; // Debug mode flag
 
+    // Logging settings (consumed by main() to configure cppxdic::log)
+    std::string log_level = ""; // "" = unset; trace|debug|info|warn|error|off (console threshold)
+    std::string log_file = "";  // "" = no log file; path to write a full-detail log
+
     // Plot map settings
     bool mapLogic = true;                                // Enable 3D map plotting
     std::vector<std::string> plotopt = {"Epc1", "Epc2"}; // Face measurement plot options

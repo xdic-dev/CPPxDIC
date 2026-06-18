@@ -19,6 +19,7 @@
 
 #include "config.h"
 #include "dic_analysis.h"
+#include "logging.h"
 #include "trial_selection.h"
 
 using cppxdic::trim;
@@ -140,7 +141,7 @@ int main(int argc, char* argv[]) {
         }
 
         if (subjects.empty()) {
-            std::cerr << "Error: no subjects provided.\n" << std::endl;
+            LOG_ERROR << "no subjects provided.";
             print_usage(argv[0]);
             return 1;
         }
@@ -156,7 +157,7 @@ int main(int argc, char* argv[]) {
 
         std::ofstream out(output_path);
         if (!out) {
-            std::cerr << "Error: cannot open output file: " << output_path << std::endl;
+            LOG_ERROR << "cannot open output file: " << output_path;
             return 1;
         }
         out << "subject,trial\n";
@@ -164,7 +165,7 @@ int main(int argc, char* argv[]) {
         size_t total_rows = 0;
         for (const auto& subject : subjects) {
             std::vector<int> trials = dic.searchTrialTarget(subject);
-            std::cout << subject << ": " << trials.size() << " trial(s)" << std::endl;
+            LOG_INFO << subject << ": " << trials.size() << " trial(s)";
             for (int trial : trials) {
                 out << subject << "," << trial << "\n";
                 ++total_rows;
@@ -172,13 +173,11 @@ int main(int argc, char* argv[]) {
         }
         out.close();
 
-        std::cout << "\nWrote " << total_rows << " (subject,trial) row(s) to " << output_path
-                  << std::endl;
-        std::cout << "SLURM array size for subject_trial mode: --array=1-" << total_rows
-                  << std::endl;
+        LOG_INFO << "Wrote " << total_rows << " (subject,trial) row(s) to " << output_path;
+        LOG_INFO << "SLURM array size for subject_trial mode: --array=1-" << total_rows;
         return 0;
     } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+        LOG_ERROR << e.what();
         return 1;
     }
 }
