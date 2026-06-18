@@ -1,0 +1,8 @@
+# Python virtualenv (created via: python -m venv .venv)
+.venv/
+__pycache__/
+*.pyc
+
+# Plotly is fetched at setup time or loaded from CDN as a fallback (see README).
+# Not committed to keep the repo lean.
+frontend/vendor/plotly.min.js

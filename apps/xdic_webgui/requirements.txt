@@ -1,0 +1,7 @@
+# xdic_webgui — Python dependencies (install into a venv, see README)
+fastapi>=0.110
+uvicorn[standard]>=0.27
+numpy>=1.24
+scipy>=1.10
+h5py>=3.8
+opencv-python-headless>=4.8
