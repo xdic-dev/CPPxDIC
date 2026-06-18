@@ -45,8 +45,8 @@ inline size_t current_rss_bytes() {
 #ifdef __APPLE__
     mach_task_basic_info_data_t info;
     mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
-    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO,
-                  reinterpret_cast<task_info_t>(&info), &count) == KERN_SUCCESS) {
+    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, reinterpret_cast<task_info_t>(&info),
+                  &count) == KERN_SUCCESS) {
         return static_cast<size_t>(info.resident_size);
     }
     return 0;
@@ -64,12 +64,12 @@ inline size_t current_rss_bytes() {
 struct Phase {
     double total_ms = 0.0;
     long count = 0;
-    size_t rss_peak = 0;  // max RSS observed across this label's windows
+    size_t rss_peak = 0; // max RSS observed across this label's windows
 };
 
 struct Event {
-    double t_ms;            // elapsed since profiler start
-    std::string label;      // "<name>@enter" / "<name>@exit"
+    double t_ms;       // elapsed since profiler start
+    std::string label; // "<name>@enter" / "<name>@exit"
     size_t rss;
 };
 
@@ -79,7 +79,7 @@ struct Sample {
 };
 
 class Profiler {
-  public:
+public:
     using clock = std::chrono::steady_clock;
 
     static Profiler& I() {
@@ -149,22 +149,20 @@ class Profiler {
 
         std::fprintf(stderr,
                      "\n================= XPROF: time + memory profile =================\n");
-        std::fprintf(stderr, "%-24s %8s %10s %12s\n", "phase", "count", "time(s)",
-                     "peakRSS(MB)");
+        std::fprintf(stderr, "%-24s %8s %10s %12s\n", "phase", "count", "time(s)", "peakRSS(MB)");
         std::fprintf(stderr, "---------------------------------------------------------------\n");
         for (const auto& kv : phases_) {
             std::fprintf(stderr, "%-24s %8ld %10.3f %12.1f\n", kv.first.c_str(), kv.second.count,
                          kv.second.total_ms / 1000.0, kv.second.rss_peak / (1024.0 * 1024.0));
         }
         std::fprintf(stderr, "---------------------------------------------------------------\n");
-        std::fprintf(stderr, "%-24s %8s %10.3f %12.1f\n", "OVERALL", "",
-                     elapsed_ms() / 1000.0, overall_peak / (1024.0 * 1024.0));
+        std::fprintf(stderr, "%-24s %8s %10.3f %12.1f\n", "OVERALL", "", elapsed_ms() / 1000.0,
+                     overall_peak / (1024.0 * 1024.0));
         std::fprintf(stderr, "CSV written to: %s/xprof_{phases,events,samples}.csv\n", out.c_str());
-        std::fprintf(stderr,
-                     "===============================================================\n\n");
+        std::fprintf(stderr, "===============================================================\n\n");
     }
 
-  private:
+private:
     Profiler() {
         enabled_ = std::getenv("XDIC_PROFILE") != nullptr;
         t0_ = clock::now();
@@ -237,7 +235,7 @@ struct ScopedTimer {
     }
 };
 
-}  // namespace xprof
+} // namespace xprof
 
 #define XPROF_CONCAT_(a, b) a##b
 #define XPROF_CONCAT(a, b) XPROF_CONCAT_(a, b)
