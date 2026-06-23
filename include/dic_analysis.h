@@ -16,6 +16,7 @@
 
 #include "config.h"
 #include "ncorr.h"
+#include "stage_plan.h"
 #include <vector>
 #include <string>
 
@@ -43,6 +44,20 @@ public:
      * @return true if all steps complete successfully
      */
     bool run(const std::vector<int>& trial_target);
+
+    /**
+     * Run a selected subset of pipeline stages for an explicit list of trials.
+     *
+     * Identical to run(trial_target) but only the sub-steps enabled in @p plan
+     * are executed; the rest are expected to be satisfied by existing on-disk
+     * checkpoints. This is what lets the pipeline be split across independent
+     * processes / SLURM array tasks (matching, tracking, E+F).
+     *
+     * @param trial_target Non-empty list of 1-based trial IDs to process.
+     * @param plan         Which sub-steps to run (+ optional pair/camera narrowing).
+     * @return true if all requested steps complete successfully
+     */
+    bool run(const std::vector<int>& trial_target, const StagePlan& plan);
 
     /**
      * Run 3D Reconstruction (Step E) only — for integration testing
@@ -78,7 +93,7 @@ private:
     const Config& config_;
     
     // Analysis steps
-    bool dic2DAnalysis(const std::vector<int>& trial_target);
+    bool dic2DAnalysis(const std::vector<int>& trial_target, const StagePlan& plan);
     bool dic3DReconstruction(const std::vector<int>& trial_target);
     bool dicDeformationAnalysis(const std::vector<int>& trial_target);
     

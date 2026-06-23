@@ -1314,6 +1314,11 @@ bool DicAnalysis::run() {
 }
 
 bool DicAnalysis::run(const std::vector<int>& trial_target) {
+    // Default: full pipeline (all stages). Preserves historical behaviour.
+    return run(trial_target, StagePlan{});
+}
+
+bool DicAnalysis::run(const std::vector<int>& trial_target, const StagePlan& plan) {
     {
         std::ostringstream trial_target_oss;
         trial_target_oss << "[";
@@ -1370,74 +1375,78 @@ bool DicAnalysis::run(const std::vector<int>& trial_target) {
         return true;
     };
     
-    // STEP D: 2D-DIC
-    bool step_d_complete = check_2d_outputs_exist();
-    if (step_d_complete) {
-        LOG_INFO << "\n=== STEP D: 2D-DIC ===";
-        LOG_INFO << "✓ Checkpoint detected: All 2D DIC output files exist";
-        LOG_INFO << "  Skipping 2D analysis (use existing results)";
-    } else {
-        LOG_INFO << "\n=== STEP D: 2D-DIC ===";
-        LOG_INFO << "Running 2D DIC analysis...";
-        auto start = std::chrono::high_resolution_clock::now();
-        bool success = dic2DAnalysis(trial_target);
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        
-        if (!success) {
-            LOG_ERROR << "2D DIC Analysis failed!";
-            return false;
-        }
+    // STEP D: 2D-DIC (matching / tracking / format) — only if the plan asks for it.
+    if (plan.anyStepD()) {
+        bool step_d_complete = check_2d_outputs_exist();
+        if (step_d_complete) {
+            LOG_INFO << "\n=== STEP D: 2D-DIC ===";
+            LOG_INFO << "✓ Checkpoint detected: All 2D DIC output files exist";
+            LOG_INFO << "  Skipping 2D analysis (use existing results)";
+        } else {
+            LOG_INFO << "\n=== STEP D: 2D-DIC ===";
+            LOG_INFO << "Running 2D DIC analysis (stages:"
+                     << (plan.match ? " match" : "") << (plan.track ? " track" : "")
+                     << (plan.format ? " format" : "") << ")...";
+            auto start = std::chrono::high_resolution_clock::now();
+            bool success = dic2DAnalysis(trial_target, plan);
+            auto end = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
-        LOG_INFO << "✓ DIC 2D Analysis done in " << duration.count() / 1000.0 << " s";
+            if (!success) {
+                LOG_ERROR << "2D DIC Analysis failed!";
+                return false;
+            }
+
+            LOG_INFO << "✓ DIC 2D Analysis done in " << duration.count() / 1000.0 << " s";
+        }
     }
-    
+
     // STEP E: 3D Reconstruction
-    bool step_e_complete = check_3d_outputs_exist();
-    if (step_e_complete) {
-        LOG_INFO << "\n=== STEP E: 3D Reconstruction ===";
-        LOG_INFO << "✓ Checkpoint detected: All 3D reconstruction output files exist";
-        LOG_INFO << "  Skipping 3D reconstruction (use existing results)";
-    } else {
-        if (!step_d_complete) {
+    if (plan.recon) {
+        bool step_e_complete = check_3d_outputs_exist();
+        if (step_e_complete) {
             LOG_INFO << "\n=== STEP E: 3D Reconstruction ===";
-        }
-        LOG_INFO << "Running 3D reconstruction...";
-        auto start = std::chrono::high_resolution_clock::now();
-        bool success = dic3DReconstruction(trial_target);
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        
-        if (!success) {
-            LOG_ERROR << "3D Reconstruction failed!";
-            return false;
-        }
+            LOG_INFO << "✓ Checkpoint detected: All 3D reconstruction output files exist";
+            LOG_INFO << "  Skipping 3D reconstruction (use existing results)";
+        } else {
+            LOG_INFO << "\n=== STEP E: 3D Reconstruction ===";
+            LOG_INFO << "Running 3D reconstruction...";
+            auto start = std::chrono::high_resolution_clock::now();
+            bool success = dic3DReconstruction(trial_target);
+            auto end = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
-        LOG_INFO << "✓ DIC 3D Reconstruction done in " << duration.count() / 1000.0 << " s";
+            if (!success) {
+                LOG_ERROR << "3D Reconstruction failed!";
+                return false;
+            }
+
+            LOG_INFO << "✓ DIC 3D Reconstruction done in " << duration.count() / 1000.0 << " s";
+        }
     }
-    
-    // STEP F: Deformation analysis
-    bool step_f_complete = check_deformation_outputs_exist();
-    if (step_f_complete) {
-        LOG_INFO << "\n=== STEP F: Deformation Analysis ===";
-        LOG_INFO << "✓ Checkpoint detected: Deformation analysis output exists";
-        LOG_INFO << "  Skipping deformation analysis (use existing results)";
-    } else {
-        if (!step_e_complete) {
-            LOG_INFO << "\n=== STEP F: Deformation Analysis ===";
-        }
-        LOG_INFO << "Running deformation analysis...";
-        auto start = std::chrono::high_resolution_clock::now();
-        bool success = dicDeformationAnalysis(trial_target);
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        
-        if (!success) {
-            LOG_ERROR << "Deformation Analysis failed!";
-            return false;
-        }
 
-        LOG_INFO << "✓ DIC Deformation Analysis done in " << duration.count() / 1000.0 << " s";
+    // STEP F: Deformation analysis
+    if (plan.deform) {
+        bool step_f_complete = check_deformation_outputs_exist();
+        if (step_f_complete) {
+            LOG_INFO << "\n=== STEP F: Deformation Analysis ===";
+            LOG_INFO << "✓ Checkpoint detected: Deformation analysis output exists";
+            LOG_INFO << "  Skipping deformation analysis (use existing results)";
+        } else {
+            LOG_INFO << "\n=== STEP F: Deformation Analysis ===";
+            LOG_INFO << "Running deformation analysis...";
+            auto start = std::chrono::high_resolution_clock::now();
+            bool success = dicDeformationAnalysis(trial_target);
+            auto end = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+
+            if (!success) {
+                LOG_ERROR << "Deformation Analysis failed!";
+                return false;
+            }
+
+            LOG_INFO << "✓ DIC Deformation Analysis done in " << duration.count() / 1000.0 << " s";
+        }
     }
 
     LOG_INFO << "\n========================================";
@@ -1647,27 +1656,31 @@ std::vector<int> DicAnalysis::searchTrialTarget(const std::string& subject) {
     return trials;
 }
 
-bool DicAnalysis::dic2DAnalysis(const std::vector<int>& trial_target) {
+bool DicAnalysis::dic2DAnalysis(const std::vector<int>& trial_target, const StagePlan& plan) {
     LOG_INFO << "Starting 2D DIC Analysis (using StepDWorkflow)...";
-    
+
     try {
         // Create workflow instance
         StepDWorkflow workflow(config_);
-        
+
         // Process each trial and stereo pair
         for (int trial : trial_target) {
             for (int pair = 1; pair <= config_.num_pair; ++pair) {
+                // Optional narrowing for SLURM array tasks: a single stereopair.
+                if (plan.only_pair != 0 && pair != plan.only_pair) {
+                    continue;
+                }
                 // Format trial as 3-digit string (e.g., "005")
                 std::ostringstream trial_str;
                 trial_str << std::setw(3) << std::setfill('0') << trial;
-                
+
                 LOG_INFO << "\n========================================";
                 LOG_INFO << "Processing Trial " << trial << ", Pair " << pair;
                 LOG_INFO << "========================================";
-                
-                // Execute workflow
-                auto [outputPath, pairOrder, pairForced] = workflow.execute(trial_str.str(), pair);
-                
+
+                // Execute workflow (only the sub-steps selected by plan)
+                auto [outputPath, pairOrder, pairForced] = workflow.execute(trial_str.str(), pair, plan);
+
                 if (outputPath.empty()) {
                     LOG_ERROR << "Workflow failed for trial " << trial << ", pair " << pair;
                     return false;

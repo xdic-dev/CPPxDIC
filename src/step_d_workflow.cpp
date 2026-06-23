@@ -101,11 +101,11 @@ StepDWorkflow::StepDWorkflow(const Config& config) : config_(config) {
 }
 
 std::tuple<std::string, std::vector<int>, bool> 
-StepDWorkflow::execute(const std::string& trial, int stereopair) {
+StepDWorkflow::execute(const std::string& trial, int stereopair, const StagePlan& plan) {
     LOG_INFO << "-------------------------------------------";
     LOG_INFO << "-------------------------------------------";
     LOG_INFO << "Digital Image Correlation analysis launch";
-    
+
     // CHECKPOINT SYSTEM (matching MATLAB implementation):
     // The following checkpoint files are checked/created to avoid redundant computation:
     // 1. REF_MASK_{reftrial}_{phase}_pair{stereopair}.mat - ROI mask (loaded from base path)
@@ -115,7 +115,14 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
     // 5. ncorr{cam1}.bin - Camera 1 tracking results (in output path)
     // 6. ncorr{cam2}.bin - Camera 2 tracking results (in output path)
     // 7. dic_info_data_target_pair{stereopair}.mat - Trial metadata (in output path)
-    
+    //
+    // STAGE DECOMPOSITION (plan): every sub-step below checkpoints to / loads from
+    // disk, so a process can run only some sub-steps and rely on a prior process's
+    // outputs for the rest:
+    //   plan.match  -> ROI/seed + REF->trial matching (3) + camera matching (4) + dic_info (7)
+    //   plan.track  -> per-camera tracking (5,6); needs (3,4) on disk (loaded here)
+    //   plan.format -> formatOutput (myDIC2DpairResults); needs (4,5,6) on disk
+
     // I. Preps analysis
     // 1. Load protocol and determine reference trial
     if (!loadProtocol()) {
@@ -125,87 +132,111 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
 
     std::string reftrial = determineReferenceTrial(trial);
     LOG_INFO << "Reference trial: " << reftrial;
-    
+
     // 2. Setup parameters
     setupBaseParameters(trial, stereopair, reftrial);
-    
-    // 3. Import video frames
-    std::vector<cv::Mat> cam_first_raw, cam_second_raw;
-    LOG_INFO << "Reading video data... ";
-    if (!importVideoFrames(trial, stereopair, cam_first_raw, cam_second_raw)) {
-        LOG_ERROR << "Failed to import video frames";
-        return {"", {}, false};
-    }
-    LOG_INFO << "Reading done. Frames: " << cam_first_raw.size();
-    
-    // 4. Phase-specific frame selection
-    if (config_.phase_id == "slide1") {
-        size_t keep = cam_first_raw.size() / 2 + 5;
-        cam_first_raw.resize(keep);
-        cam_second_raw.resize(keep);
-        LOG_INFO << "Phase 'slide1': keeping " << keep << " frames";
-    }
-    
-    // 5. Saturation
-    std::vector<cv::Mat> cam_first_satur, cam_second_satur;
-    LOG_INFO << "Applying saturation...";
-    performSaturation(cam_first_raw, cam_second_raw, cam_first_satur, cam_second_satur);
-    
-    // II. ROI, Seed, and Matching REF to Trial at frame 1
-    cv::Mat refmask_REF, refmask_trial;
-    SeedPoint ref_seed_point, initial_seed_point_set1;
-    LOG_INFO << "Initializing ROI, seed, and matching REF to Trial...";
-    if (!initializeROIAndSeed(cam_first_satur, refmask_REF, refmask_trial,
-                             ref_seed_point, initial_seed_point_set1)) {
-        LOG_ERROR << "Failed to initialize ROI and seed";
-        return {"", {}, false};
+
+    // Resolve this pair's camera ids for per-camera tracking selection.
+    int cam_first_num = 0, cam_second_num = 0;
+    Utils::getCamerasForPair(stereopair, cam_first_num, cam_second_num);
+    const bool do_track1 = plan.track && (plan.only_cam == 0 || plan.only_cam == cam_first_num);
+    const bool do_track2 = plan.track && (plan.only_cam == 0 || plan.only_cam == cam_second_num);
+    // Camera matching is needed to (re)produce ncorr{cam1}{cam2} for the match stage,
+    // and to recover refmask_trial_matched + seed for camera-2 tracking.
+    const bool need_matching = plan.match || do_track2;
+    // The frame stack (import + saturation + ROI/seed) is needed by matching/tracking
+    // but NOT by a format-only stage (which just loads ncorr binaries from disk).
+    const bool need_frames = plan.match || plan.track;
+
+    if (need_frames) {
+        // 3. Import video frames
+        std::vector<cv::Mat> cam_first_raw, cam_second_raw;
+        LOG_INFO << "Reading video data... ";
+        if (!importVideoFrames(trial, stereopair, cam_first_raw, cam_second_raw)) {
+            LOG_ERROR << "Failed to import video frames";
+            return {"", {}, false};
+        }
+        LOG_INFO << "Reading done. Frames: " << cam_first_raw.size();
+
+        // 4. Phase-specific frame selection
+        if (config_.phase_id == "slide1") {
+            size_t keep = cam_first_raw.size() / 2 + 5;
+            cam_first_raw.resize(keep);
+            cam_second_raw.resize(keep);
+            LOG_INFO << "Phase 'slide1': keeping " << keep << " frames";
+        }
+
+        // 5. Saturation
+        std::vector<cv::Mat> cam_first_satur, cam_second_satur;
+        LOG_INFO << "Applying saturation...";
+        performSaturation(cam_first_raw, cam_second_raw, cam_first_satur, cam_second_satur);
+
+        // II. ROI, Seed, and Matching REF to Trial at frame 1
+        //     (writes MATCHING2*.bin when absent; loads + applies it when present)
+        cv::Mat refmask_REF, refmask_trial;
+        SeedPoint ref_seed_point, initial_seed_point_set1;
+        LOG_INFO << "Initializing ROI, seed, and matching REF to Trial...";
+        if (!initializeROIAndSeed(cam_first_satur, refmask_REF, refmask_trial,
+                                 ref_seed_point, initial_seed_point_set1)) {
+            LOG_ERROR << "Failed to initialize ROI and seed";
+            return {"", {}, false};
+        }
+
+        LOG_INFO << "--> STEP: ROI loaded and formatted";
+        LOG_INFO << "--> STEP: SEED loaded and formatted";
+        LOG_INFO << "--> STEP: Matching REF to Trial loaded and formatted";
+
+        // post-III. Image filtering (only needed for tracking)
+        std::vector<cv::Mat> cam_first, cam_second;
+        if (plan.track) {
+            if (config_.im_filter_mode) {
+                LOG_INFO << "Applying image filtering...";
+                applyImageFiltering(cam_first_satur, cam_second_satur, refmask_trial,
+                                   cam_first, cam_second);
+                LOG_INFO << "--> STEP: filtering done";
+            } else {
+                LOG_INFO << "Skipping image filtering";
+                cam_first = cam_first_satur;
+                cam_second = cam_second_satur;
+            }
+        }
+
+        // III. Matching inside a Trial between cameras (cam1 -> cam2 at frame 1)
+        //      (writes ncorr{cam1}{cam2}.bin when absent; loads it when present)
+        cv::Mat refmask_trial_matched;
+        SeedPoint initial_seed_point_set2;
+        if (need_matching) {
+            LOG_INFO << "\nPerforming camera matching...";
+            if (!performMatching(cam_first_satur, cam_second_satur, refmask_trial,
+                                initial_seed_point_set1, refmask_trial_matched,
+                                initial_seed_point_set2)) {
+                LOG_ERROR << "Failed matching step";
+                return {"", {}, false};
+            }
+        }
+
+        // IV. Save trial information (frame count metadata)
+        saveTrialInfo(trial, stereopair, cam_first_satur.size());
+
+        // V. Tracking camera 1
+        if (do_track1) {
+            LOG_INFO << "\nPerforming tracking camera 1...";
+            if (!performTracking1(cam_first, refmask_trial, initial_seed_point_set1)) {
+                LOG_ERROR << "Failed tracking1 step";
+                return {"", {}, false};
+            }
+        }
+
+        // VI. Tracking camera 2
+        if (do_track2) {
+            LOG_INFO << "\nPerforming tracking camera 2...";
+            if (!performTracking2(cam_second, refmask_trial_matched, initial_seed_point_set2)) {
+                LOG_ERROR << "Failed tracking2 step";
+                return {"", {}, false};
+            }
+        }
     }
 
-    LOG_INFO << "--> STEP: ROI loaded and formatted";
-    LOG_INFO << "--> STEP: SEED loaded and formatted";
-    LOG_INFO << "--> STEP: Matching REF to Trial loaded and formatted";
-    
-    // post-III. Image filtering
-    std::vector<cv::Mat> cam_first, cam_second;
-    if(config_.im_filter_mode) {
-        LOG_INFO << "Applying image filtering...";
-        applyImageFiltering(cam_first_satur, cam_second_satur, refmask_trial,
-                           cam_first, cam_second);
-        LOG_INFO << "--> STEP: filtering done";
-    } else {
-        LOG_INFO << "Skipping image filtering";
-        cam_first = cam_first_satur;
-        cam_second = cam_second_satur;
-    }
-
-    // III. Matching inside a Trial between cameras (cam1 -> cam2 at frame 1)
-    cv::Mat refmask_trial_matched;
-    SeedPoint initial_seed_point_set2;
-    LOG_INFO << "\nPerforming camera matching...";
-    if (!performMatching(cam_first_satur, cam_second_satur, refmask_trial,
-                        initial_seed_point_set1, refmask_trial_matched,
-                        initial_seed_point_set2)) {
-        LOG_ERROR << "Failed matching step";
-        return {"", {}, false};
-    }
-    
-    // IV. Save trial information
-    saveTrialInfo(trial, stereopair, cam_first.size());
-    
-    // V. Tracking camera 1
-    LOG_INFO << "\nPerforming tracking camera 1...";
-    if (!performTracking1(cam_first, refmask_trial, initial_seed_point_set1)) {
-        LOG_ERROR << "Failed tracking1 step";
-        return {"", {}, false};
-    }
-    
-    // VI. Tracking camera 2
-    LOG_INFO << "\nPerforming tracking camera 2...";
-    if (!performTracking2(cam_second, refmask_trial_matched, initial_seed_point_set2)) {
-        LOG_ERROR << "Failed tracking2 step";
-        return {"", {}, false};
-    }
-    
     // Determine pair order
     std::vector<int> pairOrder;
     bool pairForced;
@@ -217,9 +248,11 @@ StepDWorkflow::execute(const std::string& trial, int stereopair) {
         pairForced = false;
     }
 
-    // Post-preps. Format output
-    formatOutput(trial, stereopair, pairOrder, pairForced);
-    
+    // Post-preps. Format output (loads ncorr{cam1},{cam2},{cam1cam2} -> myDIC2DpairResults)
+    if (plan.format) {
+        formatOutput(trial, stereopair, pairOrder, pairForced);
+    }
+
     LOG_INFO << "--> STEP: Ncorr analysis completed";
 
     return {base_params_.outputPath, pairOrder, pairForced};
