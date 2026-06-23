@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>xDIC Web GUI</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- Plotly: bundled locally (see README). Falls back to CDN if vendor file is absent. -->
+  <script src="vendor/plotly.min.js"
+          onerror="this.onerror=null;this.src='https://cdn.plot.ly/plotly-2.30.0.min.js';"></script>
+</head>
+<body>
+  <header>
+    <h1>xDIC Web GUI</h1>
+    <nav class="tabs">
+      <button class="tab active" data-tab="params">Parameters</button>
+      <button class="tab" data-tab="media">Media</button>
+      <button class="tab" data-tab="plots">Plots</button>
+    </nav>
+    <span id="repo-root" class="repo-root"></span>
+  </header>
+
+  <!-- ============ Parameters ============ -->
+  <section id="tab-params" class="panel active">
+    <div class="toolbar">
+      <label>File
+        <select id="param-file"></select>
+      </label>
+      <button id="param-load">Load</button>
+      <button id="param-save" class="primary">Save</button>
+      <span id="param-status" class="status"></span>
+    </div>
+    <form id="param-form"></form>
+  </section>
+
+  <!-- ============ Media ============ -->
+  <section id="tab-media" class="panel">
+    <div class="toolbar">
+      <label>data_path
+        <input id="media-datapath" type="text" size="40" placeholder="(from dic_params.txt)" />
+      </label>
+      <button id="media-refresh">List videos</button>
+      <label>Video
+        <select id="media-video"></select>
+      </label>
+    </div>
+    <div class="toolbar">
+      <label>Frame <input id="media-frame" type="range" min="0" max="0" value="0" />
+        <span id="media-frame-val">0</span> / <span id="media-frame-max">0</span>
+      </label>
+      <label><input id="media-filter" type="checkbox" /> Filter preview</label>
+      <label>limit_grayscale <input id="media-limit" type="number" value="70" style="width:5em" /></label>
+    </div>
+    <div class="toolbar">
+      <label>Mask file <input id="media-mask" type="text" size="30" placeholder="REF_MASK_*.mat / .png / .poly" /></label>
+      <label>Seed file <input id="media-seed" type="text" size="30" placeholder="REF_SEED_*.mat / .seed" /></label>
+      <button id="media-show-overlay">Show overlay</button>
+      <span id="media-status" class="status"></span>
+    </div>
+    <div class="image-wrap"><img id="media-image" alt="frame" /></div>
+  </section>
+
+  <!-- ============ Plots ============ -->
+  <section id="tab-plots" class="panel">
+    <div class="toolbar">
+      <label>dic_path / root
+        <input id="plot-root" type="text" size="40" placeholder="(from dic_params.txt)" />
+      </label>
+      <button id="plot-refresh">List results</button>
+      <label>File <select id="plot-file"></select></label>
+      <button id="plot-load" class="primary">Load</button>
+      <span id="plot-status" class="status"></span>
+    </div>
+
+    <div id="plot-2d-controls" class="toolbar" hidden>
+      <label>Field <select id="plot-field"></select></label>
+      <label>Frame <input id="plot-frame" type="range" min="0" max="0" value="0" />
+        <span id="plot-frame-val">0</span> / <span id="plot-frame-max">0</span>
+      </label>
+    </div>
+    <div id="plot-2d" class="plot"></div>
+
+    <div id="plot-3d-controls" class="toolbar" hidden>
+      <label>Scalar field <select id="plot-scalar"></select></label>
+    </div>
+    <div id="plot-3d" class="plot"></div>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>
