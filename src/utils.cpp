@@ -313,7 +313,7 @@ std::string padNumberWithZeros(int num, int n) {
 
 bool Utils::importRawVid(const Config& config, int trial, int stereopair, int frameStart,
                          int frameEnd, int frameJump, std::vector<std::string>& cam1Frames,
-                         std::vector<std::string>& cam2Frames) {
+                         std::vector<std::string>& cam2Frames, int maxFrames) {
     try {
         int cam_first = 0, cam_second = 0;
         getCamerasForPair(stereopair, cam_first, cam_second);
@@ -348,6 +348,13 @@ bool Utils::importRawVid(const Config& config, int trial, int stereopair, int fr
         frameEnd = std::min(frameEnd, std::min(total1, total2));
         if (frameJump <= 0) frameJump = 1;
 
+        // Limit to the first maxFrames selected frames when requested (e.g. only
+        // the reference frame is needed), avoiding a full second video decode.
+        if (maxFrames > 0) {
+            int limitedEnd = frameStart + (maxFrames - 1) * frameJump;
+            frameEnd = std::min(frameEnd, limitedEnd);
+        }
+
         // Output directory
         std::ostringstream odir;
         odir << config.dic_path << "/" << config.subject_id << "/" << config.material
@@ -362,11 +369,31 @@ bool Utils::importRawVid(const Config& config, int trial, int stereopair, int fr
 
         // Extract frames - MATLAB's readvid uses iloc(:,:,1) which takes only the first channel (R)
         // OpenCV reads as BGR, so we need to extract the R channel (index 2 in BGR)
-        for (int f = frameStart; f <= frameEnd; f += frameJump) {
-            cap1.set(cv::CAP_PROP_POS_FRAMES, f - 1);
-            cap2.set(cv::CAP_PROP_POS_FRAMES, f - 1);
+        //
+        // Performance: read sequentially instead of seeking before every frame.
+        // On the FFmpeg backend (Linux) cap.set(CAP_PROP_POS_FRAMES, n) seeks to
+        // the previous keyframe and re-decodes forward on every call, turning a
+        // linear read into ~O(N * GOP) work and re-decoding the same frames many
+        // times. We seek once to the start, then read forward; when frameJump > 1
+        // the skipped frames are grabbed (decoded but not converted to Mat).
+        if (frameStart > 1) {
+            cap1.set(cv::CAP_PROP_POS_FRAMES, frameStart - 1);
+            cap2.set(cv::CAP_PROP_POS_FRAMES, frameStart - 1);
+        }
+
+        int cur = frameStart; // 1-based index of the frame the next read()/grab() yields
+        bool eof = false;
+        for (int f = frameStart; f <= frameEnd && !eof; f += frameJump) {
+            // Skip intermediate frames (frameJump > 1) without decoding to Mat.
+            while (cur < f) {
+                if (!cap1.grab() || !cap2.grab()) { eof = true; break; }
+                ++cur;
+            }
+            if (eof) break;
+
             cv::Mat im1, im2;
             if (!cap1.read(im1) || !cap2.read(im2)) break;
+            ++cur;
 
             // Extract R channel to match MATLAB's iloc(:,:,1)
             // OpenCV reads as BGR, so R is at index 2
@@ -404,7 +431,8 @@ bool Utils::importRawVid(const Config& config, int trial, int stereopair, int fr
 }
 
 bool Utils::importVid(const Config& config, int trial, int stereopair,
-                      std::vector<std::string>& cam1Frames, std::vector<std::string>& cam2Frames) {
+                      std::vector<std::string>& cam1Frames, std::vector<std::string>& cam2Frames,
+                      int maxFrames) {
     auto calc_ranges = [](const std::string& phase, int nLoad, int nSlide, int nRelax, int& s,
                           int& e) {
         if (phase == "loading") {
@@ -520,7 +548,7 @@ bool Utils::importVid(const Config& config, int trial, int stereopair,
     }
 
     return importRawVid(config, trial, stereopair, frameStart, frameEnd, frameJump, cam1Frames,
-                        cam2Frames);
+                        cam2Frames, maxFrames);
 }
 
 bool Utils::loadROIFromMat(const Config& config, int trial, int stereopair,

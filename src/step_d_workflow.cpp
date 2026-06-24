@@ -401,15 +401,16 @@ std::string StepDWorkflow::determineReferenceTrial(const std::string& trial) {
 bool StepDWorkflow::importVideoFrames(const std::string& trial,
                                      int stereopair,
                                      std::vector<cv::Mat>& cam_first_raw,
-                                     std::vector<cv::Mat>& cam_second_raw) {
+                                     std::vector<cv::Mat>& cam_second_raw,
+                                     int maxFrames) {
     // Use Utils::importVid to get frame paths
     std::vector<std::string> cam1_frames, cam2_frames;
-    
+
     // Convert trial string to integer for Utils::importVid
     int trial_num = std::stoi(trial);
-    
+
     // Import video frames using Utils
-    if (!Utils::importVid(config_, trial_num, stereopair, cam1_frames, cam2_frames)) {
+    if (!Utils::importVid(config_, trial_num, stereopair, cam1_frames, cam2_frames, maxFrames)) {
         LOG_ERROR << "Failed to import video frames for trial " << trial
                   << " stereopair " << stereopair;
         return false;
@@ -490,10 +491,13 @@ bool StepDWorkflow::initializeROIAndSeed(const std::vector<cv::Mat>& cam_first_s
         LOG_INFO << "\n--> STEP: MATCHING file computation)";
         std::vector<cv::Mat> reftrial_cam_second_raw;
         LOG_INFO << "Reading REF Trial video data...";
+        // Only the REF trial's first frame is used for REF->trial matching, so
+        // import a single frame instead of decoding the entire reference video.
         if (!importVideoFrames(base_params_.reftrial,
                             base_params_.stereopair,
                             reftrial_cam_first_raw,
-                            reftrial_cam_second_raw)) {
+                            reftrial_cam_second_raw,
+                            /*maxFrames=*/1)) {
             LOG_ERROR << "Failed to import REF Trial video frames";
             return false;
         }
@@ -526,10 +530,12 @@ bool StepDWorkflow::initializeROIAndSeed(const std::vector<cv::Mat>& cam_first_s
             if (config_.debug_mode) {
                 if (reftrial_cam_first_raw.empty()) {
                     std::vector<cv::Mat> reftrial_cam_second_raw;
+                    // Debug panel only needs the REF trial's first frame.
                     importVideoFrames(base_params_.reftrial,
                                       base_params_.stereopair,
                                       reftrial_cam_first_raw,
-                                      reftrial_cam_second_raw);
+                                      reftrial_cam_second_raw,
+                                      /*maxFrames=*/1);
                 }
                 writeMatchingDebugPanel("ipm",
                                         reftrial_cam_first_raw.empty() ? cam_first_satur[0] : reftrial_cam_first_raw[0],

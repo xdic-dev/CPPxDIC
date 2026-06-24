@@ -30,11 +30,14 @@ public:
     static std::vector<std::string> split(const std::string& str, char delimiter);
 
     // Video import (equivalents of import_vid.m / import_raw_vid.m)
+    // maxFrames > 0 limits extraction to the first maxFrames selected frames
+    // (e.g. 1 when only the reference frame is needed); 0 means all frames.
     static bool importVid(const Config& config,
                           int trial,
                           int stereopair,
                           std::vector<std::string>& cam1Frames,
-                          std::vector<std::string>& cam2Frames);
+                          std::vector<std::string>& cam2Frames,
+                          int maxFrames = 0);
 
     static bool importRawVid(const Config& config,
                              int trial,
@@ -43,7 +46,8 @@ public:
                              int frameEnd,
                              int frameJump,
                              std::vector<std::string>& cam1Frames,
-                             std::vector<std::string>& cam2Frames);
+                             std::vector<std::string>& cam2Frames,
+                             int maxFrames = 0);
 
     // ROI/SEED from MAT to JSON
     static bool loadROIFromMat(const Config& config,
