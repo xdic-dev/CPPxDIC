@@ -13,6 +13,10 @@
 #   Override subject/reftrial:
 #        docker compose -f docker/docker-compose.yml run cppxdic \
 #          --dic-params /configs/dic_params.txt --subject S10 --reftrial 3
+#
+#   Run a different app (first arg selects the binary; see deploy/README.md):
+#        docker compose -f docker/docker-compose.yml run cppxdic \
+#          singledic --data-path /data --dic-path /output --subject S17 ...
 # =============================================================================
 
 services:

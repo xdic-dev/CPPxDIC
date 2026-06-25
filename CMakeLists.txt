@@ -346,6 +346,8 @@ if(BUILD_PROXYNCORR)
         target_include_directories(proxyncorr PRIVATE ${NLOHMANN_JSON_INCLUDE_DIRS})
     endif()
     target_compile_options(proxyncorr PRIVATE -Wall -Wextra -O2)
+    # Install so `make install` (containers / deploy) places it on PATH alongside cppxdic.
+    install(TARGETS proxyncorr DESTINATION bin)
 endif()
 
 # ----------------------------------------------------------------------------
@@ -422,6 +424,8 @@ if(BUILD_SINGLEDIC)
         target_include_directories(singledic PRIVATE ${NLOHMANN_JSON_INCLUDE_DIRS})
     endif()
     target_compile_options(singledic PRIVATE -Wall -Wextra -O2)
+    # Install so `make install` (containers / deploy) places it on PATH alongside cppxdic.
+    install(TARGETS singledic DESTINATION bin)
 endif()
 
 # ----------------------------------------------------------------------------
