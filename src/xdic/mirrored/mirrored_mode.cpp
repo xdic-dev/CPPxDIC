@@ -230,10 +230,27 @@ bool importRawViewMirrored(const Config& config, int trial, const ViewInfo& view
             return false;
         }
 
-        for (int f = frameStart; f <= frameEnd; f += frameJump) {
-            cap.set(cv::CAP_PROP_POS_FRAMES, f - 1);
+        // Read sequentially instead of seeking before every frame. On the FFmpeg
+        // backend (Linux) cap.set(CAP_PROP_POS_FRAMES, n) re-seeks to the previous
+        // keyframe and re-decodes forward on every call, making import ~O(N * GOP).
+        // Seek once to the start, then read forward; grab (decode without Mat
+        // conversion) the frames skipped when frameJump > 1.
+        if (frameStart > 1) {
+            cap.set(cv::CAP_PROP_POS_FRAMES, frameStart - 1);
+        }
+
+        int cur = frameStart; // 1-based index of the frame the next read()/grab() yields
+        bool eof = false;
+        for (int f = frameStart; f <= frameEnd && !eof; f += frameJump) {
+            while (cur < f) {
+                if (!cap.grab()) { eof = true; break; }
+                ++cur;
+            }
+            if (eof) break;
+
             cv::Mat raw;
             if (!cap.read(raw)) break;
+            ++cur;
             const cv::Mat region = extractViewFromFrame(raw, view.half);
 
             std::ostringstream fp;

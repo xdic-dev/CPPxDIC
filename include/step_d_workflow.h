@@ -89,12 +89,14 @@ private:
      * @param stereopair Stereo pair number
      * @param cam_first_raw Output: first camera frames
      * @param cam_second_raw Output: second camera frames
+     * @param maxFrames Limit to the first N selected frames (0 = all)
      * @return Success status
      */
     bool importVideoFrames(const std::string& trial,
                           int stereopair,
                           std::vector<cv::Mat>& cam_first_raw,
-                          std::vector<cv::Mat>& cam_second_raw);
+                          std::vector<cv::Mat>& cam_second_raw,
+                          int maxFrames = 0);
     
     /**
      * Perform image saturation
