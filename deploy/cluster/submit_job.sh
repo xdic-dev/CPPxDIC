@@ -38,7 +38,17 @@ DATA_DIR="${DATA_DIR:-/scratch/${USER}/MultiDIC/Data}"
 # Output directory on the host (where results are written)
 OUTPUT_DIR="${OUTPUT_DIR:-/scratch/${USER}/MultiDIC/DIC_Output}"
 
-# Optional overrides via environment or sbatch --export
+# Which app in the image to run (default cppxdic). One of:
+#   cppxdic singledic proxyncorr gen_subject_trial xdic_stepsABC
+APP="${APP:-cppxdic}"
+
+# Extra arguments for non-cppxdic apps (word-split; cppxdic ignores this and uses
+# the config/SUBJECT/REFTRIAL knobs below). Example:
+#   APP=singledic APP_ARGS="--data-path /data --dic-path /output --subject S17 \
+#       --bloc bloc1 --trial vid_23 --reftrial vid_5 --dic-params /configs/dic_params.txt"
+APP_ARGS="${APP_ARGS:-}"
+
+# Optional cppxdic overrides via environment or sbatch --export
 SUBJECT="${SUBJECT:-}"
 REFTRIAL="${REFTRIAL:-}"
 
@@ -59,6 +69,7 @@ echo "Node:          $(hostname)"
 echo "CPUs:          ${SLURM_CPUS_PER_TASK}"
 echo "Memory:        ${SLURM_MEM_PER_NODE:-unknown} MB"
 echo "Start time:    $(date '+%Y-%m-%d %H:%M:%S')"
+echo "App:           ${APP}"
 echo "Container:     ${SIF_IMAGE}"
 echo "Config dir:    ${CONFIG_DIR}"
 echo "Data dir:      ${DATA_DIR}"
@@ -82,9 +93,14 @@ if [ ! -d "${CONFIG_DIR}" ]; then
     exit 1
 fi
 
-if [ ! -f "${CONFIG_DIR}/${DIC_PARAMS}" ]; then
+# cppxdic requires the DIC params file; other apps take their own args via APP_ARGS.
+if [ "${APP}" = "cppxdic" ] && [ ! -f "${CONFIG_DIR}/${DIC_PARAMS}" ]; then
     echo "ERROR: DIC params file not found: ${CONFIG_DIR}/${DIC_PARAMS}"
     exit 1
+fi
+
+if [ "${APP}" != "cppxdic" ] && [ -z "${APP_ARGS}" ]; then
+    echo "WARN: APP=${APP} but APP_ARGS is empty; the app will run with no arguments."
 fi
 
 # =============================================================================
@@ -109,20 +125,29 @@ elif [ -d "/tmp" ]; then
     BIND_OPTS="${BIND_OPTS} --bind /tmp:/tmp"
 fi
 
-# Build cppxdic arguments
-CPPXDIC_ARGS=""
-CPPXDIC_ARGS="${CPPXDIC_ARGS} --dic-params /configs/${DIC_PARAMS}"
-CPPXDIC_ARGS="${CPPXDIC_ARGS} --ncorr-params /configs/${NCORR_PARAMS}"
-CPPXDIC_ARGS="${CPPXDIC_ARGS} --viz-params /configs/${VIZ_PARAMS}"
+# Build the in-container argument list. The first token is the app name, which
+# the image runscript uses to select the binary.
+CPPXDIC_ARGS="${APP}"
 
-if [ -n "${SUBJECT}" ]; then
-    CPPXDIC_ARGS="${CPPXDIC_ARGS} --subject ${SUBJECT}"
-    echo "Subject override: ${SUBJECT}"
-fi
+if [ "${APP}" = "cppxdic" ]; then
+    # cppxdic: inject the bind-mounted config files + optional overrides.
+    CPPXDIC_ARGS="${CPPXDIC_ARGS} --dic-params /configs/${DIC_PARAMS}"
+    CPPXDIC_ARGS="${CPPXDIC_ARGS} --ncorr-params /configs/${NCORR_PARAMS}"
+    CPPXDIC_ARGS="${CPPXDIC_ARGS} --viz-params /configs/${VIZ_PARAMS}"
 
-if [ -n "${REFTRIAL}" ]; then
-    CPPXDIC_ARGS="${CPPXDIC_ARGS} --reftrial ${REFTRIAL}"
-    echo "Reftrial override: ${REFTRIAL}"
+    if [ -n "${SUBJECT}" ]; then
+        CPPXDIC_ARGS="${CPPXDIC_ARGS} --subject ${SUBJECT}"
+        echo "Subject override: ${SUBJECT}"
+    fi
+
+    if [ -n "${REFTRIAL}" ]; then
+        CPPXDIC_ARGS="${CPPXDIC_ARGS} --reftrial ${REFTRIAL}"
+        echo "Reftrial override: ${REFTRIAL}"
+    fi
+else
+    # Other apps: forward APP_ARGS verbatim (word-split). They reference the
+    # /configs, /data and /output mounts directly via their own flags.
+    CPPXDIC_ARGS="${CPPXDIC_ARGS} ${APP_ARGS}"
 fi
 
 # Set OpenMP threads to match SLURM allocation

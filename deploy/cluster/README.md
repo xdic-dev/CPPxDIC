@@ -85,6 +85,64 @@ sbatch --cpus-per-task=16 --mem=64G --time=48:00:00 submit_job.sh
 ./monitor_job.sh --summary
 ```
 
+## Running the optional apps
+
+The container bakes in four optional apps alongside `cppxdic`. The runscript
+**dispatches on the first argument**: `apptainer run cppxdic.sif <app> [args]`.
+With no app name the default `cppxdic` runs (so everything above is unchanged).
+
+```bash
+apptainer run cppxdic.sif --list-apps    # list what's built into the image
+```
+
+`submit_job.sh` exposes the same selection through two env vars:
+
+- `APP` — one of `cppxdic` (default), `singledic`, `proxyncorr`,
+  `gen_subject_trial`, `xdic_stepsABC`.
+- `APP_ARGS` — the app's own arguments (verbatim), referencing the bind mounts
+  `/configs` (configs, ro), `/data` (input, ro), `/output` (results, rw).
+
+```bash
+# singledic — single-camera 2D DIC (a real compute job; size cpus/mem/time)
+APP=singledic \
+APP_ARGS="--data-path /data --dic-path /output --subject S17 --bloc bloc1 \
+          --trial vid_23 --reftrial vid_5 --start 55 --end 175 \
+          --dic-params /configs/dic_params.txt" \
+  sbatch --cpus-per-task=8 --mem=32G submit_job.sh
+
+# proxyncorr — pass-through DIC validation over an image folder
+APP=proxyncorr \
+APP_ARGS="--folder /data --output /output/run1 --radius 20 --threads 8" \
+  sbatch submit_job.sh
+
+# gen_subject_trial — build subject_trial.csv (quick; small allocation)
+APP=gen_subject_trial \
+APP_ARGS="--subjects S08,S09,S10 -o /output/subject_trial.csv -d /configs/dic_params.txt" \
+  sbatch --cpus-per-task=1 --mem=2G --time=00:05:00 submit_job.sh
+
+# xdic_stepsABC — headless StepC DLT calibration (no display needed)
+APP=xdic_stepsABC \
+APP_ARGS="stepc --object /data/calib_object.txt --cam1 1 --img1 /data/cam1_points.txt \
+          --cam2 2 --img2 /data/cam2_points.txt --result-out /output/stepc_report.txt" \
+  sbatch --cpus-per-task=4 --mem=4G --time=00:10:00 submit_job.sh
+```
+
+Or call the container directly inside your own sbatch script / `srun`:
+
+```bash
+apptainer run --bind "$DATA:/data:ro" --bind "$OUT:/output:rw" cppxdic.sif \
+    singledic --data-path /data --dic-path /output --subject S17 ...
+```
+
+Notes:
+- `xdic_stepsABC` is compiled **headless** (`XDIC_STEPSABC_GUI=OFF`); `--gui`
+  fails cleanly. Produce mask/seed files interactively on a local machine, copy
+  them over, and consume them with `mask-seed --no-gui`.
+- `gen_subject_trial` also prints the exact `--array=1-N` line to feed
+  `run_subject_trial_array.sbatch` — see [`README_trial_arrays.md`](README_trial_arrays.md).
+- The default 3D pipeline (`cppxdic`) can be fanned out across the cluster with
+  the staged array jobs in [`staged/`](staged/README.md).
+
 ## Dependencies Included in Container
 
 All dependencies from the project CMakeLists are installed in the container:

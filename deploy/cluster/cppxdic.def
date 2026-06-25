@@ -8,15 +8,27 @@ From: ubuntu:22.04
 
 %help
     CPPxDIC container for HPC/SLURM clusters.
-    
+
     Build:
         apptainer build cppxdic.sif cppxdic.def
-    
-    Run (standalone):
+
+    Apps baked into the image (select by first argument; default cppxdic):
+        cppxdic            camera-pairs 3D-DIC pipeline (default)
+        singledic          single-camera 2D DIC
+        proxyncorr         pass-through DIC driver over an image folder
+        gen_subject_trial  generate subject_trial.csv for SLURM arrays
+        xdic_stepsABC      MASK+Seed setup (headless) + StepC DLT calibration
+        apptainer run cppxdic.sif --list-apps   # list what is built in
+
+    Run (default cppxdic):
         apptainer run cppxdic.sif --dic-params /path/to/dic_params.txt
-    
+
+    Run (a specific app):
+        apptainer run cppxdic.sif singledic --subject S17 --bloc bloc1 --trial vid_23 ...
+        apptainer run cppxdic.sif xdic_stepsABC stepc --object obj.txt ...
+
     Run (with SLURM):
-        See submit_job.sh
+        See submit_job.sh  (APP=singledic sbatch submit_job.sh ...)
 
 %environment
     export LC_ALL=C
@@ -95,13 +107,25 @@ From: ubuntu:22.04
     cd /opt/cppxdic/src
     mkdir -p build && cd build
     
+    # Optional apps are enabled here (default OFF locally) so they are baked into
+    # the image alongside cppxdic and installed onto PATH. xdic_stepsABC is built
+    # headless (XDIC_STEPSABC_GUI=OFF) for display-less compute nodes.
     cmake .. \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/opt/cppxdic \
-        -DCMAKE_CXX_STANDARD=17
-    
+        -DCMAKE_CXX_STANDARD=17 \
+        -DBUILD_SINGLEDIC=ON \
+        -DBUILD_PROXYNCORR=ON \
+        -DBUILD_GEN_SUBJECT_TRIAL=ON \
+        -DBUILD_XDIC_STEPSABC=ON \
+        -DXDIC_STEPSABC_GUI=OFF
+
     make -j$(nproc)
     make install
+
+    # Install the shared app dispatcher to a stable path (mirrors the Docker
+    # ENTRYPOINT). The %runscript below execs it.
+    install -m 0755 /opt/cppxdic/src/deploy/entrypoint.sh /opt/cppxdic/entrypoint.sh
     
     # Also build tests (optional, useful for validation on cluster)
     if [ -d /opt/cppxdic/src/tests ]; then
@@ -122,18 +146,25 @@ From: ubuntu:22.04
     . /opt/cppxdic/src
 
 %runscript
-    # Default entrypoint: run cppxdic with all arguments forwarded
-    exec /opt/cppxdic/bin/cppxdic "$@"
+    # App dispatcher: `apptainer run cppxdic.sif <app> [args]` selects a binary
+    # (cppxdic, singledic, proxyncorr, gen_subject_trial, xdic_stepsABC); with no
+    # app name it falls through to cppxdic so existing invocations keep working.
+    # `apptainer run cppxdic.sif --list-apps` lists what is baked in.
+    exec /opt/cppxdic/entrypoint.sh "$@"
 
 %test
     echo "=== Running container self-test ==="
-    # Verify binary exists and is executable
-    test -x /opt/cppxdic/bin/cppxdic || { echo "FAIL: cppxdic binary not found"; exit 1; }
-    
-    # Verify it can print help
-    /opt/cppxdic/bin/cppxdic --help || { echo "FAIL: cppxdic --help failed"; exit 1; }
-    
-    # Verify shared libraries resolve
-    ldd /opt/cppxdic/bin/cppxdic | grep "not found" && { echo "FAIL: missing shared libs"; exit 1; }
-    
+    # Verify each app binary exists, is executable, and has all shared libs.
+    for app in cppxdic singledic proxyncorr gen_subject_trial xdic_stepsABC; do
+        bin="/opt/cppxdic/bin/${app}"
+        test -x "${bin}" || { echo "FAIL: ${app} binary not found"; exit 1; }
+        if ldd "${bin}" | grep -q "not found"; then
+            echo "FAIL: ${app} has missing shared libs"; ldd "${bin}" | grep "not found"; exit 1
+        fi
+        echo "OK: ${app}"
+    done
+
+    # Verify the default app prints help via the dispatcher.
+    /opt/cppxdic/entrypoint.sh --help || { echo "FAIL: cppxdic --help failed"; exit 1; }
+
     echo "=== Self-test PASSED ==="

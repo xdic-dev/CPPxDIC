@@ -4,6 +4,22 @@ Container and HPC deployment assets for CPPxDIC. Everything here builds and runs
 default **camera-pairs** reconstruction mode (`cppxdic`) and assumes the git submodules
 under `Tools/` are checked out (`git submodule update --init --recursive`).
 
+The deploy images also bake in the **optional apps** (off by default in a local build)
+so they can be run and tested on the cluster. Select one with the first argument
+(`apptainer run cppxdic.sif <app> …` / `docker run cppxdic <app> …`) or via `APP=` in
+the helper scripts; with no app name the default `cppxdic` runs:
+
+| App | Purpose | Parameters (in-container paths) |
+|-----|---------|----------------------------------|
+| `cppxdic` (default) | camera-pairs 3D-DIC pipeline | `--dic-params/--ncorr-params/--viz-params /configs/*`, `--subject`, `--reftrial`, `--stages`, … |
+| `singledic` | single-camera 2D DIC | `--data-path /data --dic-path /output --subject --bloc --trial --reftrial --start --end --dic-params /configs/dic_params.txt` |
+| `proxyncorr` | pass-through DIC over an image folder | `--folder /data --output /output --radius --threads` |
+| `gen_subject_trial` | generate `subject_trial.csv` for SLURM arrays | `--subjects S08,S09 -o /output/subject_trial.csv -d /configs/dic_params.txt` |
+| `xdic_stepsABC` | headless StepC DLT calibration / mask-seed | `stepc --object … --cam1 --img1 --cam2 --img2 --result-out` |
+
+See the per-path READMEs for full examples. `xdic_webgui` is **not** part of these
+images.
+
 CPPxDIC is **shared-memory parallel** (OpenMP, via the CppNCorr engine): it scales across
 the cores of a single node, not across MPI ranks. Both deployment paths therefore request
 cores on one node and bind `OMP_NUM_THREADS` to the allocation.
@@ -25,6 +41,7 @@ bind-mounted from the host at runtime, so changing parameters never requires a r
 ```
 deploy/
 ├── README.md                 # this file
+├── entrypoint.sh             # app dispatcher baked into both images (first arg = app)
 ├── build.sh                  # local CMake build helper (run from repo root)
 ├── build_for_clusters.sh     # cheat-sheet: build .sif, edit configs, sbatch, monitor
 ├── docker/                   # Docker / Podman (local & desktop)
