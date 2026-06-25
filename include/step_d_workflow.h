@@ -11,6 +11,7 @@
 #include "image_processor.h"
 #include "roi_manager.h"
 #include "config.h"
+#include "stage_plan.h"
 #include <ncorr.h>
 #include <opencv2/opencv.hpp>
 #include <string>
@@ -38,10 +39,13 @@ public:
      * 
      * @param trial Trial ID string (e.g., "005")
      * @param stereopair Stereo pair number (1 or 2)
+     * @param plan Which sub-steps to perform (matching / tracking / format) and
+     *             optional per-camera narrowing. Defaults to the full Step D.
      * @return Tuple of (outputPath, pairOrder, pairForced)
      */
     std::tuple<std::string, std::vector<int>, bool> execute(const std::string& trial,
-                                                            int stereopair);
+                                                            int stereopair,
+                                                            const StagePlan& plan = StagePlan{});
     
 private:
     const Config& config_;

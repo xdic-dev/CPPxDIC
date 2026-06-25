@@ -14,6 +14,7 @@
 #include "config.h"
 #include "dic_analysis.h"
 #include "logging.h"
+#include "stage_plan.h"
 #include "trial_selection.h"
 #include "utils.h"
 #include "xdic/xdic_mode.h"
@@ -31,7 +32,10 @@ enum {
     OPT_SUBJECT_TRIAL_CSV,
     OPT_LOG_LEVEL,
     OPT_LOG_FILE,
-    OPT_DEBUG
+    OPT_DEBUG,
+    OPT_STAGES,
+    OPT_PAIR,
+    OPT_CAM
 };
 
 // Print usage information
@@ -63,6 +67,14 @@ void print_usage(const char* prog_name) {
               << "                               both subject and trial for this task.\n"
               << "  Without SLURM_ARRAY_TASK_ID, --trials/--trials-file run the whole list and\n"
               << "  --subject-trial-csv runs every row (grouped per subject).\n\n"
+              << "STAGE DECOMPOSITION (run sub-steps in separate processes; needs explicit trials):\n"
+              << "      --stages <list>          Comma list of stages to run. Tokens:\n"
+              << "                                 all | d(=match,track,format) | match | track |\n"
+              << "                                 format | e(=recon) | f(=deform).  Default: all.\n"
+              << "      --pair <p>               Restrict Step-D work to stereopair p (1..num_pair).\n"
+              << "      --cam <id>               Restrict tracking to camera id (use with --stages track).\n"
+              << "  Each sub-step checkpoints to / loads from disk, so e.g. a 'match' job, then\n"
+              << "  per-camera 'track' jobs, then a 'format,e,f' job can run as separate SLURM tasks.\n\n"
               << "EXAMPLES:\n"
               << "  " << prog_name << " --subject S10 --reftrial 3\n"
               << "  " << prog_name << " -s S08 -r 5 -d custom_dic.txt\n"
@@ -71,6 +83,9 @@ void print_usage(const char* prog_name) {
               << " --subject S09 --trials 7,12,25\n"
               << "  SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID " << prog_name
               << " --subject-trial-csv subject_trial.csv\n"
+              << "  " << prog_name << " --subject S09 --trial 7 --pair 1 --stages match\n"
+              << "  " << prog_name << " --subject S09 --trial 7 --pair 1 --cam 1 --stages track\n"
+              << "  " << prog_name << " --subject S09 --trial 7 --stages format,e,f\n"
               << std::endl;
 }
 
@@ -96,6 +111,11 @@ int main(int argc, char* argv[]) {
     bool quiet = false;
     bool cli_debug = false;
 
+    // Stage decomposition selectors (empty => full pipeline, as before).
+    std::string stages_spec;   // --stages e.g. "match" | "track" | "format,e,f" | "d"
+    int only_pair = 0;         // --pair  (0 = all stereopairs)
+    int only_cam = 0;          // --cam   (0 = both cameras within a pair)
+
     static struct option long_options[] = {{"subject", required_argument, 0, 's'},
                                            {"reftrial", required_argument, 0, 'r'},
                                            {"config", required_argument, 0, 'C'},
@@ -111,6 +131,9 @@ int main(int argc, char* argv[]) {
                                            {"log-level", required_argument, 0, OPT_LOG_LEVEL},
                                            {"log-file", required_argument, 0, OPT_LOG_FILE},
                                            {"debug", no_argument, 0, OPT_DEBUG},
+                                           {"stages", required_argument, 0, OPT_STAGES},
+                                           {"pair", required_argument, 0, OPT_PAIR},
+                                           {"cam", required_argument, 0, OPT_CAM},
                                            {"help", no_argument, 0, 'h'},
                                            {0, 0, 0, 0}};
 
@@ -135,6 +158,15 @@ int main(int argc, char* argv[]) {
                 break;
             case 'v':
                 viz_params_file = optarg;
+                break;
+            case OPT_STAGES:
+                stages_spec = optarg;
+                break;
+            case OPT_PAIR:
+                only_pair = std::stoi(optarg);
+                break;
+            case OPT_CAM:
+                only_cam = std::stoi(optarg);
                 break;
             case OPT_TRIAL:
                 single_trial = std::stoi(optarg);
@@ -353,6 +385,27 @@ int main(int argc, char* argv[]) {
             LOG_ERROR << "Data and protocol check failed!";
             return 1;
         }
+        // Build the stage plan (default = full pipeline; unchanged behaviour).
+        StagePlan plan;
+        if (!stages_spec.empty()) {
+            std::string perr;
+            if (!StagePlan::parse(stages_spec, plan, &perr)) {
+                LOG_ERROR << "Invalid --stages '" << stages_spec << "': " << perr
+                          << " (valid tokens: all, d, match, track, format, e, f)";
+                return 1;
+            }
+        }
+        plan.only_pair = only_pair;
+        plan.only_cam = only_cam;
+        const bool custom_plan = !stages_spec.empty() || only_pair != 0 || only_cam != 0;
+
+        // Stage decomposition is meant for explicit (array-driven) trial selection.
+        if (custom_plan && selected_trials.empty()) {
+            LOG_ERROR << "--stages/--pair/--cam require an explicit trial selection "
+                         "(--trial / --trials / --trials-file / --subject-trial-csv).";
+            return 1;
+        }
+
         // Call analysis function. If a trial-level run mode was selected, run
         // the resolved trial list; otherwise use the default run() behaviour.
         DicAnalysis dicAnalysis(config);
@@ -364,7 +417,11 @@ int main(int argc, char* argv[]) {
                 if (i + 1 < selected_trials.size()) trial_list << ", ";
             }
             LOG_INFO << "Running selected trials: [" << trial_list.str() << "]";
-            success = dicAnalysis.run(selected_trials);
+            if (custom_plan) {
+                LOG_INFO << "Stage selection: stages='" << (stages_spec.empty() ? "all" : stages_spec)
+                         << "' pair=" << only_pair << " cam=" << only_cam;
+            }
+            success = dicAnalysis.run(selected_trials, plan);
         } else {
             success = dicAnalysis.run();
         }
