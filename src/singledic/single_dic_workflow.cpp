@@ -22,7 +22,7 @@
 #include "parameters.h"
 #include "logging.h"
 
-#include <ncorr/session.h>
+#include <ncorr.h>
 #include <ncorr/frame_reader.h>
 
 #include <matio.h>
@@ -34,6 +34,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 
 namespace fs = std::filesystem;
 
@@ -205,25 +206,29 @@ std::vector<int> SingleDicWorkflow::loadOrCreateSeed(const cv::Mat& roi_mask) co
 }
 
 // ---------------------------------------------------------------------------
-// Tracking — one ncorr pass: reference frame (frames[0]) vs every current
-// frame, driven through the in-memory NcorrSession.
+// Tracking — ONE seeded, matlab-style, frame-parallel DIC pass over the whole
+// stack (reference = frames[0] vs all current frames at once).
+//
+// This mirrors cppxdic::StepDWorkflow::runNcorrAnalysis (the production stepD
+// path) exactly, but drives the engine from in-memory cv::Mat frames (no temp
+// PNG round-trip). The previous implementation looped ncorr::NcorrSession::
+// process_frame() once per frame, which (a) re-ran the full automatic seed
+// search from scratch on every frame, (b) never used the computed seed, and
+// (c) had no cross-frame parallelism — making it ~10-20x slower than xdic.
+// Here we hand the engine the entire stack plus the user seed and let it
+// propagate the seed temporally and distribute frames across threads.
 // ---------------------------------------------------------------------------
 bool SingleDicWorkflow::track(const std::vector<cv::Mat>& frames, const cv::Mat& roi_mask,
                               const std::vector<int>& seed_pw, SingleDicResult& out) const {
     if (frames.empty()) return false;
 
-    // Map CPPxDIC Config tunables onto the session config so singledic uses the
-    // same DIC parameters as the production engine (step_d radius/spacing).
-    ncorr::SessionConfig scfg;
-    scfg.subregion_radius = cfg_.base.step_d.radius;
-    scfg.scalefactor = cfg_.base.step_d.spacing + 1; // grid factor = spacing+1
-    scfg.num_threads = std::max(1, cfg_.base.step_d.total_threads);
-    scfg.debug = cfg_.base.debug_mode;
+    const int spacing = cfg_.base.step_d.spacing;
+    const int scalefactor = spacing + 1; // grid factor = spacing + 1 (matches MATLAB/xdic)
+    const int radius = cfg_.base.step_d.radius;
+    const int threads = std::max(1, cfg_.base.step_d.total_threads);
 
-    const cv::Mat& ref = frames.front();
-
-    // Ensure contiguous 8-bit grayscale buffers for ImageBuffer views.
-    auto as_buffer = [](const cv::Mat& m) -> cv::Mat {
+    // Ensure contiguous 8-bit grayscale buffers.
+    auto as_gray = [](const cv::Mat& m) -> cv::Mat {
         cv::Mat g = m;
         if (g.channels() != 1) cv::cvtColor(g, g, cv::COLOR_BGR2GRAY);
         if (g.type() != CV_8UC1) g.convertTo(g, CV_8UC1);
@@ -231,7 +236,7 @@ bool SingleDicWorkflow::track(const std::vector<cv::Mat>& frames, const cv::Mat&
         return g;
     };
 
-    cv::Mat ref8 = as_buffer(ref);
+    cv::Mat ref8 = as_gray(frames.front());
     cv::Mat roi8;
     if (!roi_mask.empty()) {
         roi8 = roi_mask;
@@ -239,45 +244,94 @@ bool SingleDicWorkflow::track(const std::vector<cv::Mat>& frames, const cv::Mat&
         if (!roi8.isContinuous()) roi8 = roi8.clone();
     }
 
-    ncorr::NcorrSession session(scfg);
+    out.image_size = ref8.size();
+    out.roi_mask = roi8.empty() ? cv::Mat() : roi8.clone();
+    out.subset_spacing = spacing;
+    out.seed_pw = seed_pw;
+    out.frames.clear();
+
+    // Whole-stack in-memory image list: reference first, then every current
+    // frame (identical layout to the production stepD path).
+    std::vector<ncorr::Image2D> imgs;
+    imgs.reserve(frames.size());
+    imgs.emplace_back(ref8);
+    for (size_t i = 1; i < frames.size(); ++i) {
+        imgs.emplace_back(as_gray(frames[i]));
+    }
+
+    // ROI2D: explicit loaded mask, else full-frame.
+    ncorr::ROI2D roi = roi8.empty()
+                           ? ncorr::ROI2D(ncorr::Array2D<bool>(ref8.rows, ref8.cols, true))
+                           : cppxdic::ROIManager::matToNcorrROI(roi8);
+
+    ncorr::DIC_analysis_input dic_input(imgs, roi, scalefactor,
+                                        ncorr::INTERP::QUINTIC_BSPLINE_PRECOMPUTE,
+                                        ncorr::SUBREGION::CIRCLE, radius, threads,
+                                        ncorr::DIC_analysis_config::NO_UPDATE, cfg_.base.debug_mode);
+
+    // Match production: disable correlation-based reference updates so the
+    // MATLAB fixed-step seed propagation is used (avoids ROI fragmentation).
+    dic_input.update_corrcoef = cfg_.base.ncorr_cutoff_corrcoef;
+
+    // User seed (engine propagates it temporally instead of re-searching).
+    std::vector<ncorr::SeedParams> seeds;
+    if (seed_pw.size() >= 2) {
+        seeds.emplace_back(seed_pw[0], seed_pw[1]);
+    }
+
+    const bool go_parallel = cfg_.base.parallel_processing;
+    const bool exact = cfg_.base.ncorr_use_exact_matlab;
+    LOG_INFO << "[singledic] running " << (go_parallel ? "parallel" : "sequential")
+             << (exact ? " exact-matlab" : " matlab") << " DIC over " << (imgs.size() - 1)
+             << " frame(s), " << threads << " thread(s), seed=("
+             << (seed_pw.size() > 0 ? seed_pw[0] : 0) << ", "
+             << (seed_pw.size() > 1 ? seed_pw[1] : 0) << ")";
+
+    ncorr::DIC_analysis_output dic_output;
     try {
-        session.set_reference(ncorr::ImageBuffer(ref8.data, ref8.cols, ref8.rows, 1));
-        if (!roi8.empty()) {
-            session.set_roi(ncorr::ImageBuffer(roi8.data, roi8.cols, roi8.rows, 1));
+        if (go_parallel) {
+            ncorr::DIC_analysis_parallel_input pin(dic_input, seeds);
+            dic_output = exact ? ncorr::exact_matlab_DIC_analysis_parallel(pin)
+                               : ncorr::matlab_DIC_analysis_parallel(pin);
+        } else {
+            dic_output = exact ? ncorr::exact_matlab_DIC_analysis_sequential(dic_input, seeds, false)
+                               : ncorr::matlab_DIC_analysis_sequential(dic_input, seeds, false);
         }
     } catch (const std::exception& e) {
-        out.message = std::string("set_reference/roi failed: ") + e.what();
+        out.message = std::string("DIC analysis failed: ") + e.what();
         return false;
     }
 
-    out.image_size = ref8.size();
-    out.roi_mask = roi8.empty() ? cv::Mat() : roi8.clone();
-    out.subset_spacing = cfg_.base.step_d.spacing;
-    out.seed_pw = seed_pw;
-    out.frames.clear();
-    out.frames.reserve(frames.size() - 1);
+    // Unpack each frame's reduced-grid Lagrangian displacement field.
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    out.frames.reserve(dic_output.disps.size());
+    for (const auto& disp : dic_output.disps) {
+        const auto& u_arr = disp.get_u().get_array();
+        const auto& v_arr = disp.get_v().get_array();
+        const auto& cc_arr = disp.get_cc().get_array();
+        const auto& mask = disp.get_roi().get_mask();
+        const int h = u_arr.height();
+        const int w = u_arr.width();
 
-    // frames[0] is the reference; track frames[1..] against it.
-    for (size_t i = 1; i < frames.size(); ++i) {
-        cv::Mat def8 = as_buffer(frames[i]);
-        ncorr::DICResult r;
-        try {
-            r = session.process_frame(ncorr::ImageBuffer(def8.data, def8.cols, def8.rows, 1));
-        } catch (const std::exception& e) {
-            LOG_ERROR << "[singledic] frame " << i << " DIC failed: " << e.what();
-        }
         FrameResult fr;
-        fr.grid_width = r.width;
-        fr.grid_height = r.height;
-        fr.u = std::move(r.u);
-        fr.v = std::move(r.v);
-        fr.corrcoef = std::move(r.corrcoef);
-        fr.valid = r.valid;
-        out.frames.push_back(std::move(fr));
-        if (cfg_.base.debug_mode) {
-            LOG_DEBUG << "[singledic] tracked frame " << i << "/" << (frames.size() - 1)
-                      << (r.valid ? " ok" : " FAILED");
+        fr.grid_width = w;
+        fr.grid_height = h;
+        const std::size_t n = static_cast<std::size_t>(w) * h;
+        fr.u.assign(n, nan);
+        fr.v.assign(n, nan);
+        fr.corrcoef.assign(n, nan);
+        for (int i = 0; i < h; ++i) {
+            for (int j = 0; j < w; ++j) {
+                if (i < mask.height() && j < mask.width() && mask(i, j)) {
+                    const std::size_t idx = static_cast<std::size_t>(i) * w + j;
+                    fr.u[idx] = u_arr(i, j);
+                    fr.v[idx] = v_arr(i, j);
+                    fr.corrcoef[idx] = cc_arr(i, j);
+                }
+            }
         }
+        fr.valid = true;
+        out.frames.push_back(std::move(fr));
     }
 
     out.ok = true;

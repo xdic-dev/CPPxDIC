@@ -54,6 +54,8 @@
 #include <dirent.h>
 #include <algorithm>
 #include <getopt.h>
+#include <matio.h>
+#include <opencv2/core.hpp>
 
 using namespace ncorr;
 using json = nlohmann::json;
@@ -338,6 +340,135 @@ bool file_exists(const std::string& path) {
     return (stat(path.c_str(), &buffer) == 0);
 }
 
+// Lowercase file extension including the dot, e.g. "/a/B.MAT" -> ".mat".
+std::string file_ext_lower(const std::string& path) {
+    size_t slash = path.find_last_of("/\\");
+    size_t dot = path.find_last_of('.');
+    if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) return "";
+    std::string ext = path.substr(dot);
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    return ext;
+}
+
+// ============================================================================
+// MATLAB .mat ROI / seed loading (xDIC-compatible)
+// ============================================================================
+//
+// xDIC stores the reference ROI mask and seed as .mat sidecars next to each
+// trial (REF_MASK_*.mat / REF_SEED_*.mat). To let proxyncorr consume those same
+// artefacts, we read them here with matio, mirroring cppxdic::ROIManager::
+// loadROIFromMat / loadSeedFromMat (kept self-contained so proxyncorr stays a
+// thin, lib-free driver).
+
+// Load an ROI mask from a .mat file holding a 2D uint8/logical variable named
+// "refmask". Returns a CV_8UC1 image (0 / 255), row-major, matching the PNG ROI
+// path. Throws on any failure so the caller can report a clear error.
+cv::Mat load_roi_mask_from_mat(const std::string& mat_path) {
+    mat_t* matfp = Mat_Open(mat_path.c_str(), MAT_ACC_RDONLY);
+    if (!matfp) throw std::runtime_error("Cannot open ROI .mat file: " + mat_path);
+
+    matvar_t* var = Mat_VarRead(matfp, "refmask");
+    if (!var) {
+        Mat_Close(matfp);
+        throw std::runtime_error("Variable 'refmask' not found in " + mat_path);
+    }
+    if (var->rank != 2 || !var->data) {
+        Mat_VarFree(var);
+        Mat_Close(matfp);
+        throw std::runtime_error("'refmask' must be a 2D array in " + mat_path);
+    }
+
+    const size_t height = var->dims[0];
+    const size_t width = var->dims[1];
+    const bool is_logical = (var->isLogical != 0);
+    cv::Mat mask(static_cast<int>(height), static_cast<int>(width), CV_8UC1);
+
+    // MATLAB is column-major: element (y, x) lives at index x*height + y.
+    // Support the common storage classes for a mask variable.
+    auto fill = [&](auto* data) {
+        for (size_t y = 0; y < height; ++y) {
+            for (size_t x = 0; x < width; ++x) {
+                double v = static_cast<double>(data[x * height + y]);
+                mask.at<uint8_t>(static_cast<int>(y), static_cast<int>(x)) =
+                    (is_logical || v <= 1.0) ? (v > 0.0 ? 255 : 0)
+                                             : static_cast<uint8_t>(std::min(255.0, v));
+            }
+        }
+    };
+    switch (var->class_type) {
+        case MAT_C_UINT8:  fill(static_cast<const uint8_t*>(var->data));  break;
+        case MAT_C_INT8:   fill(static_cast<const int8_t*>(var->data));   break;
+        case MAT_C_DOUBLE: fill(static_cast<const double*>(var->data));   break;
+        case MAT_C_SINGLE: fill(static_cast<const float*>(var->data));    break;
+        case MAT_C_UINT16: fill(static_cast<const uint16_t*>(var->data)); break;
+        default:
+            Mat_VarFree(var);
+            Mat_Close(matfp);
+            throw std::runtime_error("Unsupported 'refmask' class in " + mat_path);
+    }
+
+    Mat_VarFree(var);
+    Mat_Close(matfp);
+    return mask;
+}
+
+// Build an ROI2D from either an image file (PNG/BMP/...) or an xDIC .mat mask,
+// chosen by file extension. Mirrors the existing PNG path's >0.5 threshold.
+ROI2D build_roi(const std::string& roi_path) {
+    if (file_ext_lower(roi_path) == ".mat") {
+        return ROI2D(Image2D(load_roi_mask_from_mat(roi_path)).get_gs() > 0.5);
+    }
+    return ROI2D(Image2D(roi_path).get_gs() > 0.5);
+}
+
+// Load a seed from a .mat file holding a 2-element variable named "seed_point"
+// ([x, y] in pixels), matching xDIC's REF_SEED_*.mat. Returns a single-region
+// seed vector (deformation params zeroed), consistent with load_seeds_from_json.
+std::vector<SeedParams> load_seeds_from_mat(const std::string& mat_path) {
+    mat_t* matfp = Mat_Open(mat_path.c_str(), MAT_ACC_RDONLY);
+    if (!matfp) throw std::runtime_error("Cannot open seed .mat file: " + mat_path);
+
+    matvar_t* var = Mat_VarRead(matfp, "seed_point");
+    if (!var) {
+        Mat_Close(matfp);
+        throw std::runtime_error("Variable 'seed_point' not found in " + mat_path);
+    }
+
+    size_t n = (var->rank >= 1 && var->data) ? 1 : 0;
+    for (int i = 0; i < var->rank; ++i) n *= var->dims[i];
+    if (n < 2 || !var->data) {
+        Mat_VarFree(var);
+        Mat_Close(matfp);
+        throw std::runtime_error("'seed_point' must hold at least [x, y] in " + mat_path);
+    }
+
+    auto at = [&](size_t i) -> double {
+        switch (var->class_type) {
+            case MAT_C_DOUBLE: return static_cast<const double*>(var->data)[i];
+            case MAT_C_SINGLE: return static_cast<const float*>(var->data)[i];
+            case MAT_C_UINT16: return static_cast<const uint16_t*>(var->data)[i];
+            case MAT_C_INT16:  return static_cast<const int16_t*>(var->data)[i];
+            case MAT_C_UINT32: return static_cast<const uint32_t*>(var->data)[i];
+            case MAT_C_INT32:  return static_cast<const int32_t*>(var->data)[i];
+            case MAT_C_UINT8:  return static_cast<const uint8_t*>(var->data)[i];
+            default:           return static_cast<const double*>(var->data)[i];
+        }
+    };
+    int x = static_cast<int>(std::lround(at(0)));
+    int y = static_cast<int>(std::lround(at(1)));
+
+    Mat_VarFree(var);
+    Mat_Close(matfp);
+    return {SeedParams(x, y)};
+}
+
+// Load seeds from either a JSON array or an xDIC .mat seed file, by extension.
+std::vector<SeedParams> load_seeds_from_json(const std::string& seeds_path); // fwd decl
+std::vector<SeedParams> load_seeds_any(const std::string& seeds_path) {
+    if (file_ext_lower(seeds_path) == ".mat") return load_seeds_from_mat(seeds_path);
+    return load_seeds_from_json(seeds_path);
+}
+
 // ============================================================================
 // Seeds file loading
 // ============================================================================
@@ -552,7 +683,8 @@ static int run_in_memory(const ProxyConfig& config, const std::string& roi_path,
     // Optional ROI mask (same geometry as the reference).
     cv::Mat roi_mat; // declared here so it outlives set_roi()
     if (!roi_path.empty() && file_exists(roi_path)) {
-        roi_mat = load_mat(roi_path);
+        roi_mat = (file_ext_lower(roi_path) == ".mat") ? load_roi_mask_from_mat(roi_path)
+                                                       : load_mat(roi_path);
         session.set_roi(as_buffer(roi_mat));
         LOG_INFO << "ROI mask set: " << roi_path;
     } else {
@@ -603,7 +735,8 @@ void print_usage(const char* prog_name) {
               << "OPTIONS:\n"
               << "  -f, --folder <path>        Image folder (default: images)\n"
               << "  -c, --config <path>        Config file path (overrides defaults)\n"
-              << "  -r, --roi <path>           ROI image path (default: <folder>/roi.png)\n"
+              << "  -r, --roi <path>           ROI mask: image (PNG/BMP/...) or xDIC .mat\n"
+              << "                             ('refmask' var). Default: <folder>/roi.mat then roi.png\n"
               << "  -R, --ref <path>           Reference image path (default: first frame)\n"
               << "  -o, --output <path>        Output directory (default: output)\n"
               << "  -s, --scalefactor <int>    Scale factor (default: 3)\n"
@@ -617,9 +750,15 @@ void print_usage(const char* prog_name) {
               << "  -p, --units-per-pixel <f>  Units per pixel (default: 0.2)\n"
               << "  --strain-subregion <type>  Strain subregion type (default: CIRCLE)\n"
               << "  --strain-radius <int>      Strain radius (default: 5)\n"
-              << "  -m, --mode <mode>          Algorithm mode: auto, sequential, parallel "
-                 "(default: auto)\n"
-              << "  --seeds <path>             Path to seeds JSON file (one seed per region)\n"
+              << "  -m, --mode <mode>          Algorithm mode (default: auto):\n"
+              << "                               auto                    pick parallel/sequential\n"
+              << "                               sequential              auto/seeded sequential RG-DIC\n"
+              << "                               parallel                auto/seeded threaded RG-DIC\n"
+              << "                               matlab-parallel         MATLAB-ABR seeded parallel\n"
+              << "                               matlab-sequential       MATLAB-ABR seeded sequential\n"
+              << "                               exact-matlab-parallel   exact MATLAB-ncorr parallel\n"
+              << "                               exact-matlab-sequential exact MATLAB-ncorr sequential\n"
+              << "  --seeds <path>             Seeds: JSON array OR xDIC .mat ('seed_point' [x,y])\n"
               << "  --seeds-optimized          Seeds are already optimized (skip optimization)\n"
               << "  -a, --alpha <float>        Video overlay alpha (default: 0.5)\n"
               << "  -F, --fps <float>          Video FPS (default: 15)\n"
@@ -646,8 +785,9 @@ void print_usage(const char* prog_name) {
               << "  units_per_pixel = 0.2\n"
               << "  strain_subregion = CIRCLE\n"
               << "  strain_radius = 5\n"
-              << "  algorithm_mode = auto          # auto, sequential, or parallel\n"
-              << "  seeds_file = path/to/seeds.json\n"
+              << "  algorithm_mode = auto          # auto|sequential|parallel|matlab-parallel|\n"
+              << "                                 # matlab-sequential|exact-matlab-parallel|...\n"
+              << "  seeds_file = path/to/seeds.json   # or REF_SEED_*.mat\n"
               << "  seeds_are_optimized = false\n"
               << "  alpha = 0.5\n"
               << "  fps = 15\n\n"
@@ -799,10 +939,13 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Resolve ROI path
+    // Resolve ROI path. When unspecified, prefer an xDIC-style .mat mask, then
+    // fall back to the legacy roi.png. An explicit --roi/roi= path (.mat, .png,
+    // ...) is honoured verbatim.
     std::string roi_path = config.roi_path;
     if (roi_path.empty()) {
-        roi_path = config.folder + "/roi.png";
+        std::string roi_mat = config.folder + "/roi.mat";
+        roi_path = file_exists(roi_mat) ? roi_mat : config.folder + "/roi.png";
     }
 
     // Check ROI exists
@@ -854,12 +997,17 @@ int main(int argc, char* argv[]) {
 
     LOG_INFO << "Total images for analysis: " << imgs.size();
 
-    // Load seeds if specified
+    // Load seeds if specified (JSON array or xDIC .mat REF_SEED, by extension)
     if (!config.seeds_file.empty()) {
         if (file_exists(config.seeds_file)) {
             LOG_INFO << "Loading seeds from: " << config.seeds_file;
-            config.seeds_by_region = load_seeds_from_json(config.seeds_file);
-            LOG_INFO << "Loaded " << config.seeds_by_region.size() << " seed(s)";
+            try {
+                config.seeds_by_region = load_seeds_any(config.seeds_file);
+                LOG_INFO << "Loaded " << config.seeds_by_region.size() << " seed(s)";
+            } catch (const std::exception& e) {
+                LOG_ERROR << "Failed to load seeds: " << e.what();
+                return 1;
+            }
         } else {
             LOG_WARN << "Seeds file not found: " << config.seeds_file;
         }
@@ -903,17 +1051,22 @@ int main(int argc, char* argv[]) {
 
     try {
         // Set DIC_input
-        DIC_input = DIC_analysis_input(imgs, ROI2D(Image2D(roi_path).get_gs() > 0.5),
+        DIC_input = DIC_analysis_input(imgs, build_roi(roi_path),
                                        config.scalefactor, parse_interp(config.interp_type),
                                        parse_subregion(config.subregion_type),
                                        config.subregion_radius, config.num_threads,
                                        parse_dic_config(config.dic_config), config.debug);
 
-        // Perform DIC analysis based on mode and seeds
+        // Perform DIC analysis based on mode and seeds.
         bool has_seeds = !config.seeds_by_region.empty();
-        std::string effective_mode = config.algorithm_mode;
 
-        // Determine effective mode
+        // Normalise the mode string: lowercase, '_' -> '-' so "matlab_parallel"
+        // and "matlab-parallel" are equivalent.
+        std::string effective_mode = config.algorithm_mode;
+        std::transform(effective_mode.begin(), effective_mode.end(), effective_mode.begin(),
+                       [](unsigned char c) { return c == '_' ? '-' : std::tolower(c); });
+
+        // Determine effective mode for "auto".
         if (effective_mode == "auto") {
             if (has_seeds) {
                 effective_mode = "sequential"; // Use sequential with seeds by default
@@ -924,7 +1077,16 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Execute based on effective mode
+        const bool is_matlab = effective_mode == "matlab-parallel" ||
+                               effective_mode == "matlab-sequential";
+        const bool is_exact = effective_mode == "exact-matlab-parallel" ||
+                              effective_mode == "exact-matlab-sequential";
+        if ((is_matlab || is_exact) && !has_seeds) {
+            LOG_WARN << "[" << effective_mode << "] No seeds supplied; the MATLAB-style seed "
+                        "analysis runs best with a --seeds .mat/.json. Proceeding without.";
+        }
+
+        // Execute based on effective mode.
         if (effective_mode == "sequential") {
             if (has_seeds) {
                 LOG_INFO << "[SEQUENTIAL MODE] Performing DIC analysis with "
@@ -957,9 +1119,36 @@ int main(int argc, char* argv[]) {
                             "seeds...";
                 DIC_output = DIC_analysis(DIC_input);
             }
+        } else if (effective_mode == "matlab-parallel") {
+            // MATLAB-ABR-style fixed-reference seed-analysis + parallel DIC.
+            // This is the path the production xDIC stepD pipeline uses.
+            LOG_INFO << "[MATLAB-PARALLEL MODE] MATLAB-style seeded parallel DIC ("
+                     << config.seeds_by_region.size() << " seed(s))...";
+            DIC_analysis_parallel_input parallel_input(DIC_input, config.seeds_by_region,
+                                                       config.seeds_are_optimized);
+            DIC_output = matlab_DIC_analysis_parallel(parallel_input);
+        } else if (effective_mode == "matlab-sequential") {
+            LOG_INFO << "[MATLAB-SEQUENTIAL MODE] MATLAB-style seeded sequential DIC ("
+                     << config.seeds_by_region.size() << " seed(s))...";
+            DIC_output = matlab_DIC_analysis_sequential(DIC_input, config.seeds_by_region,
+                                                        config.seeds_are_optimized);
+        } else if (effective_mode == "exact-matlab-parallel") {
+            // Exact MATLAB-ncorr-mirroring chain composition (see ncorr.h).
+            LOG_INFO << "[EXACT-MATLAB-PARALLEL MODE] Exact MATLAB-ncorr seeded parallel DIC ("
+                     << config.seeds_by_region.size() << " seed(s))...";
+            DIC_analysis_parallel_input parallel_input(DIC_input, config.seeds_by_region,
+                                                       config.seeds_are_optimized);
+            DIC_output = exact_matlab_DIC_analysis_parallel(parallel_input);
+        } else if (effective_mode == "exact-matlab-sequential") {
+            LOG_INFO << "[EXACT-MATLAB-SEQUENTIAL MODE] Exact MATLAB-ncorr seeded sequential DIC ("
+                     << config.seeds_by_region.size() << " seed(s))...";
+            DIC_output = exact_matlab_DIC_analysis_sequential(DIC_input, config.seeds_by_region,
+                                                              config.seeds_are_optimized);
         } else {
-            throw std::runtime_error("Unknown algorithm mode: " + effective_mode +
-                                     ". Use: auto, sequential, or parallel");
+            throw std::runtime_error(
+                "Unknown algorithm mode: " + effective_mode +
+                ". Use: auto, sequential, parallel, matlab-parallel, matlab-sequential, "
+                "exact-matlab-parallel, or exact-matlab-sequential");
         }
 
         // Convert to Eulerian perspective

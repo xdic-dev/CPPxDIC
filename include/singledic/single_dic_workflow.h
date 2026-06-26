@@ -94,8 +94,9 @@ private:
     /// Load seed (REF_SEED_*.mat) or fall back to the ROI centre.
     std::vector<int> loadOrCreateSeed(const cv::Mat& roi_mask) const;
 
-    /// Run the single tracking pass (reference frame vs all current frames)
-    /// through ncorr::NcorrSession. Mirrors the ncorr_dic_rewrited() call.
+    /// Run the single tracking pass (reference frame vs all current frames) as
+    /// ONE seeded, matlab-style, frame-parallel DIC over the whole stack —
+    /// mirrors cppxdic::StepDWorkflow::runNcorrAnalysis / ncorr_dic_rewrited().
     bool track(const std::vector<cv::Mat>& frames, const cv::Mat& roi_mask,
                const std::vector<int>& seed_pw, SingleDicResult& out) const;
 
