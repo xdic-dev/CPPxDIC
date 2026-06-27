@@ -1240,8 +1240,14 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     std::vector<ncorr::Image2D> ncorr_images;
     std::vector<std::string> temp_image_paths;
     
-    // Create temporary directory for images
-    std::string temp_dir = base_params_.outputPath + "/tmp_ncorr_images";
+    // Create temporary directory for images. Make it UNIQUE per ncorr output
+    // (the output filename encodes the pair/camera, e.g. ncorr1/ncorr2/ncorr12/
+    // MATCHING2005_pair1), so concurrent per-camera / per-pair staged tasks that
+    // share one dic_path do NOT collide on a single trial/phase tmp dir (which
+    // previously corrupted cur_*.png across processes).
+    std::string tmp_tag = std::filesystem::path(output_path).stem().string();
+    if (tmp_tag.empty()) tmp_tag = "images";
+    std::string temp_dir = base_params_.outputPath + "/tmp_ncorr_" + tmp_tag;
     std::filesystem::create_directories(temp_dir);
     
     // Save reference image

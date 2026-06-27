@@ -1,0 +1,12 @@
+# Run artifacts (regenerated per run) — keep scripts, ignore state/outputs.
+logs/
+apps/logs/
+manifests/
+manifestA.txt
+manifestB.txt
+.grid_jobids
+.staged_jids
+.staged_root
+.build_jobid
+.real_jobid
+.smoke_jobid

@@ -1,0 +1,106 @@
+Bootstrap: docker
+From: ubuntu:22.04
+
+%labels
+    Author CPPxDIC Team
+    Version 1.0-prof
+    Description CPPxDIC profiling image (ja/profiling + XPROF + force-frames patch)
+
+%help
+    CPPxDIC profiling container for HPC/SLURM thread/frame scaling study.
+    Built from the local working tree (ja/profiling branch) via %files, so it
+    includes the XPROF instrumentation and the local force-frames patch.
+
+    Profiling is env-gated:
+        XDIC_PROFILE=1                enable XPROF time+RSS profiler
+        XDIC_PROFILE_OUT=<dir>        where xprof_*.csv are written
+        XDIC_FORCE_FRAMES=1           make idx_frame_start/end/jump authoritative
+
+    Build (from the CPPxDIC repo root):
+        apptainer build --fakeroot deploy/cluster/cppxdic_prof.sif deploy/cluster/cppxdic_prof.def
+
+%environment
+    export LC_ALL=C
+    export LANG=C
+    export PATH=/opt/cppxdic/bin:$PATH
+    export LD_LIBRARY_PATH=/usr/local/lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+    export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        g++ \
+        git \
+        pkg-config \
+        ca-certificates \
+        wget \
+        libopencv-dev \
+        libfftw3-dev \
+        libmatio-dev \
+        libhdf5-dev \
+        libcgal-dev \
+        libeigen3-dev \
+        libsuitesparse-dev \
+        liblapack-dev \
+        libblas-dev \
+        libopenblas-dev \
+        libomp-dev \
+        nlohmann-json3-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+    echo "=== Verifying dependencies ==="
+    pkg-config --modversion opencv4   || echo "WARN: opencv4 pkg-config missing (may still work)"
+    dpkg -s libmatio-dev              | grep Version
+    dpkg -s libhdf5-dev               | grep Version
+    echo "=== All dependencies verified ==="
+
+    # Clean any stale build artifacts copied from the host working tree
+    rm -rf /opt/cppxdic/src/build
+    rm -rf /opt/cppxdic/src/tests/build
+    rm -rf /opt/cppxdic/src/Tools/CppNCorr/lib
+    rm -f  /opt/cppxdic/src/compile_commands.json
+
+    cd /opt/cppxdic/src
+    mkdir -p build && cd build
+
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/opt/cppxdic \
+        -DCMAKE_CXX_STANDARD=17 \
+        -DBUILD_SINGLEDIC=ON \
+        -DBUILD_PROXYNCORR=ON \
+        -DBUILD_GEN_SUBJECT_TRIAL=ON
+
+    # Build cppxdic plus the optional apps we want to exercise. We list targets
+    # explicitly (not `make install`) because generate_ncorr_bin fails on Ubuntu
+    # HDF5 headers and we install binaries manually below.
+    make -j$(nproc) cppxdic singledic proxyncorr gen_subject_trial
+    mkdir -p /opt/cppxdic/bin
+    cp cppxdic singledic proxyncorr gen_subject_trial /opt/cppxdic/bin/
+    # Make the app dispatcher available so `<image> singledic ...` also works.
+    cp /opt/cppxdic/src/deploy/entrypoint.sh /opt/cppxdic/bin/entrypoint.sh 2>/dev/null || true
+    chmod +x /opt/cppxdic/bin/entrypoint.sh 2>/dev/null || true
+
+    # Cleanup build artifacts to reduce image size
+    rm -rf /opt/cppxdic/src/build
+
+%files
+    # Copy the entire local working tree (ja/profiling + local patches) into the
+    # image. Run `apptainer build` from the CPPxDIC repo root so `.` resolves here.
+    . /opt/cppxdic/src
+
+%runscript
+    exec /opt/cppxdic/bin/cppxdic "$@"
+
+%test
+    test -x /opt/cppxdic/bin/cppxdic || { echo "FAIL: cppxdic binary not found"; exit 1; }
+    /opt/cppxdic/bin/cppxdic --help || { echo "FAIL: cppxdic --help failed"; exit 1; }
+    for app in singledic proxyncorr gen_subject_trial; do
+        test -x /opt/cppxdic/bin/$app || { echo "FAIL: $app binary not built"; exit 1; }
+        echo "OK: $app present"
+    done
+    ldd /opt/cppxdic/bin/cppxdic | grep "not found" && { echo "FAIL: missing shared libs"; exit 1; }
+    echo "=== Self-test PASSED ==="

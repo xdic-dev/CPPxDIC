@@ -22,6 +22,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -176,7 +177,39 @@ private:
                     std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 }
             });
+            install_crash_handlers();
         }
+    }
+
+    // Best-effort dump on a fatal signal so a crash in a LATER pipeline stage
+    // (e.g. Step E stitching) does not discard the Step-D measurements we came
+    // for. Not async-signal-safe in the strict sense, but adequate for this
+    // scratch instrumentation: we stop the sampler, write the CSVs without
+    // locking, then re-raise the signal with the default handler so the process
+    // still dies with its real exit code (e.g. 139 for SIGSEGV).
+    static void install_crash_handlers() {
+        std::signal(SIGSEGV, &Profiler::on_crash);
+        std::signal(SIGABRT, &Profiler::on_crash);
+        std::signal(SIGBUS, &Profiler::on_crash);
+        std::signal(SIGFPE, &Profiler::on_crash);
+        // Also dump on termination/cancellation (e.g. SLURM walltime sends
+        // SIGTERM before SIGKILL; scancel sends SIGTERM) so partial Step-D data
+        // survives. SIGKILL cannot be caught.
+        std::signal(SIGTERM, &Profiler::on_crash);
+        std::signal(SIGINT, &Profiler::on_crash);
+    }
+    static void on_crash(int sig) {
+        Profiler& p = I();
+        p.stop_.store(true);
+        if (!p.dumped_.exchange(true)) {
+            const std::string out = p.out_dir();
+            p.write_phases(out + "/xprof_phases.csv");
+            p.write_events(out + "/xprof_events.csv");
+            p.write_samples(out + "/xprof_samples.csv");
+            std::fprintf(stderr, "\n[XPROF] emergency dump on signal %d -> %s\n", sig, out.c_str());
+        }
+        std::signal(sig, SIG_DFL);
+        std::raise(sig);
     }
     ~Profiler() {
         stop_.store(true);

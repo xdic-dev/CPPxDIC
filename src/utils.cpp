@@ -10,6 +10,7 @@
 #include <sstream>
 #include <iomanip>
 #include <fstream>
+#include <cstdlib>   // std::getenv (force-frames override)
 // Video IO
 #include <opencv2/opencv.hpp>
 // MAT file IO
@@ -532,7 +533,12 @@ bool Utils::importVid(const Config& config, int trial, int stereopair,
                                 nSlide = 0;
                             nRelax = static_cast<int>(std::round(d5 / 1e3 * fps));
                             int s = frameStart, e = frameEnd;
-                            if (calc_ranges(config.phase_id, nLoad, nSlide, nRelax, s, e)) {
+                            // Force-frames override: when XDIC_FORCE_FRAMES is set, the
+                            // config's idx_frame_start/end/jump are authoritative and the
+                            // protocol-derived ranges are ignored (needed for the profiling
+                            // thread/frame scaling study). No effect unless the env is set.
+                            if (!std::getenv("XDIC_FORCE_FRAMES") &&
+                                calc_ranges(config.phase_id, nLoad, nSlide, nRelax, s, e)) {
                                 frameStart = s;
                                 frameEnd = e;
                             }
