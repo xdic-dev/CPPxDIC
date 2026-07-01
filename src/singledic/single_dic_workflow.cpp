@@ -21,6 +21,7 @@
 #include "roi_manager.h"
 #include "parameters.h"
 #include "logging.h"
+#include "dic/cuncorr_dic.h"
 
 #include <ncorr.h>
 #include <ncorr/frame_reader.h>
@@ -281,21 +282,46 @@ bool SingleDicWorkflow::track(const std::vector<cv::Mat>& frames, const cv::Mat&
 
     const bool go_parallel = cfg_.base.parallel_processing;
     const bool exact = cfg_.base.ncorr_use_exact_matlab;
-    LOG_INFO << "[singledic] running " << (go_parallel ? "parallel" : "sequential")
-             << (exact ? " exact-matlab" : " matlab") << " DIC over " << (imgs.size() - 1)
-             << " frame(s), " << threads << " thread(s), seed=("
-             << (seed_pw.size() > 0 ? seed_pw[0] : 0) << ", "
-             << (seed_pw.size() > 1 ? seed_pw[1] : 0) << ")";
+    const bool use_cuncorr = (cfg_.base.dic_engine != "ncorr");
 
     ncorr::DIC_analysis_output dic_output;
     try {
-        if (go_parallel) {
-            ncorr::DIC_analysis_parallel_input pin(dic_input, seeds);
-            dic_output = exact ? ncorr::exact_matlab_DIC_analysis_parallel(pin)
-                               : ncorr::matlab_DIC_analysis_parallel(pin);
+        if (use_cuncorr) {
+            // cuNCorr engine (CUDA if present, else CPU — identical). Sequence mode: fixed
+            // reference (frames[0]), each frame warm-started from the previous.
+            cppxdic::CuncorrDicConfig ccfg;
+            ccfg.scalefactor = scalefactor;
+            ccfg.subregion_radius = radius;
+            ccfg.num_threads = threads;
+            if (seed_pw.size() >= 2) {
+                ccfg.seed_x = seed_pw[0];
+                ccfg.seed_y = seed_pw[1];
+            }
+            ccfg.seed_search = cfg_.base.cuncorr_seed_search;
+            ccfg.debug = cfg_.base.debug_mode;
+            cppxdic::CuncorrDicInfo cinfo;
+            LOG_INFO << "[singledic] running cuNCorr DIC over " << (imgs.size() - 1)
+                     << " frame(s), " << threads << " thread(s), seed=("
+                     << (seed_pw.size() > 0 ? seed_pw[0] : 0) << ", "
+                     << (seed_pw.size() > 1 ? seed_pw[1] : 0) << ")";
+            dic_output = cppxdic::run_cuncorr_dic(imgs, roi, ccfg, &cinfo);
+            LOG_INFO << "[singledic] cuNCorr backend: " << cinfo.backend
+                     << (cinfo.cuda ? " (CUDA)" : " (CPU)");
         } else {
-            dic_output = exact ? ncorr::exact_matlab_DIC_analysis_sequential(dic_input, seeds, false)
-                               : ncorr::matlab_DIC_analysis_sequential(dic_input, seeds, false);
+            LOG_INFO << "[singledic] running " << (go_parallel ? "parallel" : "sequential")
+                     << (exact ? " exact-matlab" : " matlab") << " (ncorr) DIC over "
+                     << (imgs.size() - 1) << " frame(s), " << threads << " thread(s), seed=("
+                     << (seed_pw.size() > 0 ? seed_pw[0] : 0) << ", "
+                     << (seed_pw.size() > 1 ? seed_pw[1] : 0) << ")";
+            if (go_parallel) {
+                ncorr::DIC_analysis_parallel_input pin(dic_input, seeds);
+                dic_output = exact ? ncorr::exact_matlab_DIC_analysis_parallel(pin)
+                                   : ncorr::matlab_DIC_analysis_parallel(pin);
+            } else {
+                dic_output = exact
+                                 ? ncorr::exact_matlab_DIC_analysis_sequential(dic_input, seeds, false)
+                                 : ncorr::matlab_DIC_analysis_sequential(dic_input, seeds, false);
+            }
         }
     } catch (const std::exception& e) {
         out.message = std::string("DIC analysis failed: ") + e.what();

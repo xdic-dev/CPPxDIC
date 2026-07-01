@@ -4,3 +4,6 @@
 [submodule "Tools/MultiDIC"]
 	path = Tools/MultiDIC
 	url = git@github.com:donatiendoumont/fingertip_3dreconstruction.git
+[submodule "Tools/cuNCorr"]
+	path = Tools/cuNCorr
+	url = git@github.com:xdic-dev/cuNCorr.git

@@ -14,6 +14,7 @@
 #include "utils.h"
 #include "matlab_functions.h"
 #include "logging.h"
+#include "dic/cuncorr_dic.h"
 #include <iostream>
 #include <opencv2/imgcodecs.hpp>
 #include <sstream>
@@ -1270,8 +1271,25 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     
     // Run DIC analysis (returns Lagrangian perspective in pixels)
     ncorr::DIC_analysis_output dic_output_raw;
-    
-    if (go_parallel) {
+
+    const bool use_cuncorr = (config_.dic_engine != "ncorr");
+    if (use_cuncorr) {
+        // cuNCorr engine: CUDA if a device is present, else its CPU backend (identical
+        // results). Produces the same raw Lagrangian/pixel DIC_analysis_output on the
+        // reduced grid, so the downstream .bin + StepE reconstruction is unchanged.
+        cppxdic::CuncorrDicConfig ccfg;
+        ccfg.scalefactor = scalefactor;
+        ccfg.subregion_radius = step_params.radius;
+        ccfg.num_threads = step_params.total_threads;
+        ccfg.seed_x = seed_point.pw[0];
+        ccfg.seed_y = seed_point.pw[1];
+        ccfg.seed_search = config_.cuncorr_seed_search;
+        ccfg.debug = config_.debug_mode;
+        cppxdic::CuncorrDicInfo cinfo;
+        LOG_INFO << "  Using cuNCorr DIC engine...";
+        dic_output_raw = cppxdic::run_cuncorr_dic(ncorr_images, roi, ccfg, &cinfo);
+        LOG_INFO << "  cuNCorr backend: " << cinfo.backend << (cinfo.cuda ? " (CUDA)" : " (CPU)");
+    } else if (go_parallel) {
         LOG_INFO << "  Using parallel DIC processing"
                   << (config_.ncorr_use_exact_matlab ? " (exact_matlab_*)" : " (matlab_*)")
                   << "...";

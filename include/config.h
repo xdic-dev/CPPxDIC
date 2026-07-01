@@ -161,6 +161,12 @@ public:
                // composition) instead of matlab_DIC_analysis_* (which has a chain-induced jump at
                // the first segment boundary).
 
+    // DIC engine backend: "cuncorr" runs the cuNCorr engine (CUDA if a device is present,
+    // else its CPU backend — numerically identical); "ncorr" uses the legacy CppNCorr path.
+    // cuNCorr is a different algorithm from CppNCorr, so switching changes the DIC numbers.
+    std::string dic_engine = "cuncorr";
+    int cuncorr_seed_search = 15;  // cuNCorr coarse seed search radius in pixels
+
     // Visualization: VTK export options
     std::string vtk_format = "ascii"; // VTK format: ascii|binary
     bool vtk_include_scalars = true;  // Include scalar data in VTK
