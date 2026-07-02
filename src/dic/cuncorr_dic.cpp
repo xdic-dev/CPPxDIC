@@ -19,7 +19,7 @@ using diff_t = ncorr::ROI2D::difference_type;
 
 /// ncorr grayscale Image2D ([0,1]) -> row-major 8-bit buffer for a cuncorr::ImageBuffer.
 std::vector<std::uint8_t> image_to_u8(const ncorr::Image2D& img, int& W, int& H) {
-    const ncorr::Array2D<double> gs = img.get_gs();  // (height, width), values in [0,1]
+    const ncorr::Array2D<double> gs = img.get_gs(); // (height, width), values in [0,1]
     H = static_cast<int>(gs.height());
     W = static_cast<int>(gs.width());
     std::vector<std::uint8_t> buf(static_cast<std::size_t>(W) * H);
@@ -38,12 +38,11 @@ std::vector<std::uint8_t> roi_to_u8(const ncorr::ROI2D& roi) {
     const int H = static_cast<int>(m.height()), W = static_cast<int>(m.width());
     std::vector<std::uint8_t> buf(static_cast<std::size_t>(W) * H);
     for (int r = 0; r < H; ++r)
-        for (int c = 0; c < W; ++c)
-            buf[static_cast<std::size_t>(r) * W + c] = m(r, c) ? 255 : 0;
+        for (int c = 0; c < W; ++c) buf[static_cast<std::size_t>(r) * W + c] = m(r, c) ? 255 : 0;
     return buf;
 }
 
-}  // namespace
+} // namespace
 
 bool cuncorr_cuda_available() {
     auto be = cuncorr::make_default_backend();
@@ -109,8 +108,8 @@ ncorr::DIC_analysis_output run_cuncorr_dic(const std::vector<ncorr::Image2D>& im
                 const std::size_t idx = static_cast<std::size_t>(gi) * rgW + gj;
                 const double v = res.v[idx], u = res.u[idx], cc = res.corrcoef[idx];
                 if (std::isnan(v) || std::isnan(u)) continue;
-                A_v(gi, gj) = v;   // v = row/y displacement (matches ncorr)
-                A_u(gi, gj) = u;   // u = col/x displacement
+                A_v(gi, gj) = v; // v = row/y displacement (matches ncorr)
+                A_u(gi, gj) = u; // u = col/x displacement
                 A_cc(gi, gj) = std::isnan(cc) ? 0.0 : cc;
                 A_vp(gi, gj) = true;
             }
@@ -123,4 +122,4 @@ ncorr::DIC_analysis_output run_cuncorr_dic(const std::vector<ncorr::Image2D>& im
     return ncorr::DIC_analysis_output(disps, ncorr::PERSPECTIVE::LAGRANGIAN, "pixels", 1.0);
 }
 
-}  // namespace cppxdic
+} // namespace cppxdic

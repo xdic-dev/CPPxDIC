@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-#include "ncorr.h"  // DIC_analysis_output, Image2D, ROI2D, Disp2D, PERSPECTIVE
+#include "ncorr.h" // DIC_analysis_output, Image2D, ROI2D, Disp2D, PERSPECTIVE
 
 namespace cppxdic {
 
@@ -35,8 +35,8 @@ struct CuncorrDicConfig {
 
 /// Which backend actually ran.
 struct CuncorrDicInfo {
-    std::string backend;  ///< e.g. "cpu" or "cuda:0 <name>"
-    bool cuda = false;    ///< true if a CUDA device executed the run
+    std::string backend; ///< e.g. "cpu" or "cuda:0 <name>"
+    bool cuda = false;   ///< true if a CUDA device executed the run
 };
 
 /// True if cuNCorr was built with CUDA and a device is present at runtime.
@@ -50,4 +50,4 @@ ncorr::DIC_analysis_output run_cuncorr_dic(const std::vector<ncorr::Image2D>& im
                                            const ncorr::ROI2D& roi, const CuncorrDicConfig& cfg,
                                            CuncorrDicInfo* info = nullptr);
 
-}  // namespace cppxdic
+} // namespace cppxdic

@@ -21,7 +21,9 @@
 #include "roi_manager.h"
 #include "parameters.h"
 #include "logging.h"
+#ifdef CPPXDIC_HAVE_CUNCORR
 #include "dic/cuncorr_dic.h"
+#endif
 
 #include <ncorr.h>
 #include <ncorr/frame_reader.h>
@@ -282,11 +284,11 @@ bool SingleDicWorkflow::track(const std::vector<cv::Mat>& frames, const cv::Mat&
 
     const bool go_parallel = cfg_.base.parallel_processing;
     const bool exact = cfg_.base.ncorr_use_exact_matlab;
-    const bool use_cuncorr = (cfg_.base.dic_engine != "ncorr");
 
     ncorr::DIC_analysis_output dic_output;
     try {
-        if (use_cuncorr) {
+#ifdef CPPXDIC_HAVE_CUNCORR
+        if (cfg_.base.dic_engine != "ncorr") {
             // cuNCorr engine (CUDA if present, else CPU — identical). Sequence mode: fixed
             // reference (frames[0]), each frame warm-started from the previous.
             cppxdic::CuncorrDicConfig ccfg;
@@ -307,7 +309,9 @@ bool SingleDicWorkflow::track(const std::vector<cv::Mat>& frames, const cv::Mat&
             dic_output = cppxdic::run_cuncorr_dic(imgs, roi, ccfg, &cinfo);
             LOG_INFO << "[singledic] cuNCorr backend: " << cinfo.backend
                      << (cinfo.cuda ? " (CUDA)" : " (CPU)");
-        } else {
+        } else
+#endif
+        {
             LOG_INFO << "[singledic] running " << (go_parallel ? "parallel" : "sequential")
                      << (exact ? " exact-matlab" : " matlab") << " (ncorr) DIC over "
                      << (imgs.size() - 1) << " frame(s), " << threads << " thread(s), seed=("

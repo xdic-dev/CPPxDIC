@@ -6,4 +6,4 @@
 	url = git@github.com:donatiendoumont/fingertip_3dreconstruction.git
 [submodule "Tools/cuNCorr"]
 	path = Tools/cuNCorr
-	url = git@github.com:xdic-dev/cuNCorr.git
+	url = https://github.com/xdic-dev/cuNCorr.git

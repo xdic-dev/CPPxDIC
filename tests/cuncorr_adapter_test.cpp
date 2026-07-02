@@ -8,7 +8,8 @@
  * depends on. CPU backend on this machine; on a GPU node it validates the CUDA path too
  * (cuNCorr's own cuda_parity_test guarantees CUDA==CPU).
  *
- * Build: cmake -DBUILD_CUNCORR_ADAPTER_TEST=ON ..  &&  cmake --build . --target cuncorr_adapter_test
+ * Build: cmake -DBUILD_CUNCORR_ADAPTER_TEST=ON ..  &&  cmake --build . --target
+ * cuncorr_adapter_test
  */
 
 #include <algorithm>
@@ -29,11 +30,11 @@ double median(std::vector<double> v) {
     std::sort(v.begin(), v.end());
     return v[v.size() / 2];
 }
-}  // namespace
+} // namespace
 
 int main() {
     const int H = 200, W = 200;
-    const double u0 = 0.6, v0 = -0.4;  // u = col/x disp, v = row/y disp
+    const double u0 = 0.6, v0 = -0.4; // u = col/x disp, v = row/y disp
 
     // Analytic shift: def(r,c) = tex(r - v0, c - u0) — exact, no interpolation error.
     ncorr::Array2D<double> ref(H, W), def(H, W);
@@ -68,7 +69,10 @@ int main() {
     std::vector<double> us, vs;
     for (int i = 0; i < ua.height(); ++i)
         for (int j = 0; j < ua.width(); ++j)
-            if (mask(i, j)) { us.push_back(ua(i, j)); vs.push_back(va(i, j)); }
+            if (mask(i, j)) {
+                us.push_back(ua(i, j));
+                vs.push_back(va(i, j));
+            }
 
     const double mu = median(us), mv = median(vs);
     std::printf("adapter: backend=%s perspective=%s units=%s grid=%lldx%lld points=%zu\n",

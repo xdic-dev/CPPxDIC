@@ -18,16 +18,25 @@ add_subdirectory(Tools/CppNCorr)
 # ----------------------------------------------------------------------------
 # cuNCorr — GPU/CPU DIC engine (cppxdic -> cuncorr; cuncorr bundles its own CppNCorr
 # for its standalone tests, disabled here since cppxdic already builds ncorr above).
-# Built as a standalone static lib `cuncorr`. The adapter in src/dic/cuncorr_dic.cpp
-# runs cuNCorr (CUDA if a device is present, else its CPU backend — identical results)
-# and packages the output as ncorr::DIC_analysis_output for the existing pipeline.
+# OPTIONAL: cuNCorr is a private submodule. When present it is built as a standalone
+# static lib `cuncorr` and the adapter (src/dic/cuncorr_dic.cpp) is compiled in; when
+# absent (e.g. a CI runner without access to the private repo) the build falls back to
+# the ncorr-only path. Guarded so a checkout without Tools/cuNCorr still configures.
 #   Configure with -DCUNCORR_BACKEND=CUDA on a GPU node (default CPU everywhere).
 # ----------------------------------------------------------------------------
-set(CUNCORR_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
-set(CUNCORR_BUILD_APPS     OFF CACHE BOOL "" FORCE)
-set(CUNCORR_BUILD_CPPNCORR OFF CACHE BOOL "" FORCE)  # cppxdic provides the ncorr target
-add_subdirectory(Tools/cuNCorr)
-include_directories(Tools/cuNCorr/include)
+option(CPPXDIC_USE_CUNCORR "Use the cuNCorr DIC engine when its submodule is present" ON)
+set(CPPXDIC_HAVE_CUNCORR OFF)
+if(CPPXDIC_USE_CUNCORR AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/Tools/cuNCorr/CMakeLists.txt)
+    set(CUNCORR_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+    set(CUNCORR_BUILD_APPS     OFF CACHE BOOL "" FORCE)
+    set(CUNCORR_BUILD_CPPNCORR OFF CACHE BOOL "" FORCE)  # cppxdic provides the ncorr target
+    add_subdirectory(Tools/cuNCorr)
+    include_directories(Tools/cuNCorr/include)
+    set(CPPXDIC_HAVE_CUNCORR ON)
+    message(STATUS "cuNCorr DIC engine: ENABLED")
+else()
+    message(STATUS "cuNCorr DIC engine: disabled (submodule absent or CPPXDIC_USE_CUNCORR=OFF) - ncorr only")
+endif()
 
 # Lightweight, dependency-free logging facility (see include/logging.h). Built as
 # a small static library and linked into every cppxdic target via link_libraries()
@@ -58,7 +67,6 @@ add_executable(cppxdic
     src/data_serializer.cpp
     src/matlab_functions.cpp
     src/input/image_folder_reader.cpp
-    src/dic/cuncorr_dic.cpp
 )
 
 # ----------------------------------------------------------------------------
@@ -104,8 +112,12 @@ target_link_libraries(cppxdic ${OpenCV_LIBS})
 # Add ncorr library
 target_link_libraries(cppxdic ncorr)
 
-# Add cuNCorr DIC engine
-target_link_libraries(cppxdic cuncorr)
+# Add cuNCorr DIC engine (only when the submodule is present)
+if(CPPXDIC_HAVE_CUNCORR)
+    target_sources(cppxdic PRIVATE src/dic/cuncorr_dic.cpp)
+    target_compile_definitions(cppxdic PRIVATE CPPXDIC_HAVE_CUNCORR)
+    target_link_libraries(cppxdic cuncorr)
+endif()
 
 # Add OpenCV libraries explicitly (following ncorr pattern)
 find_library(OPENCV_LIBRARY1 NAMES opencv_core)
@@ -407,13 +419,17 @@ if(BUILD_SINGLEDIC)
         src/data_serializer.cpp
         src/matlab_functions.cpp
         src/input/image_folder_reader.cpp
-        src/dic/cuncorr_dic.cpp
     )
-    target_include_directories(singledic PRIVATE include Tools/CppNCorr/include Tools/cuNCorr/include)
+    target_include_directories(singledic PRIVATE include Tools/CppNCorr/include)
     target_compile_definitions(singledic PRIVATE XDIC_MODE_CAMERAPAIRS)
+    if(CPPXDIC_HAVE_CUNCORR)
+        target_sources(singledic PRIVATE src/dic/cuncorr_dic.cpp)
+        target_include_directories(singledic PRIVATE Tools/cuNCorr/include)
+        target_compile_definitions(singledic PRIVATE CPPXDIC_HAVE_CUNCORR)
+        target_link_libraries(singledic cuncorr)
+    endif()
     target_link_libraries(singledic
         ncorr
-        cuncorr
         ${OpenCV_LIBS}
         ${OPENCV_LIBRARY1} ${OPENCV_LIBRARY2} ${OPENCV_LIBRARY3} ${OPENCV_LIBRARY4} ${OPENCV_LIBRARY5}
         ${FFTW_LIBRARY} ${MATIO_LIBRARY}
@@ -562,7 +578,7 @@ endif()
 #   cmake -DBUILD_CUNCORR_ADAPTER_TEST=ON .. && cmake --build . --target cuncorr_adapter_test
 # ----------------------------------------------------------------------------
 option(BUILD_CUNCORR_ADAPTER_TEST "Build the cuNCorr->ncorr adapter smoke test" OFF)
-if(BUILD_CUNCORR_ADAPTER_TEST)
+if(BUILD_CUNCORR_ADAPTER_TEST AND CPPXDIC_HAVE_CUNCORR)
     add_executable(cuncorr_adapter_test tests/cuncorr_adapter_test.cpp src/dic/cuncorr_dic.cpp)
     target_include_directories(cuncorr_adapter_test PRIVATE include Tools/CppNCorr/include Tools/cuNCorr/include)
     target_link_libraries(cuncorr_adapter_test ncorr cuncorr
