@@ -35,26 +35,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Init CppNCorr submodule (compiled in-tree)
-        # Only CppNCorr is built. Tools/MultiDIC is a read-only MATLAB reference that
-        # lives in a separate private repo the CI runner cannot clone, so we do NOT
-        # recurse all submodules — that would fail the checkout. CppNCorr is under the
-        # same org and uses an https URL, so the persisted token can fetch it.
-        run: git submodule update --init Tools/CppNCorr
+      - name: Init submodules (CppNCorr + cuNCorr, compiled in-tree)
+        # CppNCorr and cuNCorr are public repos under the same org (https URLs), so the
+        # persisted token fetches them. Tools/MultiDIC is a separate private repo the CI
+        # runner cannot clone, so we do NOT recurse all submodules (that would fail the
+        # checkout) — we name only what cppxdic builds. Non-recursive: cuNCorr's own nested
+        # CppNCorr is not needed here (cppxdic builds ncorr; CUNCORR_BUILD_CPPNCORR=OFF).
+        run: git submodule update --init Tools/CppNCorr Tools/cuNCorr
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ${{ env.APT_DEPS }}
-      - name: Configure (camera-pairs, tests off)
+      - name: Configure (camera-pairs, tests off, cuNCorr adapter test on)
         run: >-
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Release
           -DXDIC_MODE=camerapairs
           -DBUILD_TESTING=OFF
-      - name: Build cppxdic
-        run: cmake --build build -j"$(nproc)" --target cppxdic
+          -DBUILD_CUNCORR_ADAPTER_TEST=ON
+      - name: Build cppxdic (+ cuNCorr integration)
+        run: cmake --build build -j"$(nproc)" --target cppxdic cuncorr_adapter_test
         # NOTE: cppxdic links the concurrently-developed CppNCorr submodule. If the build
         # fails inside Tools/CppNCorr/, that is a submodule issue, not a CPPxDIC regression.
+      - name: Verify the cuNCorr -> ncorr adapter (synthetic recovery)
+        # Exercises run_cuncorr_dic end to end: builds a known-translation frame pair,
+        # runs the cuNCorr engine (CPU backend on CI), and checks the packaged
+        # ncorr::DIC_analysis_output recovers it — proving the adapter/grid mapping.
+        run: ./build/cuncorr_adapter_test
 
   test:
     name: test (unit + integration on ohtcfrp via ctest)
@@ -69,11 +76,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ${{ env.APT_DEPS }}
       - name: Configure with tests
+        # ncorr-only: the ohtcfrp e2e guard uses golden statistics tuned for the CppNCorr
+        # engine. cuNCorr is a different algorithm (different numbers), so keep it off here;
+        # the build job compiles + adapter-tests the cuNCorr integration separately.
         run: >-
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Release
           -DXDIC_MODE=camerapairs
           -DBUILD_TESTING=ON
+          -DCPPXDIC_USE_CUNCORR=OFF
       - name: Build test suite
         # Build only the cppxdic_core test library + test executables (not the full cppxdic
         # binary) so the test job stays fast and is independent of the heavy main target.
@@ -143,11 +154,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ${{ env.APT_DEPS }} gcovr
       - name: Configure (coverage instrumentation)
+        # ncorr-only (see the test job): coverage tracks the CppNCorr golden path.
         run: >-
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Debug
           -DXDIC_MODE=camerapairs
           -DBUILD_TESTING=ON
+          -DCPPXDIC_USE_CUNCORR=OFF
           -DCMAKE_CXX_FLAGS="--coverage -O0 -g"
           -DCMAKE_C_FLAGS="--coverage -O0 -g"
           -DCMAKE_EXE_LINKER_FLAGS="--coverage"
