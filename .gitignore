@@ -10,6 +10,8 @@ docs/*.md
 !docs/user_guide.md
 # Keep the infrastructure setup walkthrough (tracked despite docs/*.md ignore).
 !docs/PROJECT_INFRA_SETUP.md
+# Keep the refactoring round-2 plan (tracked despite docs/*.md ignore).
+!docs/refactoring_plan.md
 # Doxygen-generated API docs output (built in CI, not committed).
 docs/doxygen/
 tests/bin/
