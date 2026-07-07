@@ -210,6 +210,39 @@ NOTE: all pre-2026-07-07 cuncorr runs have valid 2D tracking but garbage
 cam-def/3D data (bug 4). The bit-comparison results (Step-D tracking) are
 unaffected.
 
+## Definitive pipeline validation (2026-07-07/08)
+
+**t12 + t25 full pipeline (`--stages all`, jobs 7988959-62): ALL PASS, rc=0**
+| run | wall (D+E+F) |
+|---|---|
+| t12 cuncorr GPU | 35 min |
+| t25 cuncorr GPU | 38 min |
+| t12 ncorr CPU-32t | 63 min |
+| t25 ncorr CPU-32t | 58 min |
+Together with t7 (r2), all three trials complete end-to-end on both engines.
+
+**MATLAB Step-D interop test (`t7_matlabD_ef_r1`, job 7989024):** a dic_path
+seeded with MATLAB's OWN Step-D outputs (pair results v5/struct-wrapped, ncorr
+files, MATCHING, dic_info — reader handles the MATLAB layout natively), then
+`--stages e,f`. Completed in 74 s. Comparison vs MATLAB's own E/F reference
+(job 7991130):
+- **Step E is numerically EXACT**: stitched point count 6,730 = 6,730,
+  same stitch order, `Points3D` max |Δ| = 3.2e-14 (machine epsilon),
+  `corrComb` max |Δ| = 0. Faces 12,399 vs 12,371 (+0.23%, boundary-zipping
+  heuristic tail). Remaining flagged diffs are storage-layout echoes, not
+  computation: the DIC2Dinfo input-echo block and the DLT `calibration`
+  matrix layout (proven benign by the exact Points3D).
+- **Step F** (complete per-field totals, job 7991553): per-POINT quantities
+  fully agree — `Points3D` (post temporal filtering) max |Δ| = 0.043 and
+  `Disp` (DispVec/DispMgn) max |Δ| = 0.048, both with ZERO elements above 0.1;
+  `corrComb` max |Δ| = 0. Per-FACE fields (Deform strains, FaceCentroids,
+  FaceIsoInd) are shape-incomparable element-wise because the face sets differ
+  by 0.23% (12,399 vs 12,371 — the zipping tail), not because values disagree.
+  Caveat: the DIC2Dinfo echo block inside both E and F outputs differs from
+  MATLAB's in storage layout/ordering (813,808 elements, max 254) — it is a
+  copy of the INPUTS, not a computation product, but a MATLAB consumer reading
+  DIC2Dinfo out of our files should be checked once against expectations.
+
 ## Build fixes needed (committed to the working tree)
 - `CMakeLists.txt`: `CUDA_SEPARABLE_COMPILATION OFF` on the cuncorr target
   (non-CUDA executables can't device-link an rdc static lib; CMake 3.22 can't
