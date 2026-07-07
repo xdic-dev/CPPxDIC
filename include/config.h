@@ -156,7 +156,11 @@ public:
     std::string ncorr_roi_update_mode = "none";              // ROI update mode
     std::string ncorr_accumulation_mode = "none";            // Accumulation mode
     bool ncorr_save_disps_steps = false;                     // Save intermediate disps
-    bool ncorr_perspective_interp = false;                   // Perspective interpolation
+    bool ncorr_perspective_interp = false;  // Eulerian perspective-change interpolation:
+                                            // false = bicubic CUBIC_KEYS (historical workaround for
+                                            // the FFT-bcoef border bias, kept as default);
+                                            // true = biquintic B-spline (MATLAB ncorr behavior; safe
+                                            // since the recursive bcoef filter fix)
     std::string ncorr_units = "mm";                          // Units string
     bool ncorr_seeds_are_optimized = true;                   // Optimized seeds
     double ncorr_cutoff_max_diffnorm = 1e-5;                 // Max diff norm cutoff

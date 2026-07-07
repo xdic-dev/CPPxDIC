@@ -1348,11 +1348,17 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     // Post-process with both perspectives
     LOG_INFO << "Post-processing displacements...";
     
-    // Step 1: Convert to Eulerian perspective with sign inversion (still in pixels)
+    // Step 1: Convert to Eulerian perspective with sign inversion (still in pixels).
+    // Interp choice: bicubic (CUBIC_KEYS) is the historical workaround from when
+    // the biquintic B-spline coefficients used FFT circular deconvolution and
+    // carried a border bias (bicubic needs no prefilter, so it was immune).
+    // That bias was fixed in CppNCorr (Unser recursive filter, mirror BCs), so
+    // biquintic — what MATLAB ncorr uses here — is safe again; the previously
+    // dangling `perspective_interp` ncorr-params tag now selects it.
     ncorr::DIC_analysis_output dic_eulerian_pixels = ncorr::change_perspective_with_inversion(
         dic_output_raw,
-        ncorr::INTERP::CUBIC_KEYS  // Use cubic interpolation for perspective change
-    );
+        config_.ncorr_perspective_interp ? ncorr::INTERP::QUINTIC_BSPLINE_PRECOMPUTE
+                                         : ncorr::INTERP::CUBIC_KEYS);
     
     // Step 3: Apply units to BOTH perspectives
     ncorr::DIC_analysis_output dic_lagrangian = ncorr::set_units(dic_output_raw, "mm", config_.units_per_pixel);
