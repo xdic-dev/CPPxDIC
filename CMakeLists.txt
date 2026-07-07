@@ -32,6 +32,15 @@ if(CPPXDIC_USE_CUNCORR AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/Tools/cuNCorr/CMak
     set(CUNCORR_BUILD_CPPNCORR OFF CACHE BOOL "" FORCE)  # cppxdic provides the ncorr target
     add_subdirectory(Tools/cuNCorr)
     include_directories(Tools/cuNCorr/include)
+    if(CUNCORR_BACKEND STREQUAL "CUDA")
+        # libcuncorr.a is consumed by executables that have no CUDA language
+        # enabled (cppxdic, singledic), so they cannot generate the device-link
+        # step that separable compilation requires (and CMake < 3.23 cannot
+        # resolve device symbols on static libs). cuNCorr's kernels are
+        # TU-local (device code lives in per-TU headers, hd.h), so rdc is
+        # unnecessary — turn it off to make libcuncorr.a self-contained.
+        set_target_properties(cuncorr PROPERTIES CUDA_SEPARABLE_COMPILATION OFF)
+    endif()
     set(CPPXDIC_HAVE_CUNCORR ON)
     message(STATUS "cuNCorr DIC engine: ENABLED")
 else()

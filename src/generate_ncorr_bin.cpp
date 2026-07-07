@@ -48,9 +48,20 @@ static matvar_t* getField(matvar_t* parent, const char* name) {
 // HDF5 helpers for reading object reference arrays (MATLAB cell arrays)
 // ---------------------------------------------------------------------------
 
+// Dereference an object reference with the 1.10+ signature regardless of the
+// library's default API mapping (Ubuntu's hdf5 1.10 maps the H5Rdereference
+// macro to the old 3-arg H5Rdereference1, which does not compile here).
+static hid_t h5Deref(hid_t file_id, const hobj_ref_t& ref) {
+#if H5_VERSION_GE(1, 10, 0)
+    return H5Rdereference2(file_id, H5P_DEFAULT, H5R_OBJECT, &ref);
+#else
+    return H5Rdereference(file_id, H5R_OBJECT, &ref);
+#endif
+}
+
 // Read a 2D double dataset from an HDF5 object id (column-major → Array2D row-major)
 static Array2D<double> h5ReadDoubleArray2D(hid_t file_id, const hobj_ref_t& ref) {
-    hid_t obj_id = H5Rdereference(file_id, H5P_DEFAULT, H5R_OBJECT, &ref);
+    hid_t obj_id = h5Deref(file_id, ref);
     if (obj_id < 0) return {};
 
     hid_t space = H5Dget_space(obj_id);
@@ -87,7 +98,7 @@ static Array2D<double> h5ReadDoubleArray2D(hid_t file_id, const hobj_ref_t& ref)
 
 // Read a 2D uint8/logical mask from an HDF5 object ref → Array2D<bool>
 static Array2D<bool> h5ReadMask2D(hid_t file_id, const hobj_ref_t& ref) {
-    hid_t obj_id = H5Rdereference(file_id, H5P_DEFAULT, H5R_OBJECT, &ref);
+    hid_t obj_id = h5Deref(file_id, ref);
     if (obj_id < 0) return {};
 
     hid_t space = H5Dget_space(obj_id);
