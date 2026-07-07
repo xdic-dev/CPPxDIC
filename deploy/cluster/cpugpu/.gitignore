@@ -1,0 +1,3 @@
+logs/
+results/*/run.log
+results/matlab_comparison/compare_dic

@@ -1,0 +1,16 @@
+name=t25_cuncorr_gpu_r1
+job_id=7863695
+node=mb-mil110.cism.ucl.ac.be
+rc=0
+status=ok
+stepd_ok=1
+engine=cuncorr
+engine_ok=1
+cuda_used=0
+backend_line=NA
+threads_requested=8
+threads_observed=NA
+wall_s=1083
+params: trial=25 engine=cuncorr gpu=1 threads=8 rep=1 stages=d
+cpus_per_task=8
+maxrss_kb=3698436

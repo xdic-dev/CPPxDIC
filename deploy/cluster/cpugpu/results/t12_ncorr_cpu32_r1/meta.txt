@@ -1,0 +1,16 @@
+name=t12_ncorr_cpu32_r1
+job_id=7863691
+node=mb-mil008.cism.ucl.ac.be
+rc=0
+status=ok
+stepd_ok=1
+engine=ncorr
+engine_ok=1
+cuda_used=0
+backend_line=NA
+threads_requested=32
+threads_observed=32
+wall_s=3832
+params: trial=12 engine=ncorr gpu=0 threads=32 rep=1 stages=d
+cpus_per_task=32
+maxrss_kb=56345692

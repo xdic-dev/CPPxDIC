@@ -1,0 +1,16 @@
+name=t12_cuncorr_cpu8_r1
+job_id=7863698
+node=mb-rom204.cism.ucl.ac.be
+rc=0
+status=ok
+stepd_ok=1
+engine=cuncorr
+engine_ok=1
+cuda_used=0
+backend_line=cuNCorr backend: cpu (CPU)
+threads_requested=8
+threads_observed=NA
+wall_s=5791
+params: trial=12 engine=cuncorr gpu=0 threads=8 rep=1 stages=d
+cpus_per_task=8
+maxrss_kb=5908724

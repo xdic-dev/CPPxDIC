@@ -1,0 +1,12 @@
+===== MATLAB vs E4 — C_1_C_2
+POINTS: A=3651 B=3646 matched=3646 A-only/unkeyed=5 B-only=0
+POINTS coords: compared=2187600 diff=2116688 nanMis=52114 max=4.859666e+01 (cell 115, row 2103) >1e-12:2114024 >1e-9:2109578 >1e-6:2109507 >1e-3:2040048 >1e-1:289646
+POINTS spatial (grid spacing 11): boundary points overall 207/3646 (6%); rows with maxdiff>1px: 216, boundary 49 (23%); rows maxdiff<0.1px: 1328, boundary 16 (1%)
+POINTS spatial depth2: boundary(<=2 cells) 415/3646 (11%); rows maxdiff>0.1px: 2318 of which boundary2 343 (15%); max diff among INTERIOR rows: 48.597 px
+POINTS corrcoef: diff=754179 max=1.400284e+00 >1e-12:750533 >1e-9:750533 >1e-6:750529 >1e-3:745528 >1e-1:146254
+===== MATLAB vs E4 — C_4_C_3
+POINTS: A=3079 B=3080 matched=3078 A-only/unkeyed=1 B-only=2
+POINTS coords: compared=1846800 diff=1838858 nanMis=6598 max=9.970383e+00 (cell 62, row 3031) >1e-12:1836637 >1e-9:1832878 >1e-6:1832817 >1e-3:1767334 >1e-1:165096
+POINTS spatial (grid spacing 11): boundary points overall 197/3078 (6%); rows with maxdiff>1px: 51, boundary 23 (45%); rows maxdiff<0.1px: 1398, boundary 18 (1%)
+POINTS spatial depth2: boundary(<=2 cells) 390/3078 (13%); rows maxdiff>0.1px: 1680 of which boundary2 329 (20%); max diff among INTERIOR rows: 3.862 px
+POINTS corrcoef: diff=593018 max=1.143872e+00 >1e-12:589940 >1e-9:589940 >1e-6:589938 >1e-3:582947 >1e-1:72454

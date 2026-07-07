@@ -1,0 +1,231 @@
+
+############ TRIAL 7 ############
+-- [GPU determinism] cuncorr gpu r1 vs r2
+==================================================================
+A = t7_cuncorr_gpu_r1
+B = t7_cuncorr_gpu_r2
+  IDENTICAL (cmp)   : S09/coating/007/loading/MATCHING2005_pair1.bin
+  IDENTICAL (h5diff): S09/coating/007/loading/MATCHING2005_pair1.mat
+  IDENTICAL (cmp)   : S09/coating/007/loading/MATCHING2005_pair2.bin
+  IDENTICAL (h5diff): S09/coating/007/loading/MATCHING2005_pair2.mat
+  DIFFERS  (h5diff): S09/coating/007/loading/dic_info_data_target_pair1.mat
+  DIFFERS  (h5diff): S09/coating/007/loading/dic_info_data_target_pair2.mat
+  IDENTICAL (h5diff): S09/coating/007/loading/myDIC2DpairResults_C_1_C_2.mat
+  IDENTICAL (h5diff): S09/coating/007/loading/myDIC2DpairResults_C_4_C_3.mat
+  IDENTICAL (cmp)   : S09/coating/007/loading/ncorr1.bin
+  IDENTICAL (h5diff): S09/coating/007/loading/ncorr1.mat
+  IDENTICAL (cmp)   : S09/coating/007/loading/ncorr12.bin
+  IDENTICAL (h5diff): S09/coating/007/loading/ncorr12.mat
+  IDENTICAL (cmp)   : S09/coating/007/loading/ncorr2.bin
+  IDENTICAL (h5diff): S09/coating/007/loading/ncorr2.mat
+  IDENTICAL (cmp)   : S09/coating/007/loading/ncorr3.bin
+  IDENTICAL (h5diff): S09/coating/007/loading/ncorr3.mat
+  IDENTICAL (cmp)   : S09/coating/007/loading/ncorr4.bin
+  IDENTICAL (h5diff): S09/coating/007/loading/ncorr4.mat
+  IDENTICAL (cmp)   : S09/coating/007/loading/ncorr43.bin
+  IDENTICAL (h5diff): S09/coating/007/loading/ncorr43.mat
+  ---- summary: identical=18 differing=2 missing=0
+-- [CPU vs GPU, same engine] cuncorr cpu vs cuncorr gpu
+==================================================================
+A = t7_cuncorr_cpu8_r1
+B = t7_cuncorr_gpu_r1
+  DIFFERS  (cmp)    : S09/coating/007/loading/MATCHING2005_pair1.bin
+  DIFFERS  (h5diff: 3530 differences found): S09/coating/007/loading/MATCHING2005_pair1.mat
+  DIFFERS  (cmp)    : S09/coating/007/loading/MATCHING2005_pair2.bin
+  DIFFERS  (h5diff: 2954 differences found): S09/coating/007/loading/MATCHING2005_pair2.mat
+  DIFFERS  (h5diff): S09/coating/007/loading/dic_info_data_target_pair1.mat
+  DIFFERS  (h5diff): S09/coating/007/loading/dic_info_data_target_pair2.mat
+  DIFFERS  (h5diff: 1657 differences found): S09/coating/007/loading/myDIC2DpairResults_C_1_C_2.mat
+  DIFFERS  (h5diff: 1359 differences found): S09/coating/007/loading/myDIC2DpairResults_C_4_C_3.mat
+  DIFFERS  (cmp)    : S09/coating/007/loading/ncorr1.bin
+  DIFFERS  (h5diff: 2841 differences found): S09/coating/007/loading/ncorr1.mat
+  IDENTICAL (cmp)   : S09/coating/007/loading/ncorr12.bin
+  IDENTICAL (h5diff): S09/coating/007/loading/ncorr12.mat
+  IDENTICAL (cmp)   : S09/coating/007/loading/ncorr2.bin
+  IDENTICAL (h5diff): S09/coating/007/loading/ncorr2.mat
+  IDENTICAL (cmp)   : S09/coating/007/loading/ncorr3.bin
+  IDENTICAL (h5diff): S09/coating/007/loading/ncorr3.mat
+  DIFFERS  (cmp)    : S09/coating/007/loading/ncorr4.bin
+  DIFFERS  (h5diff: 2578 differences found): S09/coating/007/loading/ncorr4.mat
+  IDENTICAL (cmp)   : S09/coating/007/loading/ncorr43.bin
+  IDENTICAL (h5diff): S09/coating/007/loading/ncorr43.mat
+  ---- summary: identical=8 differing=12 missing=0
+-- [engine] ncorr cpu32 vs cuncorr gpu
+==================================================================
+A = t7_ncorr_cpu32_r1
+B = t7_cuncorr_gpu_r1
+  DIFFERS  (cmp)    : S09/coating/007/loading/MATCHING2005_pair1.bin
+  DIFFERS  (h5diff: 3672 differences found): S09/coating/007/loading/MATCHING2005_pair1.mat
+  DIFFERS  (cmp)    : S09/coating/007/loading/MATCHING2005_pair2.bin
+  DIFFERS  (h5diff: 3068 differences found): S09/coating/007/loading/MATCHING2005_pair2.mat
+  DIFFERS  (h5diff): S09/coating/007/loading/dic_info_data_target_pair1.mat
+  DIFFERS  (h5diff): S09/coating/007/loading/dic_info_data_target_pair2.mat
+  DIFFERS  (h5diff: 9 differences found): S09/coating/007/loading/myDIC2DpairResults_C_1_C_2.mat
+  DIFFERS  (h5diff: 3 differences found): S09/coating/007/loading/myDIC2DpairResults_C_4_C_3.mat
+  DIFFERS  (cmp)    : S09/coating/007/loading/ncorr1.bin
+  DIFFERS  (h5diff: 3583 differences found): S09/coating/007/loading/ncorr1.mat
+  DIFFERS  (cmp)    : S09/coating/007/loading/ncorr12.bin
+  DIFFERS  (h5diff: 3646 differences found): S09/coating/007/loading/ncorr12.mat
+  DIFFERS  (cmp)    : S09/coating/007/loading/ncorr2.bin
+  DIFFERS  (h5diff: 2969 differences found): S09/coating/007/loading/ncorr2.mat
+  DIFFERS  (cmp)    : S09/coating/007/loading/ncorr3.bin
+  DIFFERS  (h5diff: 2795 differences found): S09/coating/007/loading/ncorr3.mat
+  DIFFERS  (cmp)    : S09/coating/007/loading/ncorr4.bin
+  DIFFERS  (h5diff: 3072 differences found): S09/coating/007/loading/ncorr4.mat
+  DIFFERS  (cmp)    : S09/coating/007/loading/ncorr43.bin
+  DIFFERS  (h5diff: 3080 differences found): S09/coating/007/loading/ncorr43.mat
+  ---- summary: identical=0 differing=20 missing=0
+
+############ TRIAL 12 ############
+-- [GPU determinism] cuncorr gpu r1 vs r2
+==================================================================
+A = t12_cuncorr_gpu_r1
+B = t12_cuncorr_gpu_r2
+  IDENTICAL (cmp)   : S09/coating/012/loading/MATCHING2005_pair1.bin
+  IDENTICAL (h5diff): S09/coating/012/loading/MATCHING2005_pair1.mat
+  IDENTICAL (cmp)   : S09/coating/012/loading/MATCHING2005_pair2.bin
+  IDENTICAL (h5diff): S09/coating/012/loading/MATCHING2005_pair2.mat
+  DIFFERS  (h5diff): S09/coating/012/loading/dic_info_data_target_pair1.mat
+  DIFFERS  (h5diff): S09/coating/012/loading/dic_info_data_target_pair2.mat
+  IDENTICAL (h5diff): S09/coating/012/loading/myDIC2DpairResults_C_1_C_2.mat
+  IDENTICAL (h5diff): S09/coating/012/loading/myDIC2DpairResults_C_4_C_3.mat
+  IDENTICAL (cmp)   : S09/coating/012/loading/ncorr1.bin
+  IDENTICAL (h5diff): S09/coating/012/loading/ncorr1.mat
+  IDENTICAL (cmp)   : S09/coating/012/loading/ncorr12.bin
+  IDENTICAL (h5diff): S09/coating/012/loading/ncorr12.mat
+  IDENTICAL (cmp)   : S09/coating/012/loading/ncorr2.bin
+  IDENTICAL (h5diff): S09/coating/012/loading/ncorr2.mat
+  IDENTICAL (cmp)   : S09/coating/012/loading/ncorr3.bin
+  IDENTICAL (h5diff): S09/coating/012/loading/ncorr3.mat
+  IDENTICAL (cmp)   : S09/coating/012/loading/ncorr4.bin
+  IDENTICAL (h5diff): S09/coating/012/loading/ncorr4.mat
+  IDENTICAL (cmp)   : S09/coating/012/loading/ncorr43.bin
+  IDENTICAL (h5diff): S09/coating/012/loading/ncorr43.mat
+  ---- summary: identical=18 differing=2 missing=0
+-- [CPU vs GPU, same engine] cuncorr cpu vs cuncorr gpu
+==================================================================
+A = t12_cuncorr_cpu8_r1
+B = t12_cuncorr_gpu_r1
+  DIFFERS  (cmp)    : S09/coating/012/loading/MATCHING2005_pair1.bin
+  DIFFERS  (h5diff: 3470 differences found): S09/coating/012/loading/MATCHING2005_pair1.mat
+  DIFFERS  (cmp)    : S09/coating/012/loading/MATCHING2005_pair2.bin
+  DIFFERS  (h5diff: 2938 differences found): S09/coating/012/loading/MATCHING2005_pair2.mat
+  DIFFERS  (h5diff): S09/coating/012/loading/dic_info_data_target_pair1.mat
+  DIFFERS  (h5diff): S09/coating/012/loading/dic_info_data_target_pair2.mat
+  DIFFERS  (h5diff: 1733 differences found): S09/coating/012/loading/myDIC2DpairResults_C_1_C_2.mat
+  DIFFERS  (h5diff: 1187 differences found): S09/coating/012/loading/myDIC2DpairResults_C_4_C_3.mat
+  DIFFERS  (cmp)    : S09/coating/012/loading/ncorr1.bin
+  DIFFERS  (h5diff: 3006 differences found): S09/coating/012/loading/ncorr1.mat
+  IDENTICAL (cmp)   : S09/coating/012/loading/ncorr12.bin
+  IDENTICAL (h5diff): S09/coating/012/loading/ncorr12.mat
+  IDENTICAL (cmp)   : S09/coating/012/loading/ncorr2.bin
+  IDENTICAL (h5diff): S09/coating/012/loading/ncorr2.mat
+  IDENTICAL (cmp)   : S09/coating/012/loading/ncorr3.bin
+  IDENTICAL (h5diff): S09/coating/012/loading/ncorr3.mat
+  DIFFERS  (cmp)    : S09/coating/012/loading/ncorr4.bin
+  DIFFERS  (h5diff: 2667 differences found): S09/coating/012/loading/ncorr4.mat
+  IDENTICAL (cmp)   : S09/coating/012/loading/ncorr43.bin
+  IDENTICAL (h5diff): S09/coating/012/loading/ncorr43.mat
+  ---- summary: identical=8 differing=12 missing=0
+-- [engine] ncorr cpu32 vs cuncorr gpu
+==================================================================
+A = t12_ncorr_cpu32_r1
+B = t12_cuncorr_gpu_r1
+  DIFFERS  (cmp)    : S09/coating/012/loading/MATCHING2005_pair1.bin
+  DIFFERS  (h5diff: 3655 differences found): S09/coating/012/loading/MATCHING2005_pair1.mat
+  DIFFERS  (cmp)    : S09/coating/012/loading/MATCHING2005_pair2.bin
+  DIFFERS  (h5diff: 3063 differences found): S09/coating/012/loading/MATCHING2005_pair2.mat
+  DIFFERS  (h5diff): S09/coating/012/loading/dic_info_data_target_pair1.mat
+  DIFFERS  (h5diff): S09/coating/012/loading/dic_info_data_target_pair2.mat
+  DIFFERS  (h5diff: 10 differences found): S09/coating/012/loading/myDIC2DpairResults_C_1_C_2.mat
+  DIFFERS  (h5diff: 9 differences found): S09/coating/012/loading/myDIC2DpairResults_C_4_C_3.mat
+  DIFFERS  (cmp)    : S09/coating/012/loading/ncorr1.bin
+  DIFFERS  (h5diff: 3669 differences found): S09/coating/012/loading/ncorr1.mat
+  DIFFERS  (cmp)    : S09/coating/012/loading/ncorr12.bin
+  DIFFERS  (h5diff: 3732 differences found): S09/coating/012/loading/ncorr12.mat
+  DIFFERS  (cmp)    : S09/coating/012/loading/ncorr2.bin
+  DIFFERS  (h5diff: 3058 differences found): S09/coating/012/loading/ncorr2.mat
+  DIFFERS  (cmp)    : S09/coating/012/loading/ncorr3.bin
+  DIFFERS  (h5diff: 2740 differences found): S09/coating/012/loading/ncorr3.mat
+  DIFFERS  (cmp)    : S09/coating/012/loading/ncorr4.bin
+  DIFFERS  (h5diff: 3014 differences found): S09/coating/012/loading/ncorr4.mat
+  DIFFERS  (cmp)    : S09/coating/012/loading/ncorr43.bin
+  DIFFERS  (h5diff: 3019 differences found): S09/coating/012/loading/ncorr43.mat
+  ---- summary: identical=0 differing=20 missing=0
+
+############ TRIAL 25 ############
+-- [GPU determinism] cuncorr gpu r1 vs r2
+==================================================================
+A = t25_cuncorr_gpu_r1
+B = t25_cuncorr_gpu_r2
+  IDENTICAL (cmp)   : S09/coating/025/loading/MATCHING2005_pair1.bin
+  IDENTICAL (h5diff): S09/coating/025/loading/MATCHING2005_pair1.mat
+  IDENTICAL (cmp)   : S09/coating/025/loading/MATCHING2005_pair2.bin
+  IDENTICAL (h5diff): S09/coating/025/loading/MATCHING2005_pair2.mat
+  DIFFERS  (h5diff): S09/coating/025/loading/dic_info_data_target_pair1.mat
+  DIFFERS  (h5diff): S09/coating/025/loading/dic_info_data_target_pair2.mat
+  IDENTICAL (h5diff): S09/coating/025/loading/myDIC2DpairResults_C_1_C_2.mat
+  IDENTICAL (h5diff): S09/coating/025/loading/myDIC2DpairResults_C_4_C_3.mat
+  IDENTICAL (cmp)   : S09/coating/025/loading/ncorr1.bin
+  IDENTICAL (h5diff): S09/coating/025/loading/ncorr1.mat
+  IDENTICAL (cmp)   : S09/coating/025/loading/ncorr12.bin
+  IDENTICAL (h5diff): S09/coating/025/loading/ncorr12.mat
+  IDENTICAL (cmp)   : S09/coating/025/loading/ncorr2.bin
+  IDENTICAL (h5diff): S09/coating/025/loading/ncorr2.mat
+  IDENTICAL (cmp)   : S09/coating/025/loading/ncorr3.bin
+  IDENTICAL (h5diff): S09/coating/025/loading/ncorr3.mat
+  IDENTICAL (cmp)   : S09/coating/025/loading/ncorr4.bin
+  IDENTICAL (h5diff): S09/coating/025/loading/ncorr4.mat
+  IDENTICAL (cmp)   : S09/coating/025/loading/ncorr43.bin
+  IDENTICAL (h5diff): S09/coating/025/loading/ncorr43.mat
+  ---- summary: identical=18 differing=2 missing=0
+-- [CPU vs GPU, same engine] cuncorr cpu vs cuncorr gpu
+==================================================================
+A = t25_cuncorr_cpu8_r1
+B = t25_cuncorr_gpu_r1
+  DIFFERS  (cmp)    : S09/coating/025/loading/MATCHING2005_pair1.bin
+  DIFFERS  (h5diff: 3319 differences found): S09/coating/025/loading/MATCHING2005_pair1.mat
+  DIFFERS  (cmp)    : S09/coating/025/loading/MATCHING2005_pair2.bin
+  DIFFERS  (h5diff: 2532 differences found): S09/coating/025/loading/MATCHING2005_pair2.mat
+  DIFFERS  (h5diff): S09/coating/025/loading/dic_info_data_target_pair1.mat
+  DIFFERS  (h5diff): S09/coating/025/loading/dic_info_data_target_pair2.mat
+  DIFFERS  (h5diff: 1516 differences found): S09/coating/025/loading/myDIC2DpairResults_C_1_C_2.mat
+  DIFFERS  (h5diff: 1134 differences found): S09/coating/025/loading/myDIC2DpairResults_C_4_C_3.mat
+  DIFFERS  (cmp)    : S09/coating/025/loading/ncorr1.bin
+  DIFFERS  (h5diff: 2847 differences found): S09/coating/025/loading/ncorr1.mat
+  IDENTICAL (cmp)   : S09/coating/025/loading/ncorr12.bin
+  IDENTICAL (h5diff): S09/coating/025/loading/ncorr12.mat
+  IDENTICAL (cmp)   : S09/coating/025/loading/ncorr2.bin
+  IDENTICAL (h5diff): S09/coating/025/loading/ncorr2.mat
+  IDENTICAL (cmp)   : S09/coating/025/loading/ncorr3.bin
+  IDENTICAL (h5diff): S09/coating/025/loading/ncorr3.mat
+  DIFFERS  (cmp)    : S09/coating/025/loading/ncorr4.bin
+  DIFFERS  (h5diff: 2529 differences found): S09/coating/025/loading/ncorr4.mat
+  IDENTICAL (cmp)   : S09/coating/025/loading/ncorr43.bin
+  IDENTICAL (h5diff): S09/coating/025/loading/ncorr43.mat
+  ---- summary: identical=8 differing=12 missing=0
+-- [engine] ncorr cpu32 vs cuncorr gpu
+==================================================================
+A = t25_ncorr_cpu32_r1
+B = t25_cuncorr_gpu_r1
+  DIFFERS  (cmp)    : S09/coating/025/loading/MATCHING2005_pair1.bin
+  DIFFERS  (h5diff: 3641 differences found): S09/coating/025/loading/MATCHING2005_pair1.mat
+  DIFFERS  (cmp)    : S09/coating/025/loading/MATCHING2005_pair2.bin
+  DIFFERS  (h5diff: 3031 differences found): S09/coating/025/loading/MATCHING2005_pair2.mat
+  DIFFERS  (h5diff): S09/coating/025/loading/dic_info_data_target_pair1.mat
+  DIFFERS  (h5diff): S09/coating/025/loading/dic_info_data_target_pair2.mat
+  DIFFERS  (h5diff: 6 differences found): S09/coating/025/loading/myDIC2DpairResults_C_1_C_2.mat
+  DIFFERS  (h5diff: 14 differences found): S09/coating/025/loading/myDIC2DpairResults_C_4_C_3.mat
+  DIFFERS  (cmp)    : S09/coating/025/loading/ncorr1.bin
+  DIFFERS  (h5diff: 3616 differences found): S09/coating/025/loading/ncorr1.mat
+  DIFFERS  (cmp)    : S09/coating/025/loading/ncorr12.bin
+  DIFFERS  (h5diff: 3695 differences found): S09/coating/025/loading/ncorr12.mat
+  DIFFERS  (cmp)    : S09/coating/025/loading/ncorr2.bin
+  DIFFERS  (h5diff: 3080 differences found): S09/coating/025/loading/ncorr2.mat
+  DIFFERS  (cmp)    : S09/coating/025/loading/ncorr3.bin
+  DIFFERS  (h5diff: 2812 differences found): S09/coating/025/loading/ncorr3.mat
+  DIFFERS  (cmp)    : S09/coating/025/loading/ncorr4.bin
+  DIFFERS  (h5diff: 3065 differences found): S09/coating/025/loading/ncorr4.mat
+  DIFFERS  (cmp)    : S09/coating/025/loading/ncorr43.bin
+  DIFFERS  (h5diff: 3081 differences found): S09/coating/025/loading/ncorr43.mat
+  ---- summary: identical=0 differing=20 missing=0

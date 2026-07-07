@@ -1,0 +1,28 @@
+===== MATLAB vs E1 — C_1_C_2
+POINTS: A=3651 B=3646 matched=3646 A-only/unkeyed=5 B-only=0
+POINTS coords: compared=2187600 diff=2140516 nanMis=39062 max=5.481116e+01 (cell 56, row 1138) >1e-12:2137852 >1e-9:2133406 >1e-6:2133334 >1e-3:2063785 >1e-1:307754
+POINTS corrcoef: diff=804592 max=1.400284e+00 >1e-12:800946 >1e-9:800946 >1e-6:800942 >1e-3:795929 >1e-1:196267
+===== MATLAB vs E1 — C_4_C_3
+POINTS: A=3079 B=3080 matched=3078 A-only/unkeyed=1 B-only=2
+POINTS coords: compared=1846800 diff=1839462 nanMis=5994 max=9.970383e+00 (cell 62, row 3031) >1e-12:1837241 >1e-9:1833482 >1e-6:1833421 >1e-3:1767937 >1e-1:165539
+POINTS corrcoef: diff=594244 max=1.143872e+00 >1e-12:591166 >1e-9:591166 >1e-6:591164 >1e-3:584173 >1e-1:73673
+===== MATLAB vs E2 — C_1_C_2
+POINTS: frame-1 grid unavailable (NaN) -> matching on frame-2 coords, 0.5 px buckets
+POINTS: A=3651 B=3655 matched=2892 A-only/unkeyed=759 B-only=763
+POINTS coords: compared=1735200 diff=795844 nanMis=925424 max=5.264704e+00 (cell 37, row 1043) >1e-12:795844 >1e-9:795844 >1e-6:795818 >1e-3:765910 >1e-1:111144
+POINTS corrcoef: diff=326465 max=7.950005e-01 >1e-12:326465 >1e-9:326465 >1e-6:326465 >1e-3:325526 >1e-1:108366
+===== MATLAB vs E2 — C_4_C_3
+POINTS: frame-1 grid unavailable (NaN) -> matching on frame-2 coords, 0.5 px buckets
+POINTS: A=3079 B=3083 matched=2811 A-only/unkeyed=268 B-only=272
+POINTS coords: compared=1686600 diff=788530 nanMis=896662 max=5.550372e+00 (cell 75, row 727) >1e-12:788530 >1e-9:788530 >1e-6:788500 >1e-3:759466 >1e-1:118907
+POINTS corrcoef: diff=297315 max=9.743707e-01 >1e-12:297315 >1e-9:297315 >1e-6:297312 >1e-3:295423 >1e-1:93847
+===== E1 vs E2 — C_1_C_2
+POINTS: frame-1 grid unavailable (NaN) -> matching on frame-2 coords, 0.5 px buckets
+POINTS: A=3646 B=3655 matched=2895 A-only/unkeyed=751 B-only=760
+POINTS coords: compared=1737000 diff=794712 nanMis=924656 max=9.621921e+00 (cell 44, row 3462) >1e-12:794712 >1e-9:794711 >1e-6:794670 >1e-3:743034 >1e-1:107782
+POINTS corrcoef: diff=399160 max=9.662834e-01 >1e-12:399160 >1e-9:399160 >1e-6:399155 >1e-3:395250 >1e-1:97973
+===== E1 vs E2 — C_4_C_3
+POINTS: frame-1 grid unavailable (NaN) -> matching on frame-2 coords, 0.5 px buckets
+POINTS: A=3080 B=3083 matched=2847 A-only/unkeyed=233 B-only=236
+POINTS coords: compared=1708200 diff=798912 nanMis=906970 max=5.712651e+00 (cell 75, row 3073) >1e-12:798912 >1e-9:798912 >1e-6:798861 >1e-3:742370 >1e-1:110401
+POINTS corrcoef: diff=400613 max=9.707643e-01 >1e-12:400613 >1e-9:400613 >1e-6:400611 >1e-3:394965 >1e-1:82848

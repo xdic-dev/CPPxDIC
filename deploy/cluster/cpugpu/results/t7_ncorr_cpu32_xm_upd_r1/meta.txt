@@ -1,0 +1,16 @@
+name=t7_ncorr_cpu32_xm_upd_r1
+job_id=7885631
+node=mb-mil008.cism.ucl.ac.be
+rc=0
+status=ok
+stepd_ok=1
+engine=ncorr
+engine_ok=1
+cuda_used=0
+backend_line=NA
+threads_requested=32
+threads_observed=32
+wall_s=3807
+params: trial=7 engine=ncorr gpu=0 threads=32 rep=1 stages=d exact_matlab=1 updates=1
+cpus_per_task=32
+maxrss_kb=64359020
