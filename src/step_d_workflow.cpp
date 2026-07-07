@@ -733,9 +733,16 @@ bool StepDWorkflow::performTracking(const int tracking_number,
         return false;
     }
 
+    // `no_update` (ncorr_params.txt, default true) keeps the NO_UPDATE preset:
+    // fixed reference within a segment. Setting it false selects
+    // KEEP_MOST_POINTS — combined with cutoff_corrcoef=0.5 this re-enables the
+    // correlation-based reference updates the original MATLAB runs used.
+    // (NOTE: the pre-existing `dic_config` key is deliberately NOT wired here —
+    // the shipped ncorr_params.txt says KEEP_MOST_POINTS but this call site has
+    // always ignored it; honoring it would silently change every deployment.)
     runNcorrAnalysis(cam_frames[0], cur_frames, refmask,
                      initial_seed_point, step_params_,
-                     output_path, config_.parallel_processing, true);
+                     output_path, config_.parallel_processing, config_.ncorr_no_update);
 
     LOG_INFO << "--> STEP: Ncorr " << cam_number << " done and saved to " << output_path;
     return true;
@@ -1316,6 +1323,11 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
 
         // Create parallel input structure
         ncorr::DIC_analysis_parallel_input dic_parallel_input(dic_input, seeds);
+        dic_parallel_input.fixed_step_ref = config_.ncorr_fixed_step_ref;
+        if (config_.ncorr_fixed_step_ref > 0) {
+            LOG_INFO << "  Fixed-step reference updates: every "
+                     << config_.ncorr_fixed_step_ref << " frames";
+        }
 
         // Run parallel DIC analysis
         dic_output_raw = config_.ncorr_use_exact_matlab
@@ -1325,15 +1337,12 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
         LOG_INFO << "  Using Matlab-style sequential DIC processing"
                   << (config_.ncorr_use_exact_matlab ? " (exact_matlab_*)" : " (matlab_*)")
                   << "...";
+        ncorr::DIC_analysis_parallel_input dic_sequential_input(
+            dic_input, {ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1])}, false);
+        dic_sequential_input.fixed_step_ref = config_.ncorr_fixed_step_ref;
         dic_output_raw = config_.ncorr_use_exact_matlab
-            ? ncorr::exact_matlab_DIC_analysis_sequential(
-                dic_input,
-                {ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1])},
-                false)
-            : ncorr::matlab_DIC_analysis_sequential(
-                dic_input,
-                {ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1])},
-                false);
+            ? ncorr::exact_matlab_DIC_analysis_sequential(dic_sequential_input)
+            : ncorr::matlab_DIC_analysis_sequential(dic_sequential_input);
     }
     
     // Post-process with both perspectives

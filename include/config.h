@@ -146,6 +146,12 @@ public:
     std::string ncorr_interp = "quintic_bspline_precompute"; // Interpolation method
     std::string ncorr_subregion = "circle";                  // Subregion shape
     std::string ncorr_dic_config = "no_update";              // DIC config mode
+    bool ncorr_no_update = true;  // Step-D tracking preset: true = NO_UPDATE (fixed ref within a
+                                  // segment, the long-standing default); false = KEEP_MOST_POINTS
+                                  // (with cutoff_corrcoef=0.5 -> MATLAB-style correlation-based
+                                  // reference updates)
+    int ncorr_fixed_step_ref = 0;  // >0: force a reference change every N frames (MATLAB ncorr
+                                   // step analysis, step_ref_change semantics); 0 = off
     double ncorr_cutoff_corrcoef = 10.0;                     // Correlation cutoff
     std::string ncorr_roi_update_mode = "none";              // ROI update mode
     std::string ncorr_accumulation_mode = "none";            // Accumulation mode
