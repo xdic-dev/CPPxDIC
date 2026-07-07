@@ -1253,10 +1253,23 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     LOG_INFO << "Checkpoint found: " << e_out << " (skipping)";
                 } else {
                     LOG_INFO << "Writing DIC3Dcombined to: " << e_out;
-                    if (!e_serializer->saveDIC3Dcombined(e_out, stitched)) {
+                    // Crash-safe checkpoint: write to a .partial file and
+                    // rename on success, so a crash mid-save can never leave a
+                    // truncated file that later runs mistake for a valid
+                    // checkpoint (the existence check above cannot tell).
+                    const std::string e_tmp = e_out + ".partial";
+                    if (!e_serializer->saveDIC3Dcombined(e_tmp, stitched)) {
                         LOG_ERROR << "Failed to write DIC3Dcombined";
+                        std::error_code ec;
+                        std::filesystem::remove(e_tmp, ec);
                     } else {
-                        LOG_INFO << "✓ Saved DIC3Dcombined: " << e_out;
+                        std::error_code ec;
+                        std::filesystem::rename(e_tmp, e_out, ec);
+                        if (ec) {
+                            LOG_ERROR << "Failed to finalize DIC3Dcombined: " << ec.message();
+                        } else {
+                            LOG_INFO << "✓ Saved DIC3Dcombined: " << e_out;
+                        }
                     }
                 }
             }

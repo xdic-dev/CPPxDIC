@@ -287,23 +287,20 @@ public:
                                     const DistortionData& distortion);
     
     /**
-     * Write AllPairsResults cell array with full DIC3DpairResults structs
-     * @param matfp MAT file pointer
+     * Build the AllPairsResults cell array (full DIC3DpairResults structs)
+     * purely in memory — the caller attaches it to a struct and owns it.
      * @param all_pairs Vector of DIC3DpairResults (individual pair results)
-     * @return Success status
+     * @return New matvar (caller owns), or nullptr when empty/failed
      */
-    static bool writeAllPairsResults(mat_t* matfp,
-                                    const std::vector<DIC3DpairResults>& all_pairs);
-    
+    static matvar_t* buildAllPairsResultsVar(const std::vector<DIC3DpairResults>& all_pairs);
+
     /**
-     * Write DIC2Dinfo as object array of DIC2DPairResults
-     * 
-     * @param matfp MAT file pointer (must be open for writing)
+     * Build the DIC2Dinfo cell array of DIC2DPairResults purely in memory —
+     * the caller attaches it to a struct and owns it.
      * @param dic2d_info Vector of 2D DIC results
-     * @return Success status
+     * @return New matvar (caller owns), or nullptr when empty/failed
      */
-    static bool writeDIC2Dinfo(mat_t* matfp,
-                              const std::vector<DIC2DPairResults>& dic2d_info);
+    static matvar_t* buildDIC2DinfoVar(const std::vector<DIC2DPairResults>& dic2d_info);
 
 private:
     /**

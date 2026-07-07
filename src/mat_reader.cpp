@@ -11,6 +11,7 @@
 #include <cstring>
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 
 namespace cppxdic {
 
@@ -586,6 +587,27 @@ bool MatReader::readDIC3Dcombined(const std::string& mat_path, DIC3Dcombined& co
         }
         return true;
     };
+
+    // HDF5 (v7.3) reads defer nested field/cell data — historically each field
+    // parser grew its own ensure_loaded call as it was found empty (Faces was
+    // still missing one, making Step F see "0 faces" and abort). Force-load
+    // the whole tree once instead of relying on per-field patchwork.
+    std::function<void(matvar_t*)> deep_load = [&](matvar_t* v) {
+        if (!v) return;
+        Mat_VarReadDataAll(matfp.get(), v);
+        size_t ne = 1;
+        for (int i = 0; i < v->rank; ++i) ne *= v->dims[i];
+        if (v->class_type == MAT_C_STRUCT) {
+            unsigned nf = Mat_VarGetNumberOfFields(v);
+            char* const* names = Mat_VarGetStructFieldnames(v);
+            for (size_t e = 0; e < ne; ++e)
+                for (unsigned i = 0; i < nf; ++i)
+                    deep_load(Mat_VarGetStructFieldByName(v, names[i], e));
+        } else if (v->class_type == MAT_C_CELL) {
+            for (size_t e = 0; e < ne; ++e) deep_load(Mat_VarGetCell(v, static_cast<int>(e)));
+        }
+    };
+    deep_load(dic3d_var.get());
 
     // Faces (Nx3) — handles both INT32 (C++-written) and DOUBLE (MATLAB-written)
     if (matvar_t* faces_var = getStructField(dic3d_var.get(), "Faces", 0)) {
