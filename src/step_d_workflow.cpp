@@ -14,6 +14,9 @@
 #include "utils.h"
 #include "matlab_functions.h"
 #include "logging.h"
+#ifdef CPPXDIC_HAVE_CUNCORR
+#include "dic/cuncorr_dic.h"
+#endif
 #include <iostream>
 #include <opencv2/imgcodecs.hpp>
 #include <sstream>
@@ -730,9 +733,16 @@ bool StepDWorkflow::performTracking(const int tracking_number,
         return false;
     }
 
+    // `no_update` (ncorr_params.txt, default true) keeps the NO_UPDATE preset:
+    // fixed reference within a segment. Setting it false selects
+    // KEEP_MOST_POINTS — combined with cutoff_corrcoef=0.5 this re-enables the
+    // correlation-based reference updates the original MATLAB runs used.
+    // (NOTE: the pre-existing `dic_config` key is deliberately NOT wired here —
+    // the shipped ncorr_params.txt says KEEP_MOST_POINTS but this call site has
+    // always ignored it; honoring it would silently change every deployment.)
     runNcorrAnalysis(cam_frames[0], cur_frames, refmask,
                      initial_seed_point, step_params_,
-                     output_path, config_.parallel_processing, true);
+                     output_path, config_.parallel_processing, config_.ncorr_no_update);
 
     LOG_INFO << "--> STEP: Ncorr " << cam_number << " done and saved to " << output_path;
     return true;
@@ -904,6 +914,13 @@ void StepDWorkflow::formatOutput(const std::string& trial,
         const auto& u_array = disp.get_u().get_array();
         const auto& v_array = disp.get_v().get_array();
         const auto& cc_array = disp.get_cc().get_array();
+        // Validity comes from the frame's own ROI (the set of converged points),
+        // NOT from a "value == 0" sentinel: ncorr zero-fills invalid points, but
+        // a VALID point can also hold an exact 0.0 — notably the whole first
+        // frame under cuNCorr, whose self-match yields u=v=0 exactly, which the
+        // old sentinel turned into an all-NaN Points{1} (MATLAB/ncorr store the
+        // seed grid there).
+        const auto& valid_mask = disp.get_roi().get_mask();
 
         Points2D pts2d;
         pts2d.x.reserve(Pref.size());
@@ -913,13 +930,10 @@ void StepDWorkflow::formatOutput(const std::string& trial,
 
         for (size_t idx = 0; idx < roi_coords.size(); ++idx) {
             const auto [y, x] = roi_coords[idx];
-            double u = u_array(y, x);
-            double v = v_array(y, x);
-            double cc = cc_array(y, x);
-
-            if (u == 0.0) u = nan;
-            if (v == 0.0) v = nan;
-            if (cc == 0.0) cc = nan;
+            const bool valid = valid_mask(y, x);
+            double u = valid ? u_array(y, x) : nan;
+            double v = valid ? v_array(y, x) : nan;
+            double cc = valid ? cc_array(y, x) : nan;
 
             pts2d.x.push_back(std::isnan(u) ? nan : (Pref[idx].x + u));
             pts2d.y.push_back(std::isnan(v) ? nan : (Pref[idx].y + v));
@@ -941,6 +955,7 @@ void StepDWorkflow::formatOutput(const std::string& trial,
     const auto& disp12_ref = dic12.disps.front();
     const auto& u12_full = disp12_ref.get_u().get_array();
     const auto& v12_full = disp12_ref.get_v().get_array();
+    const auto& valid12 = disp12_ref.get_roi().get_mask();
 
     LOG_INFO << "  Processing cam2 frames (mapped through matching)...";
     for (size_t ii = 0; ii < n_frames_cam2; ++ii) {
@@ -948,6 +963,10 @@ void StepDWorkflow::formatOutput(const std::string& trial,
         const auto& u2_array = disp2.get_u().get_array();
         const auto& v2_array = disp2.get_v().get_array();
         const auto& cc2_array = disp2.get_cc().get_array();
+        // Same validity principle as fillDirectFrame: use the frame's ROI, not a
+        // "value == 0" sentinel (a valid point can hold an exact 0.0 — the whole
+        // first frame under cuNCorr).
+        const auto& valid2 = disp2.get_roi().get_mask();
         const int H2 = disp2.get_u().data_height();
         const int W2 = disp2.get_u().data_width();
 
@@ -967,10 +986,10 @@ void StepDWorkflow::formatOutput(const std::string& trial,
                 if (sx < 0 || sy < 0 || sx >= W2 || sy >= H2) {
                     continue;
                 }
-                const double value = arr(sy, sx);
-                if (value == 0.0) {
+                if (!valid2(sy, sx)) {
                     continue;
                 }
+                const double value = arr(sy, sx);
                 const double dx = rx - static_cast<double>(sx);
                 const double dy = ry - static_cast<double>(sy);
                 const double dist = std::sqrt(dx * dx + dy * dy);
@@ -985,8 +1004,7 @@ void StepDWorkflow::formatOutput(const std::string& trial,
 
             const int cx = std::clamp(static_cast<int>(std::round(rx)), 0, W2 - 1);
             const int cy = std::clamp(static_cast<int>(std::round(ry)), 0, H2 - 1);
-            const double fallback = arr(cy, cx);
-            return fallback == 0.0 ? nan : fallback;
+            return valid2(cy, cx) ? arr(cy, cx) : nan;
         };
 
         Points2D pts2d;
@@ -999,13 +1017,9 @@ void StepDWorkflow::formatOutput(const std::string& trial,
             const auto [y, x] = roi_coords[idx];
             const double u12 = u12_full(y, x);
             const double v12 = v12_full(y, x);
-            double cc = cc2_array(y, x);
-            if (cc == 0.0) {
-                cc = nan;
-            }
-            corrcoef.push_back(cc);
+            corrcoef.push_back(valid2(y, x) ? cc2_array(y, x) : nan);
 
-            if (u12 == 0.0 && v12 == 0.0) {
+            if (!valid12(y, x)) {
                 pts2d.x.push_back(nan);
                 pts2d.y.push_back(nan);
                 continue;
@@ -1270,7 +1284,34 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     
     // Run DIC analysis (returns Lagrangian perspective in pixels)
     ncorr::DIC_analysis_output dic_output_raw;
-    
+
+#ifdef CPPXDIC_HAVE_CUNCORR
+    // cuNCorr's sequence engine is built for frame-SERIES tracking: warm-started
+    // local optimization plus a small coarse seed search (cuncorr_seed_search,
+    // default 15 px). Inter-camera MATCHING calls (<= 2 current images) have
+    // disparities of hundreds of pixels that only ncorr's GLOBAL seed
+    // optimization can bridge — routing them through cuNCorr silently produced
+    // an all-zero matching field with an empty valid ROI, which cascaded into
+    // all-NaN cam-def Points, all-NaN 3D vertices, and a 0-face stitched mesh.
+    // Matching is a handful of frames, so keeping it on ncorr costs nothing.
+    if (config_.dic_engine != "ncorr" && cur_imgs.size() > 2) {
+        // cuNCorr engine: CUDA if a device is present, else its CPU backend (identical
+        // results). Produces the same raw Lagrangian/pixel DIC_analysis_output on the
+        // reduced grid, so the downstream .bin + StepE reconstruction is unchanged.
+        cppxdic::CuncorrDicConfig ccfg;
+        ccfg.scalefactor = scalefactor;
+        ccfg.subregion_radius = step_params.radius;
+        ccfg.num_threads = step_params.total_threads;
+        ccfg.seed_x = seed_point.pw[0];
+        ccfg.seed_y = seed_point.pw[1];
+        ccfg.seed_search = config_.cuncorr_seed_search;
+        ccfg.debug = config_.debug_mode;
+        cppxdic::CuncorrDicInfo cinfo;
+        LOG_INFO << "  Using cuNCorr DIC engine...";
+        dic_output_raw = cppxdic::run_cuncorr_dic(ncorr_images, roi, ccfg, &cinfo);
+        LOG_INFO << "  cuNCorr backend: " << cinfo.backend << (cinfo.cuda ? " (CUDA)" : " (CPU)");
+    } else
+#endif
     if (go_parallel) {
         LOG_INFO << "  Using parallel DIC processing"
                   << (config_.ncorr_use_exact_matlab ? " (exact_matlab_*)" : " (matlab_*)")
@@ -1282,6 +1323,11 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
 
         // Create parallel input structure
         ncorr::DIC_analysis_parallel_input dic_parallel_input(dic_input, seeds);
+        dic_parallel_input.fixed_step_ref = config_.ncorr_fixed_step_ref;
+        if (config_.ncorr_fixed_step_ref > 0) {
+            LOG_INFO << "  Fixed-step reference updates: every "
+                     << config_.ncorr_fixed_step_ref << " frames";
+        }
 
         // Run parallel DIC analysis
         dic_output_raw = config_.ncorr_use_exact_matlab
@@ -1291,25 +1337,28 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
         LOG_INFO << "  Using Matlab-style sequential DIC processing"
                   << (config_.ncorr_use_exact_matlab ? " (exact_matlab_*)" : " (matlab_*)")
                   << "...";
+        ncorr::DIC_analysis_parallel_input dic_sequential_input(
+            dic_input, {ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1])}, false);
+        dic_sequential_input.fixed_step_ref = config_.ncorr_fixed_step_ref;
         dic_output_raw = config_.ncorr_use_exact_matlab
-            ? ncorr::exact_matlab_DIC_analysis_sequential(
-                dic_input,
-                {ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1])},
-                false)
-            : ncorr::matlab_DIC_analysis_sequential(
-                dic_input,
-                {ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1])},
-                false);
+            ? ncorr::exact_matlab_DIC_analysis_sequential(dic_sequential_input)
+            : ncorr::matlab_DIC_analysis_sequential(dic_sequential_input);
     }
     
     // Post-process with both perspectives
     LOG_INFO << "Post-processing displacements...";
     
-    // Step 1: Convert to Eulerian perspective with sign inversion (still in pixels)
+    // Step 1: Convert to Eulerian perspective with sign inversion (still in pixels).
+    // Interp choice: bicubic (CUBIC_KEYS) is the historical workaround from when
+    // the biquintic B-spline coefficients used FFT circular deconvolution and
+    // carried a border bias (bicubic needs no prefilter, so it was immune).
+    // That bias was fixed in CppNCorr (Unser recursive filter, mirror BCs), so
+    // biquintic — what MATLAB ncorr uses here — is safe again; the previously
+    // dangling `perspective_interp` ncorr-params tag now selects it.
     ncorr::DIC_analysis_output dic_eulerian_pixels = ncorr::change_perspective_with_inversion(
-        dic_output_raw, 
-        ncorr::INTERP::CUBIC_KEYS  // Use cubic interpolation for perspective change
-    );
+        dic_output_raw,
+        config_.ncorr_perspective_interp ? ncorr::INTERP::QUINTIC_BSPLINE_PRECOMPUTE
+                                         : ncorr::INTERP::CUBIC_KEYS);
     
     // Step 3: Apply units to BOTH perspectives
     ncorr::DIC_analysis_output dic_lagrangian = ncorr::set_units(dic_output_raw, "mm", config_.units_per_pixel);

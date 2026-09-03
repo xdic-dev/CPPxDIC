@@ -1,0 +1,134 @@
+Bootstrap: docker
+From: nvidia/cuda:12.4.1-devel-ubuntu22.04
+
+%labels
+    Author CPPxDIC Team
+    Version 1.0-gpu
+    Description CPPxDIC with cuNCorr CUDA backend (feat/cuncorr-integration)
+
+%help
+    CPPxDIC GPU container: cuNCorr is built with -DCUNCORR_BACKEND=CUDA for
+    sm 70/75/80/86/89 (V100 / RTX2080Ti / A100 / A10+RTX3090 / L40s — all
+    Manneback gpu-partition types). At runtime cuNCorr picks CUDA when a
+    device is visible (run with `apptainer exec --nv`) and falls back to its
+    CPU backend otherwise, so the SAME image serves GPU and CPU experiments
+    with an identical binary — required for meaningful bit-comparisons.
+
+    The DIC engine is selected in dic_params.txt:
+        dic_engine = cuncorr   (default when absent!)  |  ncorr (legacy CPU)
+
+    Build (compute node, fakeroot):
+        apptainer build --fakeroot cppxdic_gpu.sif deploy/cluster/cppxdic_gpu.def
+    Run:
+        apptainer exec --nv cppxdic_gpu.sif /opt/cppxdic/bin/cppxdic ...
+
+%environment
+    export LC_ALL=C
+    export LANG=C
+    export PATH=/opt/cppxdic/bin:$PATH
+    export LD_LIBRARY_PATH=/usr/local/lib:/usr/lib/x86_64-linux-gnu:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+    export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
+
+%post
+    # =========================================================================
+    # System packages (same set as cppxdic.def + hdf5-tools for h5diff, used
+    # by the CPU-vs-GPU bit-comparison)
+    # =========================================================================
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        g++ \
+        git \
+        pkg-config \
+        ca-certificates \
+        wget \
+        libopencv-dev \
+        libfftw3-dev \
+        libmatio-dev \
+        libhdf5-dev \
+        hdf5-tools \
+        libcgal-dev \
+        libeigen3-dev \
+        libsuitesparse-dev \
+        liblapack-dev \
+        libblas-dev \
+        libopenblas-dev \
+        libomp-dev \
+        nlohmann-json3-dev \
+        gdb \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+    echo "=== Verifying dependencies ==="
+    pkg-config --modversion opencv4   || echo "WARN: opencv4 pkg-config missing (may still work)"
+    nvcc --version | tail -1
+    which h5diff
+
+    # =========================================================================
+    # Build CPPxDIC + cuNCorr (CUDA backend)
+    # =========================================================================
+    rm -rf /opt/cppxdic/src/build
+    rm -rf /opt/cppxdic/src/tests/build
+    rm -rf /opt/cppxdic/src/Tools/CppNCorr/lib
+    rm -f  /opt/cppxdic/src/compile_commands.json
+
+    cd /opt/cppxdic/src
+    mkdir -p build && cd build
+
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/opt/cppxdic \
+        -DCMAKE_CXX_STANDARD=17 \
+        -DCUNCORR_BACKEND=CUDA \
+        -DCMAKE_CUDA_ARCHITECTURES="70;75;80;86;89" \
+        -DBUILD_SINGLEDIC=ON \
+        -DBUILD_PROXYNCORR=ON \
+        -DBUILD_GEN_SUBJECT_TRIAL=ON \
+        -DBUILD_XDIC_STEPSABC=ON \
+        -DXDIC_STEPSABC_GUI=OFF
+
+    make -j$(nproc)
+    make install
+
+    install -m 0755 /opt/cppxdic/src/deploy/entrypoint.sh /opt/cppxdic/entrypoint.sh
+
+    # Debug-symbols variant of the main binary (for gdb backtraces of the
+    # Step-E stitching segfault and friends). Same source, RelWithDebInfo.
+    mkdir -p /opt/cppxdic/src/build_dbg && cd /opt/cppxdic/src/build_dbg
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DCMAKE_CXX_STANDARD=17 \
+        -DCUNCORR_BACKEND=CUDA \
+        -DCMAKE_CUDA_ARCHITECTURES="70;75;80;86;89"
+    make -j$(nproc) cppxdic
+    install -m 0755 ./cppxdic /opt/cppxdic/bin/cppxdic_dbg
+    cd /opt/cppxdic/src && rm -rf build_dbg
+
+    # Cleanup build artifacts to reduce image size
+    rm -rf /opt/cppxdic/src/build
+
+%files
+    # Copy the entire project source (incl. Tools/cuNCorr submodule) into the
+    # container. Run from the CPPxDIC repo root:
+    #   apptainer build --fakeroot cppxdic_gpu.sif deploy/cluster/cppxdic_gpu.def
+    . /opt/cppxdic/src
+
+%runscript
+    exec /opt/cppxdic/entrypoint.sh "$@"
+
+%test
+    echo "=== Running container self-test ==="
+    for app in cppxdic singledic proxyncorr gen_subject_trial xdic_stepsABC; do
+        bin="/opt/cppxdic/bin/${app}"
+        test -x "${bin}" || { echo "FAIL: ${app} binary not found"; exit 1; }
+        if ldd "${bin}" | grep -q "not found"; then
+            echo "FAIL: ${app} has missing shared libs"; ldd "${bin}" | grep "not found"; exit 1
+        fi
+        echo "OK: ${app}"
+    done
+    # cuNCorr CUDA linkage (device check happens at runtime, not here)
+    ldd /opt/cppxdic/bin/cppxdic | grep -i cudart && echo "OK: cudart linked" \
+        || echo "WARN: cudart not dynamically linked (may be static)"
+    /opt/cppxdic/entrypoint.sh --help >/dev/null || { echo "FAIL: cppxdic --help failed"; exit 1; }
+    echo "=== Self-test PASSED ==="

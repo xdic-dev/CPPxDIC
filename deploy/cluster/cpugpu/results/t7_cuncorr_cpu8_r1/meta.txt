@@ -1,0 +1,16 @@
+name=t7_cuncorr_cpu8_r1
+job_id=7863697
+node=mb-mil015.cism.ucl.ac.be
+rc=0
+status=ok
+stepd_ok=1
+engine=cuncorr
+engine_ok=1
+cuda_used=0
+backend_line=cuNCorr backend: cpu (CPU)
+threads_requested=8
+threads_observed=NA
+wall_s=5866
+params: trial=7 engine=cuncorr gpu=0 threads=8 rep=1 stages=d
+cpus_per_task=8
+maxrss_kb=5958148

@@ -390,6 +390,14 @@ bool Config::loadFromNcorrParamsFile(const std::string& filepath) {
             ncorr_cutoff_max_corrcoef = std::stod(value);
         } else if (!(value = parseConfigValue(line, "use_exact_matlab")).empty()) {
             ncorr_use_exact_matlab = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "no_update")).empty()) {
+            ncorr_no_update = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "fixed_step_ref")).empty()) {
+            ncorr_fixed_step_ref = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "dic_engine")).empty()) {
+            dic_engine = value;
+        } else if (!(value = parseConfigValue(line, "cuncorr_seed_search")).empty()) {
+            cuncorr_seed_search = std::stoi(value);
         }
     }
 

@@ -146,11 +146,21 @@ public:
     std::string ncorr_interp = "quintic_bspline_precompute"; // Interpolation method
     std::string ncorr_subregion = "circle";                  // Subregion shape
     std::string ncorr_dic_config = "no_update";              // DIC config mode
+    bool ncorr_no_update = true;  // Step-D tracking preset: true = NO_UPDATE (fixed ref within a
+                                  // segment, the long-standing default); false = KEEP_MOST_POINTS
+                                  // (with cutoff_corrcoef=0.5 -> MATLAB-style correlation-based
+                                  // reference updates)
+    int ncorr_fixed_step_ref = 0;  // >0: force a reference change every N frames (MATLAB ncorr
+                                   // step analysis, step_ref_change semantics); 0 = off
     double ncorr_cutoff_corrcoef = 10.0;                     // Correlation cutoff
     std::string ncorr_roi_update_mode = "none";              // ROI update mode
     std::string ncorr_accumulation_mode = "none";            // Accumulation mode
     bool ncorr_save_disps_steps = false;                     // Save intermediate disps
-    bool ncorr_perspective_interp = false;                   // Perspective interpolation
+    bool ncorr_perspective_interp = false;  // Eulerian perspective-change interpolation:
+                                            // false = bicubic CUBIC_KEYS (historical workaround for
+                                            // the FFT-bcoef border bias, kept as default);
+                                            // true = biquintic B-spline (MATLAB ncorr behavior; safe
+                                            // since the recursive bcoef filter fix)
     std::string ncorr_units = "mm";                          // Units string
     bool ncorr_seeds_are_optimized = true;                   // Optimized seeds
     double ncorr_cutoff_max_diffnorm = 1e-5;                 // Max diff norm cutoff
@@ -160,6 +170,12 @@ public:
         false; // Use exact_matlab_DIC_analysis_* (mirrors MATLAB ncorr_alg_addanalysis chain
                // composition) instead of matlab_DIC_analysis_* (which has a chain-induced jump at
                // the first segment boundary).
+
+    // DIC engine backend: "cuncorr" runs the cuNCorr engine (CUDA if a device is present,
+    // else its CPU backend — numerically identical); "ncorr" uses the legacy CppNCorr path.
+    // cuNCorr is a different algorithm from CppNCorr, so switching changes the DIC numbers.
+    std::string dic_engine = "cuncorr";
+    int cuncorr_seed_search = 15;  // cuNCorr coarse seed search radius in pixels
 
     // Visualization: VTK export options
     std::string vtk_format = "ascii"; // VTK format: ascii|binary

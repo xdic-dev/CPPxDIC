@@ -1550,14 +1550,16 @@ matvar_t* MatWriter::buildCombinedStructFields(mat_t* matfp,
         Mat_VarSetStructFieldByName(combined_struct, "distortion", 0, dist_struct);
     }
     
-    // AllPairsResults and DIC2Dinfo: write to file first, read back, attach to struct
-    writeAllPairsResults(matfp, combined.AllPairsResults);
-    writeDIC2Dinfo(matfp, combined.DIC2Dinfo);
-    matvar_t* apr_var = Mat_VarRead(matfp, "AllPairsResults");
+    // AllPairsResults and DIC2Dinfo: built purely in memory and attached
+    // directly. (The previous write-to-file + Mat_VarRead round-trip through
+    // the write handle crashed in Mat_VarSetStructFieldByName — the historical
+    // Step-E stitching segfault — and left duplicate top-level variables that
+    // doubled the file size.)
+    matvar_t* apr_var = buildAllPairsResultsVar(combined.AllPairsResults);
     if (apr_var) Mat_VarSetStructFieldByName(combined_struct, "AllPairsResults", 0, apr_var);
-    matvar_t* dic2d_var = Mat_VarRead(matfp, "DIC2Dinfo");
+    matvar_t* dic2d_var = buildDIC2DinfoVar(combined.DIC2Dinfo);
     if (dic2d_var) Mat_VarSetStructFieldByName(combined_struct, "DIC2Dinfo", 0, dic2d_var);
-    
+
     return combined_struct;
 }
 
@@ -2011,18 +2013,19 @@ bool MatWriter::writeDistortionGroup(mat_t* matfp,
     return true;
 }
 
-bool MatWriter::writeAllPairsResults(mat_t* matfp,
-                                    const std::vector<DIC3DpairResults>& all_pairs) {
-    if (!matfp) {
-        LOG_ERROR << "Invalid MAT file pointer";
-        return false;
-    }
-
-    LOG_INFO << "Writing AllPairsResults with " << all_pairs.size() << " pairs...";
+// Build the AllPairsResults cell array purely in memory (no file I/O).
+// Returns nullptr when there is nothing to attach. Previously this wrote the
+// cell as a top-level variable and the caller read it back from the write
+// handle to embed it in the combined struct — that read-back produced matvar
+// objects carrying live HDF5-internal state whose re-embedding crashed
+// Mat_VarSetStructFieldByName (the long-standing Step-E stitching segfault),
+// and it also duplicated ~half the file size with stray top-level variables.
+matvar_t* MatWriter::buildAllPairsResultsVar(const std::vector<DIC3DpairResults>& all_pairs) {
+    LOG_INFO << "Building AllPairsResults with " << all_pairs.size() << " pairs...";
 
     if (all_pairs.empty()) {
         LOG_WARN << "Empty AllPairsResults, skipping";
-        return true;
+        return nullptr;
     }
 
     // Create cell array (1 x n_pairs)
@@ -2033,7 +2036,7 @@ bool MatWriter::writeAllPairsResults(mat_t* matfp,
 
     if (!cell_array) {
         LOG_ERROR << "Failed to create AllPairsResults cell array";
-        return false;
+        return nullptr;
     }
     
     // Write each pair as a struct
@@ -2276,38 +2279,30 @@ bool MatWriter::writeAllPairsResults(mat_t* matfp,
         // Set this pair struct into the cell array
         Mat_VarSetCell(cell_array, i, pair_struct);
     }
-    
-    // Write to file
-    Mat_VarWrite(matfp, cell_array, MAT_COMPRESSION_NONE);
-    Mat_VarFree(cell_array);
-    
-    LOG_INFO << "AllPairsResults written successfully (" << n_pairs << " pairs)";
-    return true;
+
+    LOG_INFO << "AllPairsResults built (" << n_pairs << " pairs)";
+    return cell_array;
 }
 
-bool MatWriter::writeDIC2Dinfo(mat_t* matfp,
-                              const std::vector<DIC2DPairResults>& dic2d_info) {
-    if (!matfp) {
-        LOG_ERROR << "Invalid MAT file pointer";
-        return false;
-    }
-
-    LOG_INFO << "Writing DIC2Dinfo with " << dic2d_info.size() << " entries...";
+// Build the DIC2Dinfo cell array purely in memory (no file I/O) — see
+// buildAllPairsResultsVar for why the old write-then-read-back scheme had to go.
+matvar_t* MatWriter::buildDIC2DinfoVar(const std::vector<DIC2DPairResults>& dic2d_info) {
+    LOG_INFO << "Building DIC2Dinfo with " << dic2d_info.size() << " entries...";
 
     if (dic2d_info.empty()) {
         LOG_WARN << "Empty DIC2Dinfo, skipping";
-        return true;
+        return nullptr;
     }
-    
+
     // Create cell array (n_entries x 1)
     size_t n_entries = dic2d_info.size();
     std::vector<size_t> array_dims = {n_entries, 1};
     matvar_t* obj_array = Mat_VarCreate("DIC2Dinfo", MAT_C_CELL, MAT_T_CELL,
                                         2, array_dims.data(), nullptr, 0);
-    
+
     if (!obj_array) {
         LOG_ERROR << "Failed to create DIC2Dinfo cell array";
-        return false;
+        return nullptr;
     }
     
     // Write each DIC2DPairResults as a struct
@@ -2350,11 +2345,15 @@ bool MatWriter::writeDIC2Dinfo(mat_t* matfp,
                                                   2, scalar_dims, &pair_forced_dbl, 0);
         Mat_VarSetStructFieldByName(dic2d_struct, "pairForced", 0, pair_forced_var);
         
-        // Write ROImask if available
-        if (!dic2d.ROImask.empty()) {
-            writeMatVariable(matfp, "temp_roimask", dic2d.ROImask);
-            matvar_t* roi_var = Mat_VarRead(matfp, "temp_roimask");
-            Mat_VarSetStructFieldByName(dic2d_struct, "ROImask", 0, roi_var);
+        // Write ROImask if available — built directly (column-major transpose);
+        // the old write-to-file + Mat_VarRead round-trip crashed here.
+        if (!dic2d.ROImask.empty() && dic2d.ROImask.type() == CV_8UC1) {
+            std::vector<size_t> roi_dims = {static_cast<size_t>(dic2d.ROImask.rows),
+                                            static_cast<size_t>(dic2d.ROImask.cols)};
+            cv::Mat roi_t = dic2d.ROImask.t();
+            matvar_t* roi_var = Mat_VarCreate("ROImask", MAT_C_UINT8, MAT_T_UINT8,
+                                              2, roi_dims.data(), roi_t.data, 0);
+            if (roi_var) Mat_VarSetStructFieldByName(dic2d_struct, "ROImask", 0, roi_var);
         }
         
         // Write ncorrInfo struct (reuse existing logic from writeDIC2DPairResults)
@@ -2470,13 +2469,9 @@ bool MatWriter::writeDIC2Dinfo(mat_t* matfp,
         // Set this struct into the cell array
         Mat_VarSetCell(obj_array, i, dic2d_struct);
     }
-    
-    // Write to file
-    Mat_VarWrite(matfp, obj_array, MAT_COMPRESSION_NONE);
-    Mat_VarFree(obj_array);
-    
-    LOG_INFO << "DIC2Dinfo written successfully (" << n_entries << " entries)";
-    return true;
+
+    LOG_INFO << "DIC2Dinfo built (" << n_entries << " entries)";
+    return obj_array;
 }
 
 // Helper function implementations ============================================
