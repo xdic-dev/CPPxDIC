@@ -15,6 +15,11 @@ frictional_conditions = glass,coating,coating_oil
 # Number of stereo pairs
 num_pair = 2
 
+# Mirrored (MNG) rig only, used when built with -DXDIC_MODE=mirrored
+# (theGlobalSettings_MNG.m: Npair and cam_order)
+mirrored_num_pair = 7
+mirrored_cam_order = 2,1,4,3
+
 # Sampling frequencies
 robot_sample_freq = 1000.0
 vid_sample_freq = 50.0
@@ -28,11 +33,11 @@ base_path = /Users/jaoga/devlab/MultiDIC
 
 # Data path (location of video files and protocol files)
 # Leave empty to use default: <base_path>/Data
-data_path = 
+data_path = /Users/jaoga/devlab/MultiDIC/example_data
 
 # DIC path (location of output data from DIC)
 # Leave empty to use default: <base_path>/DIC_Output
-dic_path = 
+dic_path = /Users/jaoga/devlab/MultiDIC/analysis
 
 # ============================================================================
 # PROCESSING FLAGS
@@ -271,3 +276,7 @@ generate_mat_files = true
 
 # Delete cached .bin files after use
 cleanup_cache_bins = false
+
+# ---- added by xdic_webgui ----
+log_level = 
+log_file = 

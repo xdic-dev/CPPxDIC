@@ -803,15 +803,25 @@ void StepDWorkflow::formatOutput(const std::string& trial,
                                 const std::vector<int>& pairOrder,
                                 bool pairForced) {
     (void)trial;
-    LOG_INFO << "Formatting output files (step2_dic_finish equivalent)...";
-    
     int cam_1, cam_2;
     Utils::getCamerasForPair(stereopair, cam_1, cam_2);
+    formatDic2DPairResults(config_, step1_params_, base_params_.outputPath, cam_1, cam_2,
+                           pairOrder, pairForced);
+}
+
+void StepDWorkflow::formatDic2DPairResults(const Config& config,
+                                           const StepParameters& step_params,
+                                           const std::string& output_path,
+                                           int cam_1,
+                                           int cam_2,
+                                           const std::vector<int>& pairOrder,
+                                           bool pairForced) {
+    LOG_INFO << "Formatting output files (step2_dic_finish equivalent)...";
     
     // ncorr outputs live directly in the output directory as .bin (ncorr native format)
-    std::string ncorr1_bin = base_params_.outputPath + "/ncorr" + std::to_string(cam_1) + ".bin";
-    std::string ncorr2_bin = base_params_.outputPath + "/ncorr" + std::to_string(cam_2) + ".bin";
-    std::string ncorr12_bin = base_params_.outputPath + "/ncorr" + std::to_string(cam_1) + std::to_string(cam_2) + ".bin";
+    std::string ncorr1_bin = output_path + "/ncorr" + std::to_string(cam_1) + ".bin";
+    std::string ncorr2_bin = output_path + "/ncorr" + std::to_string(cam_2) + ".bin";
+    std::string ncorr12_bin = output_path + "/ncorr" + std::to_string(cam_1) + std::to_string(cam_2) + ".bin";
     
     if (!std::filesystem::exists(ncorr1_bin) || !std::filesystem::exists(ncorr2_bin) || !std::filesystem::exists(ncorr12_bin)) {
         LOG_WARN << "cached ncorr result files not found";
@@ -821,8 +831,8 @@ void StepDWorkflow::formatOutput(const std::string& trial,
         return;
     }
     
-    auto d_serializer = cppxdic::DataSerializer::create(config_.data_format);
-    std::string output_file = base_params_.outputPath + "/myDIC2DpairResults_C_" + 
+    auto d_serializer = cppxdic::DataSerializer::create(config.data_format);
+    std::string output_file = output_path + "/myDIC2DpairResults_C_" + 
         std::to_string(cam_1) + "_C_" + std::to_string(cam_2) + d_serializer->extension();
     
     if (std::filesystem::exists(output_file)) {
@@ -842,7 +852,7 @@ void StepDWorkflow::formatOutput(const std::string& trial,
 
     // Apply replacebadcorr if enabled (MATLAB step2_dic_finish equivalent)
     // This replaces badly correlated subsets with spatiotemporally filtered values
-    if (config_.step_d_replacebadcorr) {
+    if (config.step_d_replacebadcorr) {
         LOG_INFO << "  Applying replacebadcorr (MATLAB step2_dic_finish)...";
         cppxdic::matlab_replacebadcorr(dic1);
         cppxdic::matlab_replacebadcorr(dic2);
@@ -868,24 +878,24 @@ void StepDWorkflow::formatOutput(const std::string& trial,
     results.pairOrder = pairOrder;
     results.pairForced = pairForced;
     results.ncorrInfo.cutoff_corrcoef = {
-        config_.ncorr_cutoff_corrcoef,
-        config_.ncorr_cutoff_corrcoef,
-        config_.ncorr_cutoff_corrcoef
+        config.ncorr_cutoff_corrcoef,
+        config.ncorr_cutoff_corrcoef,
+        config.ncorr_cutoff_corrcoef
     };
-    results.ncorrInfo.cutoff_diffnorm = step1_params_.cutoff_diffnorm;
-    results.ncorrInfo.cutoff_iteration = step1_params_.cutoff_iteration;
+    results.ncorrInfo.cutoff_diffnorm = step_params.cutoff_diffnorm;
+    results.ncorrInfo.cutoff_iteration = step_params.cutoff_iteration;
     results.ncorrInfo.imgcorr = {"reference", "current"};
     results.ncorrInfo.lenscoef = 0;
-    results.ncorrInfo.pixtounits = config_.units_per_pixel;
-    results.ncorrInfo.radius = step1_params_.radius;
-    results.ncorrInfo.spacing = step1_params_.spacing;
-    results.ncorrInfo.stepanalysis.enabled = step1_params_.stepanalysis_params.enabled;
-    results.ncorrInfo.stepanalysis.type = step1_params_.stepanalysis_params.type;
-    results.ncorrInfo.stepanalysis.auto_update = step1_params_.stepanalysis_params.auto_update;
-    results.ncorrInfo.stepanalysis.step = step1_params_.stepanalysis_params.step;
+    results.ncorrInfo.pixtounits = config.units_per_pixel;
+    results.ncorrInfo.radius = step_params.radius;
+    results.ncorrInfo.spacing = step_params.spacing;
+    results.ncorrInfo.stepanalysis.enabled = step_params.stepanalysis_params.enabled;
+    results.ncorrInfo.stepanalysis.type = step_params.stepanalysis_params.type;
+    results.ncorrInfo.stepanalysis.auto_update = step_params.stepanalysis_params.auto_update;
+    results.ncorrInfo.stepanalysis.step = step_params.stepanalysis_params.step;
     results.ncorrInfo.subsettrunc = false;
-    results.ncorrInfo.total_threads = step1_params_.total_threads;
-    results.ncorrInfo.type = step1_params_.type;
+    results.ncorrInfo.total_threads = step_params.total_threads;
+    results.ncorrInfo.type = step_params.type;
     results.ncorrInfo.units = "pixels";
     
     const auto& roi1 = dic1.disps[0].get_roi();
@@ -1070,7 +1080,7 @@ bool StepDWorkflow::updateMaskAndSeedFromOutput(const cv::Mat& input_mask,
                                                 const SeedPoint& input_seed,
                                                 const ncorr::DIC_analysis_output& dic_output,
                                                 cv::Mat& output_mask,
-                                                SeedPoint& output_seed) const {
+                                                SeedPoint& output_seed) {
     if (dic_output.disps.empty()) {
         return false;
     }

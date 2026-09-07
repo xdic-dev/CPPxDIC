@@ -3,8 +3,8 @@
  * @brief Compile-time selection of the xDIC reconstruction mode.
  *
  * The xDIC executable supports (or will support) three reconstruction modes:
- *   - camerapairs : stereo pairs of cameras (the only fully-working mode today).
- *   - mirrored    : a single camera plus a mirror rig (MNG-prefixed MultiDIC files). STUB.
+ *   - camerapairs : stereo pairs of cameras (default mode).
+ *   - mirrored    : a single camera plus a mirror rig (MNG-prefixed MultiDIC files). Implemented.
  *   - multi       : N-camera generalisation of the camera-pair approach. STUB.
  *
  * The active mode is chosen at configure time via the CMake cache variable `XDIC_MODE`
@@ -30,7 +30,7 @@ namespace xdic {
 /// Enumeration of the supported xDIC reconstruction modes.
 enum class Mode {
     CameraPairs, ///< Stereo camera pairs (default, fully implemented).
-    Mirrored,    ///< Single camera + mirror rig (stub).
+    Mirrored,    ///< Single camera + mirror rig (implemented, MNG variant).
     Multi        ///< N-camera generalisation (stub).
 };
 

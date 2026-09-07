@@ -8,6 +8,9 @@
 #include "mat_reader.h"
 #include "logging.h"
 #include <matio.h>
+#if CV_VERSION_MAJOR >= 5
+#include <opencv2/geometry.hpp> // cv::moments moved out of imgproc in OpenCV 5
+#endif
 #include <iostream>
 #include <filesystem>
 #include <cmath>

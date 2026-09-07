@@ -46,6 +46,41 @@ public:
     std::tuple<std::string, std::vector<int>, bool> execute(const std::string& trial,
                                                             int stereopair,
                                                             const StagePlan& plan = StagePlan{});
+
+    /**
+     * Map an ROI mask and seed point through the first displacement field.
+     * Equivalent to the map_pointcoordinate/map_subset2pixel + ROI update that
+     * stepD_2DDIC*.m performs after each ncorr matching call. Stateless, so it is
+     * shared with the other xDIC modes (e.g. mirrored).
+     */
+    static bool updateMaskAndSeedFromOutput(const cv::Mat& input_mask,
+                                            const SeedPoint& input_seed,
+                                            const ncorr::DIC_analysis_output& dic_output,
+                                            cv::Mat& output_mask,
+                                            SeedPoint& output_seed);
+
+    /**
+     * Format cached ncorr outputs into myDIC2DpairResults (step2_dic_finish equivalent).
+     *
+     * Loads ncorr{cam_1}.bin, ncorr{cam_2}.bin and ncorr{cam_1}{cam_2}.bin from
+     * output_path and writes myDIC2DpairResults_C_{cam_1}_C_{cam_2}.<ext>. Shared
+     * with the other xDIC modes, where cam_1/cam_2 are logical view numbers.
+     *
+     * @param config       Global configuration (data_format, replacebadcorr, ...)
+     * @param step_params  Tracking DIC parameters recorded in ncorrInfo
+     * @param output_path  Per-trial/per-pair output directory holding the .bin caches
+     * @param cam_1        Reference camera/view id
+     * @param cam_2        Deformed camera/view id
+     * @param pairOrder    Trial-level stitch order metadata
+     * @param pairForced   Trial-level forced-stitch metadata
+     */
+    static void formatDic2DPairResults(const Config& config,
+                                       const StepParameters& step_params,
+                                       const std::string& output_path,
+                                       int cam_1,
+                                       int cam_2,
+                                       const std::vector<int>& pairOrder,
+                                       bool pairForced);
     
 private:
     const Config& config_;
@@ -246,15 +281,6 @@ private:
                       int stereopair,
                       const std::vector<int>& pairOrder,
                       bool pairForced);
-
-    /**
-     * Map an ROI mask and seed point through the first displacement field.
-     */
-    bool updateMaskAndSeedFromOutput(const cv::Mat& input_mask,
-                                     const SeedPoint& input_seed,
-                                     const ncorr::DIC_analysis_output& dic_output,
-                                     cv::Mat& output_mask,
-                                     SeedPoint& output_seed) const;
 
     /**
      * Persist a MATLAB-compatible ncorr sidecar alongside the native .bin cache.

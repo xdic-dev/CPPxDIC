@@ -152,6 +152,10 @@ bool Config::loadFromDicParamsFile(const std::string& filepath) {
             frictional_conditions = parseStringList(value);
         } else if (!(value = parseConfigValue(line, "num_pair")).empty()) {
             num_pair = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "mirrored_num_pair")).empty()) {
+            mirrored_num_pair = std::stoi(value);
+        } else if (!(value = parseConfigValue(line, "mirrored_cam_order")).empty()) {
+            mirrored_cam_order = parseIntList(value);
         } else if (!(value = parseConfigValue(line, "robot_sample_freq")).empty()) {
             robot_sample_freq = std::stod(value);
         } else if (!(value = parseConfigValue(line, "vid_sample_freq")).empty()) {

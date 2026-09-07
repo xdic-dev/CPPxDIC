@@ -1,6 +1,4 @@
-build
-build_tests
-build_newver
+build*/
 .cache
 docs/*.md
 # Exceptions: the curated guides committed on the newversion branch are kept under

@@ -109,10 +109,14 @@ bool importRawViewMirrored(const Config& config, int trial, const ViewInfo& view
 /**
  * @brief Run the mirrored-camera 2D DIC pipeline.
  *
- * For each stereopair: resolve its two views, extract them as masked full frames, then run
- * standard 2D DIC (matching view1->view2 at the reference frame plus temporal tracking of
- * each view), reusing the CppNCorr engine and ROIManager. Results are written under the
- * usual per-trial/per-pair output directory.
+ * For each stereopair (config.mirrored_num_pair, geometry from config.mirrored_cam_order):
+ * resolve its two views, extract them as masked full frames, saturate + filter_like_ben
+ * (when config.im_filter_mode), then run standard 2D DIC exactly like the camerapairs
+ * StepDWorkflow -- matching view1->view2 at the reference frame, mapping the ROI/seed
+ * through the matching field (StepDWorkflow::updateMaskAndSeedFromOutput), temporal
+ * tracking of each view, and finally step2_dic_finish formatting
+ * (StepDWorkflow::formatDic2DPairResults) into myDIC2DpairResults_C_{v1}_C_{v2}.
+ * Results are written under <dic_path>/<subject>/<material>/<trial>/<phase>/mirrored_pair<N>.
  *
  * @param config Fully-resolved configuration.
  * @return true on success.

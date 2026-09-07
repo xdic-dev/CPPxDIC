@@ -10,11 +10,14 @@
  *      (get_cam_view_stereopair_param.m + camera_info_from_view.m).
  *   2. Mask-extract each view as a stand-alone full frame from the single physical-camera
  *      video (import_raw_vid_MNG.m: temp(:, mask_nbr, :)). This is the missing C++ part.
- *   3. Saturate (satur.m) and run standard 2D DIC on the extracted views, reusing the
- *      CppNCorr engine and ROIManager exactly as the camerapairs StepDWorkflow does:
+ *   3. Saturate (satur.m), bandpass-filter (filter_like_ben.m, when im_filter_mode) and
+ *      run standard 2D DIC on the extracted views, reusing the CppNCorr engine, ROIManager
+ *      and StepDWorkflow helpers exactly as the camerapairs path does:
  *        - view1 -> view2 matching at the reference frame (step1_2),
+ *        - map the view1 ROI/seed through the matching field to seed view2,
  *        - temporal tracking of view1 (step1) and view2 (step2).
- *   4. Persist the per-view ncorr outputs under the per-trial/per-pair output directory.
+ *   4. Persist the per-view ncorr outputs (.bin) and format them into
+ *      myDIC2DpairResults (step2_dic_finish.m) under the per-trial/per-pair output dir.
  */
 
 #include "xdic/mirrored/mirrored_mode.h"
@@ -24,6 +27,8 @@
 #include "utils.h"
 #include "image_processor.h"
 #include "roi_manager.h"
+#include "step_d_workflow.h"
+#include "mat_writer.h"
 #include "logging.h"
 
 #include <ncorr.h>
@@ -45,15 +50,14 @@ namespace {
 
 namespace fs = std::filesystem;
 
-// MATLAB theGlobalSettings_MNG defaults.
-constexpr int kMngFps = 50;          // actual_FS_vid
-constexpr int kLimitGrayscale = 120; // LIMIT_GRAYSCALE in stepD_2DDIC_MNG.m
+// MATLAB stepD_2DDIC_MNG.m constants.
+constexpr int kMngFps = 50;          // theGlobalSettings_MNG.actual_FS_vid
+constexpr int kLimitGrayscale = 120; // LIMIT_GRAYSCALE
+const std::vector<int> kParamFiltIm = {25, 300}; // param_filt_im default
 
-// Default physical-camera ordering from theGlobalSettings_MNG.cam_order = [2 1 4 3].
+// Default physical-camera ordering from theGlobalSettings_MNG.cam_order = [2 1 4 3],
+// used only if the config supplies an empty mirrored_cam_order.
 const std::vector<int> kDefaultCamOrder = {2, 1, 4, 3};
-
-// Default stereopair count for the 4-camera rig (theGlobalSettings_MNG.Npair = 7).
-constexpr int kDefaultNumPair = 7;
 
 bool ensureDir(const std::string& path) {
     try {
@@ -376,10 +380,7 @@ bool processPair(const Config& config, int trial, const ViewPair& vp, int frameS
 
     cv::Mat roi_view1 = cppxdic::ROIManager::loadOrCreateROI(bp, view1_satur.front());
 
-    // 5. Seed: reuse ROIManager (loads REF seed if present, else ROI centre).
-    cppxdic::SeedPoint seed1 = cppxdic::ROIManager::loadOrCreateSeed(bp, roi_view1);
-
-    // 6. DIC parameters (MNG values from stepD_2DDIC_MNG.m, overridable via config.step_d).
+    // 5. DIC parameters (MNG values from stepD_2DDIC_MNG.m, overridable via config.step_d).
     cppxdic::StepParameters step_track;
     step_track.type = "regular";
     step_track.radius = (config.step_d.radius > 0) ? config.step_d.radius : 25;
@@ -387,41 +388,98 @@ bool processPair(const Config& config, int trial, const ViewPair& vp, int frameS
     step_track.cutoff_diffnorm = config.step_d.cutoff_diffnorm;
     step_track.cutoff_iteration = config.step_d.cutoff_iteration;
     step_track.total_threads = config.step_d.total_threads;
+    step_track.stepanalysis_params.enabled = config.step_d.high_strain_enabled;
+    step_track.stepanalysis_params.type = config.step_d.seed_type;
+    step_track.stepanalysis_params.auto_update = config.step_d.auto_update;
+    step_track.stepanalysis_params.step = config.step_d.step_ref_change;
 
     cppxdic::StepParameters step_match = step_track;
     step_match.radius =
         (config.step_e.radius > 0) ? config.step_e.radius : 30; // matching radius (MNG=30)
 
-    // 7. MATCHING view1 -> view2 at the reference frame (input2 = [view2_1, view1_1]).
-    //    Mirrors the ncorr_dic_rewrited matching call in stepD_2DDIC_MNG.m.
+    // 6. Seed: reuse ROIManager (loads REF seed if present, else ROI centre), then map
+    //    to subset world (map_pixel2subset.m) so the matching field can transport it.
+    cppxdic::SeedPoint seed1 = cppxdic::ROIManager::loadOrCreateSeed(bp, roi_view1);
+    seed1.sw = cppxdic::ROIManager::mapPixel2Subset(seed1.pw, step_track.spacing);
+
+    // 7. Image filtering (filter_like_ben.m): gs bounds from view1 over the ROI, reused
+    //    for view2 -- identical to StepDWorkflow::applyImageFiltering.
+    std::vector<cv::Mat> view1, view2;
+    if (config.im_filter_mode) {
+        auto [f1, gs_bounds] =
+            cppxdic::ImageProcessor::filterLikeBen(view1_satur, roi_view1, kParamFiltIm, nullptr);
+        auto [f2, _] =
+            cppxdic::ImageProcessor::filterLikeBen(view2_satur, roi_view1, kParamFiltIm, &gs_bounds);
+        view1 = std::move(f1);
+        view2 = std::move(f2);
+        LOG_INFO << "--> STEP : filtering done";
+    } else {
+        view1 = view1_satur;
+        view2 = view2_satur;
+        LOG_INFO << "--> STEP : raw (saturated) data used";
+    }
+
+    // 8. Trial info sidecar (dic_info_data_target_pair<N>.mat), as saveTrialInfo does.
     {
-        std::vector<cv::Mat> match_cur = {view2_satur.front(), view1_satur.front()};
+        std::vector<int> idxframe;
+        for (int f = frameStart, k = 0; k < static_cast<int>(n); f += frameJump, ++k) {
+            idxframe.push_back(f);
+        }
+        cppxdic::MatWriter::writeTrialInfoFile(
+            out_dir + "/dic_info_data_target_pair" + std::to_string(vp.stereopair) + ".mat",
+            static_cast<double>(kMngFps) / frameJump, idxframe);
+    }
+
+    // 9. MATCHING view1 -> view2 at the reference frame (input2 = [view2_1, view1_1]).
+    //    Mirrors the ncorr_dic_rewrited matching call in stepD_2DDIC_MNG.m. The matching
+    //    is done on the filtered frames, exactly like the MATLAB script (im_view_*).
+    cv::Mat roi_view2_matched = roi_view1;
+    cppxdic::SeedPoint seed2 = seed1;
+    {
+        std::vector<cv::Mat> match_cur = {view2.front(), view1.front()};
         const std::string match_out =
             Utils::buildNcorrFilePath(out_dir, vp.view1.view_nbr, vp.view2.view_nbr, ".bin");
-        runViewDic(config, view1_satur.front(), match_cur, roi_view1, seed1, step_match,
-                   out_dir + "/tmp_ncorr_match", match_out);
+        ncorr::DIC_analysis_output dic12 =
+            runViewDic(config, view1.front(), match_cur, roi_view1, seed1, step_match,
+                       out_dir + "/tmp_ncorr_match", match_out);
+
+        // Port of: refmask_trial_matched = h12.current(1).roi.mask;
+        //          initial_seed_point_set2 = map_pointcoordinate(seed1.sw, {U,V}/(spacing+1))
+        if (!cppxdic::StepDWorkflow::updateMaskAndSeedFromOutput(roi_view1, seed1, dic12,
+                                                                  roi_view2_matched, seed2)) {
+            LOG_WARN << "mirrored: matching produced no displacement field; view2 will reuse "
+                        "the view1 ROI/seed";
+            roi_view2_matched = roi_view1;
+            seed2 = seed1;
+        }
+        LOG_INFO << "--> STEP : Ncorr matching " << vp.view1.view_nbr << "-" << vp.view2.view_nbr
+                 << " done (seed2=" << seed2.pw[0] << "," << seed2.pw[1] << ")";
     }
 
-    // 8. TRACKING view1 across all frames (ncorr1).
+    // 10. TRACKING view1 across all frames (ncorr1).
     {
-        std::vector<cv::Mat> cur(view1_satur.begin(), view1_satur.end());
         const std::string track1_out =
             Utils::buildNcorrFilePath(out_dir, vp.view1.view_nbr, -1, ".bin");
-        runViewDic(config, view1_satur.front(), cur, roi_view1, seed1, step_track,
+        runViewDic(config, view1.front(), view1, roi_view1, seed1, step_track,
                    out_dir + "/tmp_ncorr_view1", track1_out);
+        LOG_INFO << "--> STEP : Ncorr " << vp.view1.view_nbr << " done";
     }
 
-    // 9. TRACKING view2 across frames 2..end (ncorr2). The matched ROI in view2 is the
-    //    same geometry over the extracted full frame; we reuse the view1 ROI/seed as the
-    //    initial estimate (the matching output above refines it in a full MATLAB port).
+    // 11. TRACKING view2 across frames 2..end (ncorr2), seeded/masked by the matching.
     {
-        std::vector<cv::Mat> cur(view2_satur.begin() + (view2_satur.size() > 1 ? 1 : 0),
-                                 view2_satur.end());
+        std::vector<cv::Mat> cur(view2.begin() + (view2.size() > 1 ? 1 : 0), view2.end());
         const std::string track2_out =
             Utils::buildNcorrFilePath(out_dir, vp.view2.view_nbr, -1, ".bin");
-        runViewDic(config, view2_satur.front(), cur, roi_view1, seed1, step_track,
+        runViewDic(config, view2.front(), cur, roi_view2_matched, seed2, step_track,
                    out_dir + "/tmp_ncorr_view2", track2_out);
+        LOG_INFO << "--> STEP : Ncorr " << vp.view2.view_nbr << " done";
     }
+
+    // 12. Format output (step2_dic_finish.m): ncorr{v1}.bin + ncorr{v2}.bin +
+    //     ncorr{v1}{v2}.bin -> myDIC2DpairResults_C_{v1}_C_{v2}.<ext>. No protocol-driven
+    //     pair order in the MNG script, so use the neutral default.
+    cppxdic::StepDWorkflow::formatDic2DPairResults(config, step_track, out_dir, vp.view1.view_nbr,
+                                                   vp.view2.view_nbr, {1, 2}, false);
 
     LOG_INFO << "--- pair " << vp.stereopair << " done; results in " << out_dir << " ---";
     return true;
@@ -434,8 +492,14 @@ bool run(const Config& config) {
     LOG_INFO << "xDIC mirrored-camera (MNG) mode";
     LOG_INFO << "-------------------------------------------";
 
-    // Number of stereopairs: prefer the config value, fall back to the MNG default (7).
-    const int num_pair = (config.num_pair > 0) ? config.num_pair : kDefaultNumPair;
+    // Rig geometry from config (theGlobalSettings_MNG: Npair, cam_order).
+    const int num_pair = config.mirrored_num_pair;
+    const std::vector<int>& cam_order =
+        config.mirrored_cam_order.empty() ? kDefaultCamOrder : config.mirrored_cam_order;
+    if (num_pair <= 0) {
+        LOG_ERROR << "mirrored: mirrored_num_pair must be > 0 (got " << num_pair << ")";
+        return false;
+    }
 
     // Frame range from config (import_vid_MNG honours frame_idx_set / protocol; here we
     // use the explicit config range, consistent with the camerapairs C++ path).
@@ -443,6 +507,9 @@ bool run(const Config& config) {
     const int frameEnd = config.idx_frame_end;
     const int frameJump = (config.frame_jump > 0) ? config.frame_jump : 1;
     const double true_fps = static_cast<double>(kMngFps) / frameJump;
+    std::ostringstream order_str;
+    for (std::size_t i = 0; i < cam_order.size(); ++i) order_str << (i ? "," : "") << cam_order[i];
+    LOG_INFO << "Stereopairs: " << num_pair << ", cam_order: [" << order_str.str() << "]";
     LOG_INFO << "True FPS: " << true_fps << ", frames " << frameStart << ".." << frameEnd
              << " jump " << frameJump;
 
@@ -452,7 +519,7 @@ bool run(const Config& config) {
     for (int pair = 1; pair <= num_pair; ++pair) {
         ViewPair vp;
         try {
-            vp = resolveViewPair(pair, kDefaultCamOrder);
+            vp = resolveViewPair(pair, cam_order);
         } catch (const std::exception& e) {
             LOG_ERROR << "mirrored: " << e.what() << " (skipping pair " << pair << ")";
             all_ok = false;

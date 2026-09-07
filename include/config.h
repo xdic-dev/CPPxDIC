@@ -35,6 +35,10 @@ public:
     // Camera pairs: per-pair (cam_first, cam_second) mapping
     // Default matches MATLAB import_raw_vid: pair1=(1,2), pair2=(4,3)
     std::vector<std::pair<int, int>> camera_pairs = {{1, 2}, {4, 3}};
+    // Mirrored (MNG) rig settings, from theGlobalSettings_MNG.m. Only used when the
+    // executable is built with -DXDIC_MODE=mirrored.
+    int mirrored_num_pair = 7;                        // Npair: 8 views -> 7 overlapping stereopairs
+    std::vector<int> mirrored_cam_order = {2, 1, 4, 3}; // cam_order: physical camera per view slot
     double robot_sample_freq = 1000.0; // robot sampling frequency (Hz)
     double vid_sample_freq = 50.0;     // image sampling frequency (Hz)
 

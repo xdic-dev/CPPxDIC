@@ -433,7 +433,7 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 #elif defined(XDIC_MODE_MIRRORED)
-        // ---- Mirrored-camera mode: STUB (Section 2d). ----
+        // ---- Mirrored-camera (MNG) mode (Section 2d). ----
         if (!xdic::mirrored::run(config)) {
             LOG_ERROR << "Mirrored mode failed.";
             return 1;

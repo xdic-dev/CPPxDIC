@@ -6,6 +6,9 @@
 #include "matlab_functions.h"
 #include "logging.h"
 #include <opencv2/imgproc.hpp>
+#if CV_VERSION_MAJOR >= 5
+#include <opencv2/geometry.hpp> // cv::moments / cv::contourArea moved out of imgproc in OpenCV 5
+#endif
 #include <iostream>
 #include <cmath>
 #include <algorithm>

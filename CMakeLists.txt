@@ -80,9 +80,11 @@ add_executable(cppxdic
 
 # ----------------------------------------------------------------------------
 # xDIC reconstruction mode selection (Section 2c)
-# Choose the reconstruction mode at configure time. Only `camerapairs` is fully
-# implemented; `mirrored` and `multi` are stubs gated behind this flag so that
-# the working pipeline is never restructured to add them.
+# Choose the reconstruction mode at configure time. `camerapairs` is the default
+# pipeline. `mirrored` (MNG single-camera + mirror rig) is implemented and reuses
+# the camerapairs ROI/seed/filter/ncorr/step2_dic_finish infrastructure. `multi`
+# is still a stub whose translation unit contains a #error guard. Modes are gated
+# behind this flag so the working pipeline is never restructured to add them.
 #   cmake -DXDIC_MODE=camerapairs ..   (default)
 #   cmake -DXDIC_MODE=mirrored ..
 #   cmake -DXDIC_MODE=multi ..
@@ -101,7 +103,7 @@ endif()
 message(STATUS "xDIC mode: ${XDIC_MODE} (define ${XDIC_MODE_DEFINE})")
 target_compile_definitions(cppxdic PRIVATE ${XDIC_MODE_DEFINE})
 
-# Mirrored-camera mode skeleton (Section 2d): compiled only for XDIC_MODE=mirrored.
+# Mirrored-camera mode (Section 2d): compiled only for XDIC_MODE=mirrored.
 if(XDIC_MODE STREQUAL "mirrored")
     target_sources(cppxdic PRIVATE src/xdic/mirrored/mirrored_mode.cpp)
 endif()
