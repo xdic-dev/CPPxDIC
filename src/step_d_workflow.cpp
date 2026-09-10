@@ -647,12 +647,36 @@ bool StepDWorkflow::matchingInitialFrame(const std::vector<cv::Mat>& cam_ref,
         static_cast<int>(ref_seed_point.pw[1])
     };
     
-    // Run ncorr analysis and save to cache-compatible path (for formatOutput to find)
-    auto dic_output = runNcorrAnalysis(cam_ref[0], cur_imgs, refmask_ref,
-                                      ref_seed_point, step1_2_params_,
+    // Run ncorr analysis and save to cache-compatible path (for formatOutput to find).
+    // The user-drawn seed is chosen on the REFERENCE view; near the ROI boundary the
+    // other camera may see that spot under a very oblique angle and the inter-camera
+    // seed does not converge ("could not seed any current image"). In that case retry
+    // once from the ROI centre of mass, which sits in the best-overlapping part of the
+    // surface; the mapped seed for the second camera is then derived from that point
+    // too (the first camera keeps the user seed for tracking).
+    SeedPoint matching_seed = ref_seed_point;
+    ncorr::DIC_analysis_output dic_output;
+    try {
+        dic_output = runNcorrAnalysis(cam_ref[0], cur_imgs, refmask_ref,
+                                      matching_seed, step1_2_params_,
                                       ncorr_matching_path, false, true); // false for parallel processing, true for no update
+    } catch (const std::runtime_error& e) {
+        const std::string what = e.what();
+        if (what.find("could not seed") == std::string::npos) throw;
+        const std::vector<int> c = ROIManager::findROICenter(refmask_ref); // [x, y]
+        matching_seed = SeedPoint(c[0], c[1]);
+        matching_seed.sw = ROIManager::mapPixel2Subset(matching_seed.pw, step1_2_params_.spacing);
+        LOG_WARN << "Matching seed (" << ref_seed_point.pw[0] << "," << ref_seed_point.pw[1]
+                 << ") did not converge in the other camera (" << what
+                 << "); retrying from the ROI centre of mass (" << matching_seed.pw[0] << ","
+                 << matching_seed.pw[1] << ")";
+        step1_2_params_.initial_seed = {matching_seed.pw[0], matching_seed.pw[1]};
+        dic_output = runNcorrAnalysis(cam_ref[0], cur_imgs, refmask_ref,
+                                      matching_seed, step1_2_params_,
+                                      ncorr_matching_path, false, true);
+    }
 
-    if (!updateMaskAndSeedFromOutput(refmask_ref, ref_seed_point, dic_output,
+    if (!updateMaskAndSeedFromOutput(refmask_ref, matching_seed, dic_output,
                                      refmask_cur_matched, after_disp_seed_point)) {
         LOG_ERROR << "No displacement output from matching";
         return false;
