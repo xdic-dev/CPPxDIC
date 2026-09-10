@@ -78,6 +78,12 @@ step_e_step_ref_change = 10
 step_e_initial_seed = 
 step_e_distortion_removal = false
 
+# Stitching of the per-pair 3D surfaces (used when all pairs of a trial exist):
+#   geometric = MATLAB-faithful overlap removal + boundary zipping (can take hours
+#               on multi-pair rigs with large overlaps, e.g. 8-view MNG)
+#   simple    = plain append of all pairs (overlaps kept), seconds
+step_e_stitch_mode = geometric
+
 # --- Step F (Deformation) ---
 step_f_analysis_type = regular
 step_f_radius = 40

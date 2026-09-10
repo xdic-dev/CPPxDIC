@@ -300,7 +300,11 @@ bool Config::loadFromDicParamsFile(const std::string& filepath) {
             step_f.initial_seed = parseIntList(value);
         }
         // Step E specific parameters (3D reconstruction)
-        else if (!(value = parseConfigValue(line, "step_e_distortion_removal")).empty()) {
+        else if (!(value = parseConfigValue(line, "step_e_stitch_mode")).empty()) {
+            std::string m = value; std::transform(m.begin(), m.end(), m.begin(), ::tolower);
+            if (m == "geometric" || m == "simple") step_e_stitch_mode = m;
+            else LOG_WARN << "Unknown step_e_stitch_mode '" << value << "' (geometric|simple), keeping " << step_e_stitch_mode;
+        } else if (!(value = parseConfigValue(line, "step_e_distortion_removal")).empty()) {
             step_e_distortion_removal = parseBool(value);
         } else if (!(value = parseConfigValue(line, "step_d_replacebadcorr")).empty()) {
             step_d_replacebadcorr = parseBool(value);

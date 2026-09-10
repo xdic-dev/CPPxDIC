@@ -1176,7 +1176,11 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     continue;
                 }
 
-                if (all_pairs.size() > 1 && all_pairs.size() == static_cast<size_t>(config_.num_pair)) {
+                if (all_pairs.size() > 1 && config_.step_e_stitch_mode == "simple") {
+                    LOG_INFO << "  step_e_stitch_mode=simple: appending " << all_pairs.size()
+                             << " pairs without overlap removal";
+                    stitched = stitchPairsSimple(all_pairs);
+                } else if (all_pairs.size() > 1 && all_pairs.size() == static_cast<size_t>(config_.num_pair)) {
                     if (!have_stitch_metadata) {
                         bool protocol_loaded = false;
                         bool protocol_available = false;

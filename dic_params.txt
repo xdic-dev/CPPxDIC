@@ -237,6 +237,12 @@ camera_pairs = 1,2;4,3
 # MATLAB step3_dic_rewrited.m has distortionRemovalLogic = 0 (disabled)
 step_e_distortion_removal = false
 
+# Stitching of the per-pair 3D surfaces (used when all pairs of a trial exist):
+#   geometric = MATLAB-faithful overlap removal + boundary zipping (can take hours
+#               on multi-pair rigs with large overlaps, e.g. 8-view MNG)
+#   simple    = plain append of all pairs (overlaps kept), seconds
+step_e_stitch_mode = geometric
+
 # ============================================================================
 # STEP D: 2D DIC POST-PROCESSING OPTIONS
 # ============================================================================

@@ -144,6 +144,11 @@ public:
     StepConfig step_f; // Step F: combined/final
 
     // Step E specific parameters (3D reconstruction)
+    // Step E stitching of the per-pair 3D surfaces: "geometric" (MATLAB-faithful overlap
+    // removal + boundary zipping; O(iterations x boundary x faces), can take many hours
+    // on multi-pair rigs with large overlaps) or "simple" (plain append of all pairs,
+    // overlaps kept). Only used when every pair of the trial was reconstructed.
+    std::string step_e_stitch_mode = "geometric";
     bool step_e_distortion_removal =
         false; // Remove distortion from 2D points (MATLAB default: false)
     bool step_d_replacebadcorr =
