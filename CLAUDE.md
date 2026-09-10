@@ -77,6 +77,38 @@ Merge order: 2→1 first, then 3→2. CppNCorr PR: `feat/fixed-step-ref` → mai
 - `debug_stepe.sbatch` — rerun selected `--stages` on an existing run dir under
   gdb (`cppxdic_dbg`), for backtraces. RUN=<name> STAGES=<spec> LOGLEVEL=debug.
 
+## Config keys that used to be silently ignored (fixed Sept 2026, fix/config-driven-pairs-mng-data)
+
+- `camera_pairs` is now the ONLY source of the stereopair -> cameras table
+  (`Utils::setCameraPairs`, registered in main.cpp / DicAnalysis ctor). Before,
+  every call site used the hard-coded {1,2 ; 4,3}: pair >= 3 mapped to cams
+  (1,2) -> "could not seed any current image" on multi-pair rigs.
+- `im_saturation_mode` (default true) — set false for videos already filtered
+  upstream (MNG rigs): satur.m clipping flattens the speckle and ncorr diverges
+  ("hessian failed" with huge p1/p2). `limit_grayscale = 0` = auto (subject
+  NUMBER rule: S01..S07 -> 70, else 100; ids without digits, e.g. "Artem", -> 70).
+- `force_frame_window` (default false) — idx_frame_start/end/jump authoritative;
+  otherwise ANY `*.mat` in the protocol dir silently sets the per-phase window.
+  A protocol .mat is optional when `ref_trial_id` is set (MNG `.tsv` protocols
+  are not parsed).
+- ncorr_params `cutoff_max_corrcoef` / `cutoff_max_diffnorm` /
+  `seeds_are_optimized` now really reach the engine (engine defaults 0.5 / 0.1
+  applied before). Inter-view MATCHING calls (<= 2 current images) use
+  `matching_cutoff_max_corrcoef` (default 1.0): the MNG pair-1 matching seed
+  converges at corrcoef 0.51 and the 0.5 tracking gate rejected it — that was
+  the whole July "mirrored mode cannot match" story.
+- Video lookup: strict `<subj>_<mat>_speckles_<trial>_*_cam_<id>.mp4` first,
+  then a relaxed `*_<trial>_*_cam_<id>.mp4` fallback (logged as WARN).
+- `video_quality = high` no longer crashes (stoi); `dic_engine` MUST be `ncorr`
+  in CPU-only images (compiled default cuncorr = single-thread CPU fallback).
+- External user's 8-view dataset ("Artem", 4 pairs 1,2;3,4;5,6;7,8, per-view
+  968x1216 pre-filtered videos) lives on LEMAITRE:
+  `/globalscratch/ucl/inma/jaoga/louis/`; rerun harness in `../louis_run/`.
+- Mirrored (MNG) mode work is a SEPARATE worktree/branch:
+  `../CPPxDIC-mirrored` = `feat/mirrored-mode-mng` (stacked on the fix branch);
+  Manneback copy synced WITHOUT .git (`.build_commit` carries the SHA), runs in
+  `/globalscratch/ucl/inma/jaoga/mirrored_run/`.
+
 ## Key findings (details in deploy/cluster/cpugpu/results/REPORT.md)
 
 - **Perf (Step D, 150-frame trial)**: GPU (1×A100) ~17 min ≈ 3.7-4× faster than
