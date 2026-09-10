@@ -1158,7 +1158,48 @@ bool StepDWorkflow::updateMaskAndSeedFromOutput(const cv::Mat& input_mask,
         }
     }
 
-    output_seed.sw = ROIManager::mapPointCoordinate(input_seed.sw, U_mapped, V_mapped);
+    // The seed can only be transported through the field where the field is VALID.
+    // A user seed near the ROI edge often sits on a grid point the matching never
+    // converged at (u=v=0 there) and would be "mapped" onto itself, i.e. outside the
+    // matched ROI of the other camera -> the next tracking call cannot seed. In that
+    // case transport the valid grid point closest to the centroid of the valid field.
+    const auto& valid_mask = disp.get_roi().get_mask();
+    const int gw = static_cast<int>(u_data.data_width());
+    const int gh = static_cast<int>(u_data.data_height());
+    auto grid_valid = [&](int gx, int gy) {
+        if (gx < 0 || gy < 0 || gx >= gw || gy >= gh) return false;
+        return static_cast<bool>(valid_mask(gy, gx)) && std::isfinite(u_array(gy, gx)) &&
+               std::isfinite(v_array(gy, gx));
+    };
+    SeedPoint seed_used = input_seed;
+    if (!grid_valid(input_seed.sw[0], input_seed.sw[1])) {
+        double sx = 0.0, sy = 0.0;
+        long n = 0;
+        for (int gy = 0; gy < gh; ++gy)
+            for (int gx = 0; gx < gw; ++gx)
+                if (grid_valid(gx, gy)) { sx += gx; sy += gy; ++n; }
+        if (n == 0) {
+            LOG_ERROR << "Displacement field has no valid point: cannot transport the seed";
+            return false;
+        }
+        const double cx = sx / n, cy = sy / n;
+        int bx = -1, by = -1;
+        double best = 1e300;
+        for (int gy = 0; gy < gh; ++gy)
+            for (int gx = 0; gx < gw; ++gx)
+                if (grid_valid(gx, gy)) {
+                    const double d = (gx - cx) * (gx - cx) + (gy - cy) * (gy - cy);
+                    if (d < best) { best = d; bx = gx; by = gy; }
+                }
+        seed_used.sw = {bx, by};
+        seed_used.pw = ROIManager::mapSubset2Pixel(seed_used.sw, static_cast<int>(scale - 1.0));
+        LOG_WARN << "Seed (" << input_seed.pw[0] << "," << input_seed.pw[1]
+                 << ") lies where the matching field is invalid; transporting the seed from the "
+                    "valid grid point nearest the field centroid instead: ("
+                 << seed_used.pw[0] << "," << seed_used.pw[1] << ")";
+    }
+
+    output_seed.sw = ROIManager::mapPointCoordinate(seed_used.sw, U_mapped, V_mapped);
     output_seed.pw = ROIManager::mapSubset2Pixel(output_seed.sw, static_cast<int>(scale - 1.0));
 
     output_mask = input_mask.clone();
