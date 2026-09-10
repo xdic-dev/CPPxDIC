@@ -20,7 +20,7 @@ perspective_interp = false
 units = mm
 seeds_are_optimized = false
 cutoff_max_diffnorm = 0.1
-cutoff_max_corrcoef = 1.0
+cutoff_max_corrcoef = 0.5
 
 # Seed-quality gate for inter-view MATCHING seeds (cam1->cam2 / view1->view2 at the
 # reference frame). Different perspectives correlate worse than consecutive frames,
