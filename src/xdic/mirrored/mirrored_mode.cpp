@@ -35,6 +35,7 @@
 #include <opencv2/opencv.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -507,13 +508,30 @@ bool processPair(const Config& config, int trial, const ViewPair& vp, int frameS
         std::vector<cv::Mat> match_cur = {view2.front(), view1.front()};
         const std::string match_out =
             Utils::buildNcorrFilePath(out_dir, vp.view1.view_nbr, vp.view2.view_nbr, ".bin");
-        ncorr::DIC_analysis_output dic12 =
-            runViewDic(config, view1.front(), match_cur, roi_view1, seed1, step_match,
-                       out_dir + "/tmp_ncorr_match", match_out);
+        // Same fallback as StepDWorkflow::matchingInitialFrame: a seed near the ROI
+        // boundary may not converge in the other view; retry once from the ROI centre.
+        cppxdic::SeedPoint match_seed = seed1;
+        ncorr::DIC_analysis_output dic12;
+        try {
+            dic12 = runViewDic(config, view1.front(), match_cur, roi_view1, match_seed, step_match,
+                               out_dir + "/tmp_ncorr_match", match_out);
+        } catch (const std::runtime_error& e) {
+            const std::string what = e.what();
+            if (what.find("could not seed") == std::string::npos) throw;
+            const std::vector<int> c = cppxdic::ROIManager::findROICenter(roi_view1); // [x, y]
+            match_seed = cppxdic::SeedPoint(c[0], c[1]);
+            match_seed.sw = cppxdic::ROIManager::mapPixel2Subset(match_seed.pw, step_track.spacing);
+            LOG_WARN << "mirrored: matching seed (" << seed1.pw[0] << "," << seed1.pw[1]
+                     << ") did not converge in view " << vp.view2.view_nbr
+                     << "; retrying from the ROI centre of mass (" << match_seed.pw[0] << ","
+                     << match_seed.pw[1] << ")";
+            dic12 = runViewDic(config, view1.front(), match_cur, roi_view1, match_seed, step_match,
+                               out_dir + "/tmp_ncorr_match", match_out);
+        }
 
         // Port of: refmask_trial_matched = h12.current(1).roi.mask;
         //          initial_seed_point_set2 = map_pointcoordinate(seed1.sw, {U,V}/(spacing+1))
-        if (!cppxdic::StepDWorkflow::updateMaskAndSeedFromOutput(roi_view1, seed1, dic12,
+        if (!cppxdic::StepDWorkflow::updateMaskAndSeedFromOutput(roi_view1, match_seed, dic12,
                                                                   roi_view2_matched, seed2)) {
             LOG_WARN << "mirrored: matching produced no displacement field; view2 will reuse "
                         "the view1 ROI/seed";
