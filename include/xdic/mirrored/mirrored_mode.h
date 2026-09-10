@@ -119,9 +119,11 @@ bool importRawViewMirrored(const Config& config, int trial, const ViewInfo& view
  * Results are written under <dic_path>/<subject>/<material>/<trial>/<phase>/mirrored_pair<N>.
  *
  * @param config Fully-resolved configuration.
- * @return true on success.
+ * @param trials Trials to process (--trial/--trials selection). Empty = the reference
+ *               trial only (config.ref_trial_id), as in the MATLAB single-trial script.
+ * @return true when every (trial, stereopair) succeeded.
  */
-bool run(const Config& config);
+bool run(const Config& config, const std::vector<int>& trials = {});
 
 } // namespace mirrored
 } // namespace xdic

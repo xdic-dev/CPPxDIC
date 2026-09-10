@@ -1,0 +1,133 @@
+Bootstrap: docker
+From: ubuntu:22.04
+
+%labels
+    Author CPPxDIC Team
+    Version 1.0-mirrored
+    Description CPPxDIC built with XDIC_MODE=mirrored (mirrored-camera xDIC reconstruction)
+
+%help
+    CPPxDIC container built for XDIC_MODE=mirrored (Section 2d mirrored-camera
+    reconstruction, src/xdic/mirrored/mirrored_mode.cpp) instead of the default
+    camerapairs mode. XDIC_MODE is a CMake compile-time cache variable, so a
+    single binary can only serve one mode — this image cannot also do
+    camerapairs reconstruction. Only the `cppxdic` binary is mode-sensitive:
+    `singledic` hardcodes XDIC_MODE_CAMERAPAIRS regardless of this build's
+    XDIC_MODE (see CMakeLists.txt), so it behaves identically to the plain
+    cppxdic.def image and is included here only for convenience.
+
+    Apps baked into the image (select by first argument; default cppxdic):
+        cppxdic            mirrored-camera 3D-DIC pipeline (XDIC_MODE=mirrored)
+        singledic          single-camera 2D DIC (always camerapairs internals)
+        proxyncorr         pass-through DIC driver over an image folder
+        gen_subject_trial  generate subject_trial.csv for SLURM arrays
+        apptainer run cppxdic_mirrored.sif --list-apps   # list what is built in
+
+    Build:
+        apptainer build --fakeroot cppxdic_mirrored.sif deploy/cluster/cppxdic_mirrored.def
+
+    Run (default cppxdic, mirrored mode):
+        apptainer run cppxdic_mirrored.sif --dic-params /path/to/dic_params.txt
+
+    Run (with SLURM):
+        See submit_job_mirrored.sh  (APP=singledic sbatch submit_job_mirrored.sh ...)
+
+%environment
+    export LC_ALL=C
+    export LANG=C
+    export PATH=/opt/cppxdic/bin:$PATH
+    export LD_LIBRARY_PATH=/usr/local/lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+    export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
+
+%post
+    # =========================================================================
+    # System packages (identical set to cppxdic.def — this is a CPU/ncorr-only
+    # image, no CUDA toolchain, so CPPXDIC_HAVE_CUNCORR auto-detects OFF)
+    # =========================================================================
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        g++ \
+        git \
+        pkg-config \
+        ca-certificates \
+        wget \
+        libopencv-dev \
+        libfftw3-dev \
+        libmatio-dev \
+        libhdf5-dev \
+        libcgal-dev \
+        libeigen3-dev \
+        libsuitesparse-dev \
+        liblapack-dev \
+        libblas-dev \
+        libopenblas-dev \
+        libomp-dev \
+        nlohmann-json3-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+    echo "=== Verifying dependencies ==="
+    pkg-config --modversion opencv4   || echo "WARN: opencv4 pkg-config missing (may still work)"
+    dpkg -s libmatio-dev              | grep Version
+    dpkg -s libhdf5-dev               | grep Version
+    echo "=== All dependencies verified ==="
+
+    # =========================================================================
+    # Clone and build CPPxDIC (XDIC_MODE=mirrored)
+    # =========================================================================
+    rm -rf /opt/cppxdic/src/build
+    rm -rf /opt/cppxdic/src/tests/build
+    rm -rf /opt/cppxdic/src/Tools/CppNCorr/lib
+    rm -f  /opt/cppxdic/src/compile_commands.json
+
+    cd /opt/cppxdic/src
+    mkdir -p build && cd build
+
+    # The one difference from cppxdic.def: -DXDIC_MODE=mirrored. This only
+    # changes which src/xdic/<mode>/ file compiles into `cppxdic`; singledic
+    # and proxyncorr are unaffected by this flag.
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/opt/cppxdic \
+        -DCMAKE_CXX_STANDARD=17 \
+        -DXDIC_MODE=mirrored \
+        -DBUILD_SINGLEDIC=ON \
+        -DBUILD_PROXYNCORR=ON \
+        -DBUILD_GEN_SUBJECT_TRIAL=ON
+
+    make -j$(nproc) cppxdic singledic proxyncorr gen_subject_trial
+    mkdir -p /opt/cppxdic/bin
+    cp cppxdic singledic proxyncorr gen_subject_trial /opt/cppxdic/bin/
+    install -m 0755 /opt/cppxdic/src/deploy/entrypoint.sh /opt/cppxdic/bin/entrypoint.sh
+
+    # Cleanup build artifacts to reduce image size
+    rm -rf /opt/cppxdic/src/build
+
+%files
+    # Copy the entire project source into the container at build time
+    # Run: apptainer build --fakeroot cppxdic_mirrored.sif deploy/cluster/cppxdic_mirrored.def
+    # from the CPPxDIC repo root.
+    . /opt/cppxdic/src
+
+%runscript
+    # App dispatcher: `apptainer run cppxdic_mirrored.sif <app> [args]` selects
+    # a binary (cppxdic, singledic, proxyncorr, gen_subject_trial); with no app
+    # name it falls through to cppxdic (mirrored mode) so existing invocations
+    # keep working. `apptainer run cppxdic_mirrored.sif --list-apps` lists
+    # what is baked in.
+    exec /opt/cppxdic/bin/entrypoint.sh "$@"
+
+%test
+    echo "=== Running container self-test ==="
+    for app in cppxdic singledic proxyncorr gen_subject_trial; do
+        bin="/opt/cppxdic/bin/${app}"
+        test -x "${bin}" || { echo "FAIL: ${app} binary not found"; exit 1; }
+        if ldd "${bin}" | grep -q "not found"; then
+            echo "FAIL: ${app} has missing shared libs"; ldd "${bin}" | grep "not found"; exit 1
+        fi
+        echo "OK: ${app}"
+    done
+    /opt/cppxdic/bin/entrypoint.sh --help >/dev/null || { echo "FAIL: cppxdic --help failed"; exit 1; }
+    echo "=== Self-test PASSED ==="

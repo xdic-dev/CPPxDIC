@@ -461,7 +461,7 @@ int main(int argc, char* argv[]) {
         }
 #elif defined(XDIC_MODE_MIRRORED)
         // ---- Mirrored-camera (MNG) mode (Section 2d). ----
-        if (!xdic::mirrored::run(config)) {
+        if (!xdic::mirrored::run(config, selected_trials)) {
             LOG_ERROR << "Mirrored mode failed.";
             return 1;
         }
