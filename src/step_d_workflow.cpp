@@ -1324,7 +1324,20 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     // when correlation drops, leading to ROI fragmentation and divergence around frame 60-70.
     // Setting this to ncorr_cutoff_corrcoef (default 10.0) effectively disables correlation-based updates.
     dic_input.update_corrcoef = config_.ncorr_cutoff_corrcoef;
-    
+
+    // Seed-quality gate (ncorr_params cutoff_max_corrcoef / matching_cutoff_max_corrcoef).
+    // A seed whose optimised corrcoef exceeds the gate is rejected ("could not seed any
+    // current image"). Inter-view MATCHING calls (<= 2 current images) legitimately
+    // correlate worse than frame-to-frame tracking because the two cameras see the
+    // surface under different perspectives, so they get their own, looser gate.
+    const bool is_matching_call = cur_imgs.size() <= 2;
+    const double seed_cutoff_corrcoef = is_matching_call
+        ? config_.ncorr_matching_cutoff_max_corrcoef
+        : config_.ncorr_cutoff_max_corrcoef;
+    LOG_DEBUG << "  Seed gate: cutoff_max_corrcoef=" << seed_cutoff_corrcoef
+              << (is_matching_call ? " (matching)" : " (tracking)")
+              << ", cutoff_max_diffnorm=" << config_.ncorr_cutoff_max_diffnorm;
+
     // Run DIC analysis (returns Lagrangian perspective in pixels)
     ncorr::DIC_analysis_output dic_output_raw;
 
@@ -1367,6 +1380,9 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
         // Create parallel input structure
         ncorr::DIC_analysis_parallel_input dic_parallel_input(dic_input, seeds);
         dic_parallel_input.fixed_step_ref = config_.ncorr_fixed_step_ref;
+        dic_parallel_input.seeds_are_optimized = config_.ncorr_seeds_are_optimized;
+        dic_parallel_input.cutoff_max_diffnorm = config_.ncorr_cutoff_max_diffnorm;
+        dic_parallel_input.cutoff_max_corrcoef = seed_cutoff_corrcoef;
         if (config_.ncorr_fixed_step_ref > 0) {
             LOG_INFO << "  Fixed-step reference updates: every "
                      << config_.ncorr_fixed_step_ref << " frames";
@@ -1381,8 +1397,11 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
                   << (config_.ncorr_use_exact_matlab ? " (exact_matlab_*)" : " (matlab_*)")
                   << "...";
         ncorr::DIC_analysis_parallel_input dic_sequential_input(
-            dic_input, {ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1])}, false);
+            dic_input, {ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1])},
+            config_.ncorr_seeds_are_optimized);
         dic_sequential_input.fixed_step_ref = config_.ncorr_fixed_step_ref;
+        dic_sequential_input.cutoff_max_diffnorm = config_.ncorr_cutoff_max_diffnorm;
+        dic_sequential_input.cutoff_max_corrcoef = seed_cutoff_corrcoef;
         dic_output_raw = config_.ncorr_use_exact_matlab
             ? ncorr::exact_matlab_DIC_analysis_sequential(dic_sequential_input)
             : ncorr::matlab_DIC_analysis_sequential(dic_sequential_input);

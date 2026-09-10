@@ -178,9 +178,17 @@ public:
                                             // true = biquintic B-spline (MATLAB ncorr behavior; safe
                                             // since the recursive bcoef filter fix)
     std::string ncorr_units = "mm";                          // Units string
-    bool ncorr_seeds_are_optimized = true;                   // Optimized seeds
-    double ncorr_cutoff_max_diffnorm = 1e-5;                 // Max diff norm cutoff
-    double ncorr_cutoff_max_corrcoef = 10.0;                 // Max corr coef cutoff
+    // Seed-quality gates (ncorr_params.txt). A seed whose optimised solution exceeds
+    // either gate is rejected -> "could not seed any current image". Defaults match
+    // CppNCorr's own defaults; before these were wired through, the engine defaults
+    // (0.1 / 0.5) always applied whatever the config said.
+    bool ncorr_seeds_are_optimized = false;                  // seeds already optimised (skip seed optimisation)
+    double ncorr_cutoff_max_diffnorm = 0.1;                  // max diffnorm accepted for a seed
+    double ncorr_cutoff_max_corrcoef = 0.5;                  // max corrcoef accepted for a TRACKING seed
+    // Looser gate for inter-view MATCHING seeds (cam1->cam2 / view1->view2 at the
+    // reference frame): different perspectives correlate worse than consecutive
+    // frames (MNG mirrored rig pair 1: 0.51, rejected by the 0.5 tracking gate).
+    double ncorr_matching_cutoff_max_corrcoef = 1.0;
     int ncorr_threads = 4;                                   // Number of threads
     bool ncorr_use_exact_matlab =
         false; // Use exact_matlab_DIC_analysis_* (mirrors MATLAB ncorr_alg_addanalysis chain
