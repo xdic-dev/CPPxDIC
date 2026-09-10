@@ -21,3 +21,9 @@ units = mm
 seeds_are_optimized = false
 cutoff_max_diffnorm = 1e-5
 cutoff_max_corrcoef = 1.0
+
+# DIC engine: ncorr (CppNCorr, multi-threaded CPU via parallel_processing +
+# step_d_total_threads) or cuncorr (cuNCorr GPU; falls back to a single-threaded
+# CPU backend without a GPU). The compiled-in default is cuncorr, so a CPU-only
+# image MUST set ncorr explicitly.
+dic_engine = ncorr

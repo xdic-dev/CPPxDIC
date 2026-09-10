@@ -37,6 +37,15 @@ frame_jump = 1
 
 # --- Processing flags ---
 im_filter_mode = false
+
+# Grayscale saturation (satur.m clipping above limit_grayscale) on imported frames.
+# Set false for videos already filtered/normalised upstream (e.g. MNG rigs):
+# clipping such frames flattens the speckle contrast and makes ncorr diverge.
+im_saturation_mode = true
+
+# When true, idx_frame_start/idx_frame_end/frame_jump are authoritative; the
+# protocol-derived per-phase window (from the protocol .mat) is not applied.
+force_frame_window = false
 automatic_process = true
 parallel_processing = false
 debug_mode = false
@@ -86,12 +95,18 @@ step_f_freq_filt = 10.0
 step_f_compute_rbm = false
 
 # --- Camera pairs ---
+# One entry per stereopair, in pair order; must list at least num_pair entries
+# (e.g. an 8-camera rig: camera_pairs = 1,2;3,4;5,6;7,8). Missing entries default
+# to (2N-1, 2N). Video files, REF masks/seeds and DLT calibrations are resolved
+# from these camera ids.
 camera_pairs = 1,2;4,3
 
 # --- Units & Calibration ---
 units_per_pixel = 0.2
 subregion_radius = 20
-limit_grayscale = 70
+# Saturation limit: 0 = automatic (70 for subject numbers < 8, 100 otherwise);
+# any positive value is used as-is (needed for subjects without a number, e.g. Artem)
+limit_grayscale = 0
 
 # --- Output ---
 fileversion = v2

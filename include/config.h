@@ -49,6 +49,15 @@ public:
 
     // Processing flags
     bool im_filter_mode = true;
+    // Grayscale saturation (satur.m: clip pixels above limit_grayscale) applied to
+    // every imported frame before ROI/matching/tracking. Set false for videos that
+    // were already filtered/normalised upstream (e.g. MNG rigs), where clipping
+    // would flatten the speckle contrast and make ncorr diverge.
+    bool im_saturation_mode = true;
+    // When true, idx_frame_start/idx_frame_end/frame_jump are authoritative and the
+    // protocol-derived per-phase window (loading/slide/relax from the protocol .mat)
+    // is NOT applied. Default false keeps the historical protocol-driven behaviour.
+    bool force_frame_window = false;
     bool automatic_process = true;   // automatic processing flag
     bool parallel_processing = true; // parallel processing flag
 
@@ -120,7 +129,10 @@ public:
     // Units and subregion
     double units_per_pixel = 0.2; // e.g., mm per pixel
     int subregion_radius = 20;    // default subset radius (pixels)
-    int limit_grayscale = 70;     // Grayscale limit threshold
+    // Grayscale saturation limit. 0 (default) = automatic: 70 for subjects whose
+    // id number is < 8 (S01..S07), 100 otherwise (legacy MATLAB rule); any positive
+    // value is used as-is regardless of the subject id.
+    int limit_grayscale = 0;
 
     // Step-level DIC parameters (loaded from dic_params.txt)
     StepConfig step_d;       // Step D: initial tracking

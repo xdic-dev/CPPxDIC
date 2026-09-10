@@ -199,3 +199,10 @@ cutoff_iterations = 100
 # Points with correlation above this value are filtered out
 # Default: 10.0 (effectively disabled)
 max_corr_coef_filter = 10.0
+
+# ============================================================================
+# DIC ENGINE
+# ============================================================================
+# ncorr   = CppNCorr (CPU, multi-threaded with parallel_processing + step_d_total_threads)
+# cuncorr = cuNCorr (GPU; single-threaded CPU fallback without a GPU) [compiled default]
+# dic_engine = ncorr

@@ -32,6 +32,9 @@ using namespace ncorr;
 using namespace cppxdic;
 
 DicAnalysis::DicAnalysis(const Config& config) : config_(config) {
+    // Library entry point: make sure the configured stereopair table is active even
+    // when the caller is not main.cpp (tests, tools, other drivers).
+    Utils::setCameraPairs(config_.camera_pairs);
 }
 
 bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {

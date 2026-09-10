@@ -169,10 +169,16 @@ StepDWorkflow::execute(const std::string& trial, int stereopair, const StagePlan
             LOG_INFO << "Phase 'slide1': keeping " << keep << " frames";
         }
 
-        // 5. Saturation
+        // 5. Saturation (satur.m). Skipped for pre-filtered inputs (im_saturation_mode=false).
         std::vector<cv::Mat> cam_first_satur, cam_second_satur;
-        LOG_INFO << "Applying saturation...";
-        performSaturation(cam_first_raw, cam_second_raw, cam_first_satur, cam_second_satur);
+        if (config_.im_saturation_mode) {
+            LOG_INFO << "Applying saturation (limit_grayscale=" << base_params_.limit_grayscale << ")...";
+            performSaturation(cam_first_raw, cam_second_raw, cam_first_satur, cam_second_satur);
+        } else {
+            LOG_INFO << "Skipping saturation (im_saturation_mode=false): raw frames used as-is";
+            cam_first_satur = cam_first_raw;
+            cam_second_satur = cam_second_raw;
+        }
 
         // II. ROI, Seed, and Matching REF to Trial at frame 1
         //     (writes MATCHING2*.bin when absent; loads + applies it when present)
@@ -250,6 +256,13 @@ StepDWorkflow::execute(const std::string& trial, int stereopair, const StagePlan
         pairOrder = {1, 2};
         pairForced = false;
     }
+    // The protocol rule only orders the first two pairs; rigs with more stereopairs
+    // append the remaining ones in natural order so Step E stitches all of them.
+    for (int p = 1; p <= config_.num_pair; ++p) {
+        if (std::find(pairOrder.begin(), pairOrder.end(), p) == pairOrder.end()) {
+            pairOrder.push_back(p);
+        }
+    }
 
     // Post-preps. Format output (loads ncorr{cam1},{cam2},{cam1cam2} -> myDIC2DpairResults)
     if (plan.format) {
@@ -276,15 +289,22 @@ void StepDWorkflow::setupBaseParameters(const std::string& trial,
     base_params_.idxstart_set = config_.idx_frame_start;
     base_params_.idxend_set = config_.idx_frame_end;
     
-    // Set grayscale limit based on subject number
-    int subject_num = 0;
-    for (char ch : config_.subject_id) {
-        if (std::isdigit(ch)) {
-            subject_num = subject_num * 10 + (ch - '0');
+    // Grayscale limit: explicit config value wins; otherwise the legacy MATLAB rule
+    // keyed on the subject NUMBER (S01..S07 -> 70, S08+ -> 100). Subject ids that
+    // carry no digits (e.g. "Artem") count as 0 and get the S<8 default, so such
+    // datasets should set limit_grayscale (or im_saturation_mode=false) explicitly.
+    if (config_.limit_grayscale > 0) {
+        base_params_.limit_grayscale = config_.limit_grayscale;
+    } else {
+        int subject_num = 0;
+        for (char ch : config_.subject_id) {
+            if (std::isdigit(ch)) {
+                subject_num = subject_num * 10 + (ch - '0');
+            }
         }
+        base_params_.limit_grayscale = (subject_num < 8) ?
+            DICConstants::LIMIT_GRAYSCALE_DEFAULT : DICConstants::LIMIT_GRAYSCALE_S8_PLUS;
     }
-    base_params_.limit_grayscale = (subject_num < 8) ? 
-        DICConstants::LIMIT_GRAYSCALE_DEFAULT : DICConstants::LIMIT_GRAYSCALE_S8_PLUS;
     
     // Set camera numbers
     Utils::getCamerasForPair(stereopair, base_params_.cam_1, base_params_.cam_2);
@@ -333,7 +353,20 @@ bool StepDWorkflow::loadProtocol() {
     auto mat_files = Utils::findFiles(protocol_dir, "*.mat");
 
     if (mat_files.empty()) {
-        LOG_ERROR << "No protocol file found in: " << protocol_dir;
+        // Without a protocol the only things we cannot derive are the automatic
+        // reference trial and the direction-based pair order. A manual
+        // ref_trial_id makes the former unnecessary; the latter falls back to the
+        // natural 1..num_pair order. Datasets from other rigs (e.g. MNG .tsv
+        // protocols) therefore run with ref_trial_id set explicitly.
+        if (config_.ref_trial_id > 0) {
+            LOG_WARN << "No protocol .mat file in " << protocol_dir
+                     << " — using ref_trial_id=" << config_.ref_trial_id
+                     << " and the default pair order";
+            protocol_info_ = ProtocolInfo{};
+            return true;
+        }
+        LOG_ERROR << "No protocol file found in: " << protocol_dir
+                  << " (set ref_trial_id / --reftrial to run without a protocol)";
         return false;
     }
 
