@@ -84,6 +84,11 @@ step_e_distortion_removal = false
 #   simple    = plain append of all pairs (overlaps kept), seconds
 step_e_stitch_mode = geometric
 
+# Accelerate the geometric stitcher's ray casts with an AABB hierarchy over the faces.
+# Exact: same hits, same stitched result; it only skips triangles the ray cannot reach.
+# The brute-force scan dominates Step E on rigs with several pairs (hours vs minutes).
+step_e_ray_bvh = false
+
 # --- Step F (Deformation) ---
 step_f_analysis_type = regular
 step_f_radius = 40

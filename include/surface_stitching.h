@@ -34,6 +34,21 @@ DIC3Dcombined stitchPairsGeometric(const std::vector<DIC3DpairResults>& all_pair
                                     const std::vector<int>& pair_order,
                                     bool pair_forced = false);
 
+/**
+ * Enable/disable the AABB-hierarchy prefilter used by the overlap-removal ray casts.
+ *
+ * Off by default. The prefilter is exact (a ray that hits a triangle also hits its
+ * padded bounding box, so nothing is pruned that could have been hit) and only changes
+ * how many triangles are tested per ray: O(log F) box tests instead of O(F) triangle
+ * tests. On rigs with many pairs the brute-force path is the dominant cost of Step E.
+ *
+ * Process-wide, set once from Config::step_e_ray_bvh before stitching.
+ */
+void setStitchRayAccel(bool enabled);
+
+/** Current state of the ray-cast prefilter (see setStitchRayAccel). */
+bool stitchRayAccel();
+
 // ============================================================================
 // Helper functions for geometric stitching
 // ============================================================================

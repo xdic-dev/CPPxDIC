@@ -1176,6 +1176,7 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     continue;
                 }
 
+                cppxdic::setStitchRayAccel(config_.step_e_ray_bvh);
                 if (all_pairs.size() > 1 && config_.step_e_stitch_mode == "simple") {
                     LOG_INFO << "  step_e_stitch_mode=simple: appending " << all_pairs.size()
                              << " pairs without overlap removal";
@@ -1231,6 +1232,8 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                         LOG_INFO << "  Stitch order: " << stitch_order_oss.str();
                     }
                     LOG_INFO << "  Pair forced metadata: " << (stitch_pair_forced ? "true" : "false");
+                    LOG_INFO << "  Ray-cast prefilter (step_e_ray_bvh): "
+                             << (config_.step_e_ray_bvh ? "on (AABB hierarchy)" : "off (full scan)");
                     stitched = stitchPairsGeometric(all_pairs, stitch_pair_order, stitch_pair_forced);
                     LOG_INFO << "Geometric Stitching done!";
                 } else {

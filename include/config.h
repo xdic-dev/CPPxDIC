@@ -149,6 +149,11 @@ public:
     // on multi-pair rigs with large overlaps) or "simple" (plain append of all pairs,
     // overlaps kept). Only used when every pair of the trial was reconstructed.
     std::string step_e_stitch_mode = "geometric";
+    // Accelerate the geometric stitcher's ray casts with an AABB hierarchy over the
+    // faces. Exact (same hits, same result) — it only avoids testing triangles the ray
+    // cannot reach. Off by default while it is being validated against the brute-force
+    // path; on multi-pair rigs the brute-force ray casts dominate Step E.
+    bool step_e_ray_bvh = false;
     bool step_e_distortion_removal =
         false; // Remove distortion from 2D points (MATLAB default: false)
     bool step_d_replacebadcorr =
