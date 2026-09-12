@@ -1,7 +1,7 @@
 # External dataset "Artem" (8-view MNG rig) — diagnosis, fixes and CPU/GPU runs
 
-**Date:** 2026-09-10 → 2026-09-12 · **Branch:** `fix/config-driven-pairs-mng-data`
-(7 commits on top of `main`, 14 files, +445/−64) · **Clusters:** Lemaitre4, Manneback
+**Date:** 2026-09-10 → 2026-09-13 · **Branch:** `fix/config-driven-pairs-mng-data`
+(8 commits on top of `main`) · **Clusters:** Lemaitre4, Manneback
 
 An external user could not get `cppxdic` to run on an 8-view / 4-stereopair rig and
 reported three symptoms: *(a)* "my modified parameters are not taken into account",
@@ -80,6 +80,7 @@ Same cause as (a): pair 3 ran camera 1's frames against pair 3's mask and failed
 | `ec1fc14` | transport the second camera's seed only through a **valid** grid point of the matching field |
 | `2e2a8ae` | cluster template: tracking seed gate back to the engine default 0.5 |
 | `2f8f9da` | `step_e_stitch_mode = geometric \| simple` |
+| `a88a5b9` | optional AABB prefilter for the stitcher ray casts (`step_e_ray_bvh`, default off) |
 | `ca29de8` | CLAUDE.md: the silently-ignored keys, both MNG datasets, the mirrored worktree |
 
 ### The change that actually unblocked the data
@@ -97,8 +98,9 @@ calibration, not a cosmetic detail.
 ## 4. Configuration used for the runs
 
 The user's `configs.zip` verbatim, plus `step_e_stitch_mode = simple` on both clusters
-(the geometric stitcher is unusably slow here, see §6). The only intentional difference
-between the two runs is `dic_engine`.
+(a precaution taken when geometric stitching was believed to be unusably slow — §6 shows
+it would have been affordable). The only intentional difference between the two runs is
+`dic_engine`.
 
 ```
 camera_pairs = 1,2;3,4;6,5;8,7      num_pair = 4        ref_trial_id = 1
@@ -174,34 +176,81 @@ measured figure for this rig and 3.7-4× as specific to S09.
 
 ---
 
-## 6. Remaining issues
+## 6. Step-E stitching study (2026-09-12/13)
 
-1. **Geometric stitching is unusable on a 4-pair rig.** `stitchPairsGeometric` removes one
-   vertex per iteration and re-ray-traces every boundary vertex against every face of the
-   other surface, with no spatial acceleration. On the 2-pair S09 rig it takes minutes; on
-   this rig two trials ran **> 9 h** in stitching alone and were killed. All results above
-   use `step_e_stitch_mode = simple` (plain append, seconds). Fix: an AABB/grid prefilter
-   in `raySetTriangleIntersect` (exact same results, orders of magnitude faster) and/or
-   removing a whole erosion front per iteration instead of one vertex.
-2. **Step F cost grows steeply with point count.** 51-87 min for ~11.8 k points over
-   ~800 frames, against minutes on the 2-pair rig. Worth profiling before this rig is used
-   at production scale.
-3. **Trial-window sensitivity.** With the old (wrong) pair ordering, tracking of camera 6
-   was lost at frame 792/837 (trial 001) and 868/916 (trial 003) — the finger unloads and
-   moves in the last ~45 frames. The reversed ordering removed the symptom for these
-   trials, but any trial with strong late motion can still exhaust a fixed reference; a
-   `fixed_step_ref` sweep would be the mitigation.
-4. **Lemaitre4 queue.** The 12-trial CPU rerun (jobs 7786071-82) sits at position ~11 300
-   of ~12 000 pending with an estimated start of 2026-09-20; that partition had 40/40
-   nodes allocated. Manneback (keira + gpu) is the practical place to run this workload.
-5. **Peak memory.** ncorr on 32 threads reaches 102-114 GB on 837-916 frame trials
-   (32 frames in flight); cuNCorr stays at 73-85 GB. Jobs need `--mem=120G`.
-6. **Interactive prerequisites.** Nothing in the C++ path draws reference masks or seeds;
-   they must come from MATLAB or `xdic_stepsABC`. Worth stating in the user-facing docs.
+I previously reported that geometric stitching was "pathologically slow, > 9 h on a
+4-pair rig" and implemented an AABB prefilter for the ray casts to fix it
+(`step_e_ray_bvh`, opt-in, default off). Measuring it properly **did not support that
+claim** and the record is corrected here.
 
----
+### The prefilter is exact
 
-## 7. Reproducing
+Three input sets, each stitched twice (prefilter off / on), same Step E otherwise:
+
+| Input (trial 001, 4 pairs) | Off | On | Ratio | Stitched mesh (both) |
+|---|---|---|---|---|
+| cuNCorr 2D results, correct pairing | 699 s | 555 s | 1.26× | 11 834 pts / 12 605 faces |
+| ncorr 2D results, correct pairing | 741 s | 603 s | 1.23× | 11 834 pts / 12 605 faces |
+| ncorr 2D results, old pairing (780 fr) | 551 s | 496 s | 1.11× | 11 834 pts / 12 960 faces |
+
+Identical point and face counts every time, and a dataset-level `h5diff` of the two
+`DIC3Dcombined` files reports **0 differences** on every comparable object (the
+"not comparable" entries are v7.3 struct/cell layouts, not values). The two engines'
+2D results also stitch to exactly the same mesh, which cross-checks the reconstruction
+path itself.
+
+### The speedup is modest, and the "> 9 h" case did not reproduce
+
+Ray casting drops from roughly 150 s to a few seconds, but Step E on this rig is
+dominated by per-pair reconstruction, triangulation and writing a 2.7 GB output, so
+end-to-end it is only 1.1-1.3×.
+
+More importantly: the *same* 2D results from the Lemaitre job that I killed after five
+hours in stitching (`Results_t1_780`, old pairing) complete Step E in **9 min 13 s on
+Manneback with the prefilter off** — the identical code path. So the hours-long stitching
+observed on Lemaitre is **not** explained by the stitching algorithm, by the rig having
+four pairs, or by the camera-pair ordering. Its cause is unknown; the most likely
+candidate is the state of that cluster (the batch partition was saturated, 40/40 nodes
+allocated with ~12 000 jobs queued), but the jobs are gone and it could not be
+re-measured. **Do not treat "geometric stitching is unusable on multi-pair rigs" as
+established.**
+
+Consequences:
+
+- `step_e_ray_bvh` stays **off by default**. It is exact and slightly faster, but it is
+  not the rescue it was introduced to be, and an off-by-default option carries no risk.
+- `step_e_stitch_mode = simple` was used for the production trials above as a
+  precaution. On this evidence `geometric` would have been affordable (~10 min).
+
+### Separate finding: geometric stitching can silently discard every face
+
+On the 2-pair S09 inputs (`cpugpu/runs/t7_cuncorr_gpu_r3`), Step E run on its own
+produces **6 738 points and 0 faces**: the stitcher's "remove NaN faces" step drops every
+face whose vertices are NaN in frame 0, overlap removal then returns immediately, and the
+result is written and reported as a success. The July image built from `7a0e3ce` produces
+the identical 0-face output on the same input, so this predates the branch. It has not
+been diagnosed further. A stitch that loses all faces should fail loudly rather than
+write a face-less mesh.
+
+## 7. Remaining issues
+
+1. **The two findings above**: the unexplained Lemaitre slowness, and the silent
+   0-face stitch on S09 inputs.
+2. **Step F cost grows steeply with point count** — 51-87 min for ~11.8 k points over
+   ~800 frames, against minutes on the 2-pair rig. Worth profiling.
+3. **GPU speedup far below the S09 study** (§5): 1.14× on tracking vs 3.7-4×. Engine
+   dispatch and reference updates ruled out; needs an instrumented run.
+4. **Trial-window sensitivity.** With the old pair ordering, camera-6 tracking was lost
+   at frame 792/837 (trial 001) and 868/916 (trial 003). The reversed ordering removed the
+   symptom, but a trial with strong late motion can still exhaust a fixed reference.
+5. **Lemaitre4 queue.** The 12-trial CPU rerun (jobs 7786071-82) is at position ~11 300 of
+   ~12 000 pending, estimated start 2026-09-20. Manneback is the practical place to run this.
+6. **Peak memory.** ncorr on 32 threads reaches 102-114 GB on 837-916 frame trials;
+   cuNCorr stays at 73-85 GB. Jobs need `--mem=120G`.
+7. **Interactive prerequisites.** Nothing in the C++ path draws reference masks or seeds;
+   they must come from MATLAB or `xdic_stepsABC`.
+
+## 8. Reproducing
 
 ```bash
 # Manneback — GPU (cuNCorr) and CPU (ncorr) share data, configs and Results trees
