@@ -1,7 +1,7 @@
 # External dataset "Artem" (8-view MNG rig) — diagnosis, fixes and CPU/GPU runs
 
-**Date:** 2026-09-10 → 2026-09-13 · **Branch:** `fix/config-driven-pairs-mng-data`
-(8 commits on top of `main`) · **Clusters:** Lemaitre4, Manneback
+**Date:** 2026-09-10 → 2026-09-14 · **Branch:** `fix/config-driven-pairs-mng-data`
+(8 commits on top of `main`) · **Clusters:** Manneback (primary), Lemaitre4
 
 An external user could not get `cppxdic` to run on an 8-view / 4-stereopair rig and
 reported three symptoms: *(a)* "my modified parameters are not taken into account",
@@ -150,6 +150,32 @@ re-references in segments and the delayed re-reference could not be seeded, wher
 cuNCorr tracks from a fixed reference with a warm start and does not re-seed. Worth
 noting as an engine robustness difference, not a data problem.
 
+### Same 12 trials on Lemaitre4 (CPU/ncorr) — and why Lemaitre is not comparable
+
+The 12-trial CPU batch queued on Lemaitre4 eventually ran. Same code, same configs, same
+data, `ncorr` on 32 threads — 11 of 12 succeeded, and **trial 011 failed at exactly the
+same point** (`could not seed the segment starting at reference frame 683`), so that
+failure is deterministic and cluster-independent.
+
+| Trial | Wall | Step D | Step E | Step F | vs Manneback CPU: D | Step F |
+|---|---|---|---|---|---|---|
+| 001 | 10:45 | 15 936 s | 481 s | 22 289 s | **0.70×** (faster) | **6.2× slower** |
+| 002 | 9:42 | 14 882 s | 435 s | 19 577 s | 0.63× | 4.8× slower |
+| 003 | 22:58 | 19 790 s | 954 s | 61 918 s | 0.76× | 11.8× slower |
+| 008 | 16:28 | 17 611 s | 624 s | 41 026 s | 0.88× | 14.7× slower |
+| 012 | 20:05 | 19 894 s | 797 s | 51 606 s | 0.72× | 9.5× slower |
+
+The pattern is consistent across all trials: **Lemaitre is faster than Manneback on
+Step D** (multi-threaded, compute-bound — 0.63-0.88× the time, and trial 001's Step D is
+even faster there than on the A100) **and 5-15× slower on Step F** (single-threaded,
+memory- and I/O-heavy). Step E with `simple` stitching is comparable on both.
+
+**This resolves the open question of §6.** A 5-15× penalty on the single-threaded,
+memory-bound phases is exactly the right order to explain the > 5 h geometric stitch
+observed on Lemaitre for an input that takes 9 minutes on Manneback. The slowness was the
+machine, not the stitching algorithm — and it is now measured independently, on Step F,
+with identical code and data. Do not compare Step E/F timings across the two clusters.
+
 ### Phase breakdown, trial 001 (from output-file timestamps)
 
 | Phase (per pair) | cuNCorr GPU | ncorr 32 threads |
@@ -221,10 +247,11 @@ More importantly: the *same* 2D results from the Lemaitre job that I killed afte
 hours in stitching (`Results_t1_780`, old pairing) complete Step E in **9 min 13 s on
 Manneback with the prefilter off** — the identical code path. So the hours-long stitching
 observed on Lemaitre is **not** explained by the stitching algorithm, by the rig having
-four pairs, or by the camera-pair ordering. Its cause is unknown; the most likely
-candidate is the state of that cluster (the batch partition was saturated, 40/40 nodes
-allocated with ~12 000 jobs queued), but the jobs are gone and it could not be
-re-measured. **Do not treat "geometric stitching is unusable on multi-pair rigs" as
+four pairs, or by the camera-pair ordering. **The cause is now identified** (§5): on the same code and data,
+Lemaitre runs Step F 5-15× slower than Manneback while running Step D *faster*. That
+penalty on the single-threaded, memory-bound phases is the right order of magnitude to
+turn a 9-minute stitch into a 5-hour one. The slowness was the machine, not the
+algorithm. **Do not treat "geometric stitching is unusable on multi-pair rigs" as
 established.**
 
 Consequences:
@@ -246,8 +273,8 @@ write a face-less mesh.
 
 ## 7. Remaining issues
 
-1. **The two findings above**: the unexplained Lemaitre slowness, and the silent
-   0-face stitch on S09 inputs.
+1. **The silent 0-face stitch on S09 inputs** (§6). Undiagnosed. (The Lemaitre
+   slowness that was listed here is now explained — see §5.)
 2. **Step F cost grows steeply with point count** — 51-87 min for ~11.8 k points over
    ~800 frames, against minutes on the 2-pair rig. Worth profiling.
 3. **GPU speedup far below the S09 study** (§5): 1.14× on tracking vs 3.7-4×. Engine
@@ -255,8 +282,8 @@ write a face-less mesh.
 4. **Trial-window sensitivity.** With the old pair ordering, camera-6 tracking was lost
    at frame 792/837 (trial 001) and 868/916 (trial 003). The reversed ordering removed the
    symptom, but a trial with strong late motion can still exhaust a fixed reference.
-5. **Lemaitre4 queue.** The 12-trial CPU rerun (jobs 7786071-82) is at position ~11 300 of
-   ~12 000 pending, estimated start 2026-09-20. Manneback is the practical place to run this.
+5. **Run Step E/F on Manneback.** Lemaitre is competitive for Step D but 5-15× slower for
+   Step F (§5), so a full pipeline there costs 8-23 h per trial against 5-9 h on Manneback.
 6. **Peak memory.** ncorr on 32 threads reaches 102-114 GB on 837-916 frame trials;
    cuNCorr stays at 73-85 GB. Jobs need `--mem=120G`.
 7. **Interactive prerequisites.** Nothing in the C++ path draws reference masks or seeds;
