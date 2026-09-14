@@ -114,29 +114,41 @@ dic_engine = cuncorr (GPU run) | ncorr (CPU run)
 
 ---
 
-## 5. Results — trials 001-003, full pipeline (D + E + F)
+## 5. Results — all 12 trials, full pipeline (D + E + F)
 
-Both engines on Manneback, same node class, 32 cores, `rc = 0`, all 4 pairs.
+Both engines on Manneback, 32 cores, reference trial 001. GPU = cuNCorr on A100
+(40 or 80 GB), CPU = ncorr on 32 threads (keira). **23 of 24 runs succeeded** with all
+4 pairs; the one failure is CPU trial 011 (below).
 
-| Trial | Frames | Engine | Step D | Step E | Step F | Wall | Peak RSS |
-|---|---|---|---|---|---|---|---|
-| 001 | 837 | cuNCorr / A100 80GB | 5 h 29 | 7.6 min | 51 min | **6 h 28** | 78 GB |
-| 001 | 837 | ncorr / 32 threads | 6 h 19 | 9.5 min | 60 min | **7 h 29** | 114 GB |
-| 002 | 791 | cuNCorr / A100 40GB | 5 h 13 | 11.8 min | 70 min | **6 h 35** | 73 GB |
-| 002 | 791 | ncorr / 32 threads | 6 h 32 | 10.6 min | 68 min | **7 h 51** | 102 GB |
-| 003 | 916 | cuNCorr / A100 80GB | 6 h 12 | 9.2 min | 59 min | **7 h 19** | 85 GB |
-| 003 | 916 | ncorr / 32 threads | 7 h 14 | 14.2 min | 87 min | **8 h 55** | 111 GB |
+| Trial | Frames | Wall GPU | Wall CPU | Step D GPU | Step D CPU | D speedup | Points | Faces | RSS GPU / CPU |
+|---|---|---|---|---|---|---|---|---|---|
+| 001 | 837 | 6:28 | 7:29 | 19 774 s | 22 715 s | 1.15× | 11 834 | 22 888 | 77 / 114 GB |
+| 002 | 791 | 6:35 | 7:51 | 18 777 s | 23 535 s | 1.25× | 11 790 | 22 801 | 73 / 102 GB |
+| 003 | 916 | 7:19 | 8:55 | 22 294 s | 26 014 s | 1.17× | 11 837 | 22 892 | 85 / 110 GB |
+| 004 | 674 | 4:57 | 6:04 | 15 779 s | 18 987 s | 1.20× | 11 919 / 11 934 | 23 053 / 23 083 | 63 / 89 GB |
+| 005 | 782 | 5:34 | 6:19 | 17 180 s | 19 516 s | 1.14× | 11 781 / 11 782 | 22 779 / 22 781 | 72 / 98 GB |
+| 006 | 824 | 6:09 | 6:52 | 18 918 s | 21 089 s | 1.11× | 11 932 / 11 947 | 23 075 / 23 105 | 77 / 101 GB |
+| 007 | 737 | 5:35 | 6:01 | 17 613 s | 18 838 s | 1.07× | 11 924 | 23 065 | 69 / 93 GB |
+| 008 | 774 | 5:45 | 6:26 | 17 899 s | 19 905 s | 1.11× | 11 925 | 23 067 | 72 / 97 GB |
+| 009 | 786 | 5:55 | 6:43 | 18 389 s | 20 768 s | 1.13× | 11 861 | 22 941 | 73 / 103 GB |
+| 010 | 693 | 5:10 | 5:36 | 16 362 s | 17 556 s | 1.07× | 11 906 | 23 031 | 65 / 95 GB |
+| 011 | 711 | 5:19 | **failed** | 16 763 s | — | — | 11 901 | 23 019 | 66 / 29 GB |
+| 012 | 1000 | 7:48 | 9:27 | 22 783 s | 27 785 s | 1.22× | 11 907 | 23 033 | 93 / 117 GB |
 
-Reconstruction is identical between the two engines:
+Every trial reconstructs ~11.8-11.9 k points and ~23 k faces over 4 pairs, and both
+engines agree exactly on 9 of 11 comparable trials (trials 004, 005 and 006 differ by
+1-15 points out of ~11 900, i.e. slightly different valid-point sets at the ROI edges).
+Each run writes `DIC3Dcombined_4Pairs_stitched.mat` and `DIC3DPPresults_4Pairs_cum_v2.mat`.
 
-| Trial | Frames | Points | Faces | Per-pair points |
-|---|---|---|---|---|
-| 001 | 837 | 11 834 | 22 888 | 2934 / 2699 / 2838 / 3363 |
-| 002 | 791 | 11 790 | 22 801 | 2923 / 2695 / 2828 / 3344 |
-| 003 | 916 | 11 837 | 22 892 | 2941 / 2712 / 2846 / 3338 |
+**Step D speedup: 1.07-1.25×, mean ≈ 1.15×.** Peak memory is consistently lower on the
+GPU path (63-93 GB vs 89-117 GB) because ncorr keeps 32 frames in flight.
 
-Each trial writes `DIC3Dcombined_4Pairs_stitched.mat` and
-`DIC3DPPresults_4Pairs_cum_v2.mat`. Trials 004-012 are running (both engines).
+**The one failure — CPU trial 011**, pair 2: `matlab_DIC_analysis_parallel could not seed
+the segment starting at reference frame 683` (of 711). The GPU run of the same trial with
+the same configuration completed. This is the late-trial tracking loss of §7.4: ncorr
+re-references in segments and the delayed re-reference could not be seeded, whereas
+cuNCorr tracks from a fixed reference with a warm start and does not re-seed. Worth
+noting as an engine robustness difference, not a data problem.
 
 ### Phase breakdown, trial 001 (from output-file timestamps)
 
