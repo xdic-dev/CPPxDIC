@@ -139,6 +139,37 @@ Merge order: 2→1 first, then 3→2. CppNCorr PR: `feat/fixed-step-ref` → mai
   in the `ja/profiling` branch CLAUDE.md; that OMP_NUM_THREADS-only sweeps
   measure nothing still applies.
 
+## Branch structure — SEPTEMBER 2026 UPDATE (read this, the section above is July)
+
+Everything in the July stack is merged into `main` (PR #41). Current work:
+
+1. `fix/config-driven-pairs-mng-data` (12 commits on `main`, pushed) — the config keys
+   that were parsed but ignored, the ncorr seed gates, `step_e_stitch_mode`,
+   `step_e_ray_bvh`, and two reports under `deploy/cluster/{artem,mirrored}/REPORT.md`.
+   Keeps `Tools/CppNCorr` pinned to `feat/fixed-step-ref` (01b6e81) because `main` uses
+   `fixed_step_ref`, which CppNCorr `main` does not have.
+2. `feat/mirrored-mode-mng` (3 commits, stacked on 1, pushed) — worktree at
+   `../CPPxDIC-mirrored`.
+
+`Tools/MultiDIC` shows as modified in the worktree (recorded 0466ade vs checked-out
+f0e4877). Pre-existing drift from c7c574c — do NOT commit it.
+
+## Cluster timing trap (measured 2026-09-14)
+
+Lemaitre is **faster** than Manneback on Step D (multi-threaded) and **5-15x slower** on
+Step F (single-threaded, memory-bound); Step E geometric stitching behaves like Step F.
+Never compare Step E/F timings across the two clusters, and run them on Manneback.
+This — not the stitching algorithm — is what made a 9-minute stitch take 5 hours there.
+
+## Things that look like bugs and are not (or are)
+
+- `camera_pairs` ordering is part of the calibration: `6,5` and `5,6` are different runs
+  (it decides which camera is the reference, hence which REF mask/seed applies).
+- Geometric stitching on the 2-pair S09 inputs silently yields **0 faces** and reports
+  success (the July 7a0e3ce image does the same). Undiagnosed.
+- The 3.7-4.2x cuNCorr speedup from the S09 study does NOT reproduce on the Artem rig
+  (1.15x). Open — see the memory note `gpu-speedup-regression`.
+
 ## Routine operations
 
 ```bash
