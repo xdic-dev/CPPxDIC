@@ -35,7 +35,9 @@
 #include <opencv2/opencv.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <regex>
@@ -225,14 +227,38 @@ bool importRawViewMirrored(const Config& config, int trial, const ViewInfo& view
         if (frameJump <= 0) frameJump = 1;
 
         // Per-view frame output dir (kept separate from the camerapairs tmp_frames layout).
+        // Views are shared between adjacent stereopairs (view 2 serves pairs 1 and 2), so
+        // the extracted PNG sequence is cached per (trial, view) and reused when a
+        // previous extraction with the same frame window completed.
         std::ostringstream odir;
         odir << config.dic_path << "/" << config.subject_id << "/" << config.material
-             << "/tmp_frames_mirrored/T" << trial << "/pair_unset/view" << view.view_nbr;
+             << "/tmp_frames_mirrored/T" << trial << "/view" << view.view_nbr;
         const std::string view_dir = odir.str();
         if (!ensureDir(view_dir)) {
             LOG_ERROR << "mirrored: cannot create frame dir " << view_dir;
             return false;
         }
+        const std::string done_marker = view_dir + "/.extracted";
+        std::ostringstream window_sig;
+        window_sig << vid << " " << frameStart << " " << frameEnd << " " << frameJump;
+        {
+            std::ifstream marker(done_marker);
+            std::string prev;
+            if (marker && std::getline(marker, prev) && prev == window_sig.str()) {
+                for (int f = frameStart; f <= frameEnd; f += frameJump) {
+                    std::ostringstream fp;
+                    fp << view_dir << "/frame_" << std::setw(6) << std::setfill('0') << f << ".png";
+                    if (!fs::exists(fp.str())) { out_frames.clear(); break; }
+                    out_frames.push_back(fp.str());
+                }
+                if (!out_frames.empty()) {
+                    LOG_INFO << "  view " << view.view_nbr << ": reusing " << out_frames.size()
+                             << " cached frames in " << view_dir;
+                    return true;
+                }
+            }
+        }
+        fs::remove(done_marker);
 
         // Read sequentially instead of seeking before every frame. On the FFmpeg
         // backend (Linux) cap.set(CAP_PROP_POS_FRAMES, n) re-seeks to the previous
@@ -263,6 +289,10 @@ bool importRawViewMirrored(const Config& config, int trial, const ViewInfo& view
             out_frames.push_back(fp.str());
         }
 
+        if (!out_frames.empty() && !eof) {
+            std::ofstream marker(done_marker);
+            marker << window_sig.str() << "\n";
+        }
         return !out_frames.empty();
     } catch (const std::exception& e) {
         LOG_ERROR << "mirrored: importRawViewMirrored error: " << e.what();
@@ -280,6 +310,12 @@ ncorr::DIC_analysis_output runViewDic(const Config& config, const cv::Mat& ref_i
                                       const cppxdic::SeedPoint& seed_point,
                                       const cppxdic::StepParameters& step_params,
                                       const std::string& tmp_dir, const std::string& output_path) {
+    // Checkpoint: a completed DIC for this view/pair is reloaded instead of recomputed
+    // (same convention as StepDWorkflow's ncorr{cam}.bin caches).
+    if (fs::exists(output_path)) {
+        LOG_INFO << "    Checkpoint found: " << output_path << " (loading)";
+        return ncorr::DIC_analysis_output::load(output_path);
+    }
     ensureDir(tmp_dir);
 
     std::vector<ncorr::Image2D> imgs;
@@ -298,17 +334,39 @@ ncorr::DIC_analysis_output runViewDic(const Config& config, const cv::Mat& ref_i
     const int scalefactor = step_params.spacing + 1;
     ncorr::DIC_analysis_input dic_input(
         imgs, roi, scalefactor, ncorr::INTERP::QUINTIC_BSPLINE_PRECOMPUTE, ncorr::SUBREGION::CIRCLE,
-        step_params.radius, step_params.total_threads, ncorr::DIC_analysis_config::KEEP_MOST_POINTS,
+        step_params.radius, step_params.total_threads,
+        config.ncorr_no_update ? ncorr::DIC_analysis_config::NO_UPDATE
+                               : ncorr::DIC_analysis_config::KEEP_MOST_POINTS,
         config.debug_mode);
     dic_input.update_corrcoef = config.ncorr_cutoff_corrcoef;
 
-    const std::vector<ncorr::SeedParams> seeds = {
-        ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1])};
+    // Same engine configuration as StepDWorkflow::runNcorrAnalysis: seeds, fixed-step
+    // reference updates and the seed-quality gates come from ncorr_params.txt. The
+    // view1->view2 MATCHING call (<= 2 current images) uses the looser matching gate:
+    // two mirror views see the fingertip under different perspectives and the seed
+    // converges around corrcoef 0.5, which the tracking gate rejects.
+    const bool is_matching = cur_imgs.size() <= 2;
+    ncorr::DIC_analysis_parallel_input in(
+        dic_input, {ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1])},
+        config.ncorr_seeds_are_optimized);
+    in.fixed_step_ref = config.ncorr_fixed_step_ref;
+    in.cutoff_max_diffnorm = config.ncorr_cutoff_max_diffnorm;
+    in.cutoff_max_corrcoef = is_matching ? config.ncorr_matching_cutoff_max_corrcoef
+                                         : config.ncorr_cutoff_max_corrcoef;
+    LOG_INFO << "    ncorr " << (is_matching ? "matching" : "tracking") << ": "
+             << cur_imgs.size() << " frame(s), radius " << step_params.radius << ", threads "
+             << step_params.total_threads << ", seed (" << seed_point.pw[0] << ","
+             << seed_point.pw[1] << "), seed gate corrcoef<=" << in.cutoff_max_corrcoef
+             << (config.parallel_processing && !is_matching ? " [parallel]" : " [sequential]");
 
-    ncorr::DIC_analysis_output dic_out =
-        config.ncorr_use_exact_matlab
-            ? ncorr::exact_matlab_DIC_analysis_sequential(dic_input, seeds, false)
-            : ncorr::matlab_DIC_analysis_sequential(dic_input, seeds, false);
+    ncorr::DIC_analysis_output dic_out;
+    if (config.parallel_processing && !is_matching) {
+        dic_out = config.ncorr_use_exact_matlab ? ncorr::exact_matlab_DIC_analysis_parallel(in)
+                                                : ncorr::matlab_DIC_analysis_parallel(in);
+    } else {
+        dic_out = config.ncorr_use_exact_matlab ? ncorr::exact_matlab_DIC_analysis_sequential(in)
+                                                : ncorr::matlab_DIC_analysis_sequential(in);
+    }
 
     // Persist the raw (pixel) displacements, matching StepDWorkflow's convention.
     // `save` is a friend free function found via ADL on the ncorr argument type.
@@ -342,7 +400,10 @@ bool processPair(const Config& config, int trial, const ViewPair& vp, int frameS
         return false;
     }
 
-    // 2. Load + saturate (satur.m, LIMIT_GRAYSCALE).
+    // 2. Load + saturate (satur.m). LIMIT_GRAYSCALE is the MNG script constant (120)
+    //    unless dic_params.txt sets limit_grayscale; im_saturation_mode=false skips the
+    //    clipping entirely (pre-filtered videos).
+    const int limit_grayscale = (config.limit_grayscale > 0) ? config.limit_grayscale : kLimitGrayscale;
     std::vector<cv::Mat> view1_satur, view2_satur;
     view1_satur.reserve(n);
     view2_satur.reserve(n);
@@ -353,9 +414,17 @@ bool processPair(const Config& config, int trial, const ViewPair& vp, int frameS
             LOG_ERROR << "mirrored: failed to read extracted frame " << i;
             return false;
         }
-        view1_satur.push_back(cppxdic::ImageProcessor::saturate(a, kLimitGrayscale, "high"));
-        view2_satur.push_back(cppxdic::ImageProcessor::saturate(b, kLimitGrayscale, "high"));
+        if (config.im_saturation_mode) {
+            view1_satur.push_back(cppxdic::ImageProcessor::saturate(a, limit_grayscale, "high"));
+            view2_satur.push_back(cppxdic::ImageProcessor::saturate(b, limit_grayscale, "high"));
+        } else {
+            view1_satur.push_back(a);
+            view2_satur.push_back(b);
+        }
     }
+    LOG_INFO << (config.im_saturation_mode
+                     ? "--> STEP : saturation done (limit_grayscale=" + std::to_string(limit_grayscale) + ")"
+                     : std::string("--> STEP : saturation skipped (im_saturation_mode=false)"));
 
     // 3. Output layout (per trial / per pair), mirroring buildPath conventions.
     std::ostringstream odir;
@@ -374,7 +443,7 @@ bool processPair(const Config& config, int trial, const ViewPair& vp, int frameS
     bp.reftrial = padNumber(config.ref_trial_id, 3);
     bp.outputPath = out_dir;
     bp.baseResultPath = config.dic_path;
-    bp.limit_grayscale = kLimitGrayscale;
+    bp.limit_grayscale = limit_grayscale;
     bp.roifile = Utils::buildRoiFilePath(bp, bp.reftrial, vp.stereopair);
     bp.seedfile = Utils::buildSeedFilePath(bp, bp.reftrial, vp.stereopair);
 
@@ -439,13 +508,30 @@ bool processPair(const Config& config, int trial, const ViewPair& vp, int frameS
         std::vector<cv::Mat> match_cur = {view2.front(), view1.front()};
         const std::string match_out =
             Utils::buildNcorrFilePath(out_dir, vp.view1.view_nbr, vp.view2.view_nbr, ".bin");
-        ncorr::DIC_analysis_output dic12 =
-            runViewDic(config, view1.front(), match_cur, roi_view1, seed1, step_match,
-                       out_dir + "/tmp_ncorr_match", match_out);
+        // Same fallback as StepDWorkflow::matchingInitialFrame: a seed near the ROI
+        // boundary may not converge in the other view; retry once from the ROI centre.
+        cppxdic::SeedPoint match_seed = seed1;
+        ncorr::DIC_analysis_output dic12;
+        try {
+            dic12 = runViewDic(config, view1.front(), match_cur, roi_view1, match_seed, step_match,
+                               out_dir + "/tmp_ncorr_match", match_out);
+        } catch (const std::runtime_error& e) {
+            const std::string what = e.what();
+            if (what.find("could not seed") == std::string::npos) throw;
+            const std::vector<int> c = cppxdic::ROIManager::findROICenter(roi_view1); // [x, y]
+            match_seed = cppxdic::SeedPoint(c[0], c[1]);
+            match_seed.sw = cppxdic::ROIManager::mapPixel2Subset(match_seed.pw, step_track.spacing);
+            LOG_WARN << "mirrored: matching seed (" << seed1.pw[0] << "," << seed1.pw[1]
+                     << ") did not converge in view " << vp.view2.view_nbr
+                     << "; retrying from the ROI centre of mass (" << match_seed.pw[0] << ","
+                     << match_seed.pw[1] << ")";
+            dic12 = runViewDic(config, view1.front(), match_cur, roi_view1, match_seed, step_match,
+                               out_dir + "/tmp_ncorr_match", match_out);
+        }
 
         // Port of: refmask_trial_matched = h12.current(1).roi.mask;
         //          initial_seed_point_set2 = map_pointcoordinate(seed1.sw, {U,V}/(spacing+1))
-        if (!cppxdic::StepDWorkflow::updateMaskAndSeedFromOutput(roi_view1, seed1, dic12,
+        if (!cppxdic::StepDWorkflow::updateMaskAndSeedFromOutput(roi_view1, match_seed, dic12,
                                                                   roi_view2_matched, seed2)) {
             LOG_WARN << "mirrored: matching produced no displacement field; view2 will reuse "
                         "the view1 ROI/seed";
@@ -487,7 +573,7 @@ bool processPair(const Config& config, int trial, const ViewPair& vp, int frameS
 
 } // namespace
 
-bool run(const Config& config) {
+bool run(const Config& config, const std::vector<int>& trials_in) {
     LOG_INFO << "-------------------------------------------";
     LOG_INFO << "xDIC mirrored-camera (MNG) mode";
     LOG_INFO << "-------------------------------------------";
@@ -513,21 +599,39 @@ bool run(const Config& config) {
     LOG_INFO << "True FPS: " << true_fps << ", frames " << frameStart << ".." << frameEnd
              << " jump " << frameJump;
 
-    const int trial = config.ref_trial_id; // single-trial entry, as in the MATLAB script
+    // Trials: the CLI selection (--trial/--trials/...) when given, else the reference
+    // trial only (single-trial entry, as in the MATLAB script).
+    std::vector<int> trials = trials_in;
+    if (trials.empty()) trials.push_back(config.ref_trial_id);
+    {
+        std::ostringstream tl;
+        for (std::size_t i = 0; i < trials.size(); ++i) tl << (i ? "," : "") << trials[i];
+        LOG_INFO << "Trials: [" << tl.str() << "], reference trial " << config.ref_trial_id;
+    }
 
     bool all_ok = true;
-    for (int pair = 1; pair <= num_pair; ++pair) {
-        ViewPair vp;
-        try {
-            vp = resolveViewPair(pair, cam_order);
-        } catch (const std::exception& e) {
-            LOG_ERROR << "mirrored: " << e.what() << " (skipping pair " << pair << ")";
-            all_ok = false;
-            continue;
-        }
-        if (!processPair(config, trial, vp, frameStart, frameEnd, frameJump)) {
-            LOG_ERROR << "mirrored: pair " << pair << " failed";
-            all_ok = false;
+    for (int trial : trials) {
+        for (int pair = 1; pair <= num_pair; ++pair) {
+            ViewPair vp;
+            try {
+                vp = resolveViewPair(pair, cam_order);
+            } catch (const std::exception& e) {
+                LOG_ERROR << "mirrored: " << e.what() << " (skipping pair " << pair << ")";
+                all_ok = false;
+                continue;
+            }
+            // One pair's failure (including engine exceptions such as "could not seed any
+            // current image") must not abort the remaining pairs/trials.
+            bool ok = false;
+            try {
+                ok = processPair(config, trial, vp, frameStart, frameEnd, frameJump);
+            } catch (const std::exception& e) {
+                LOG_ERROR << "mirrored: trial " << trial << " pair " << pair << " threw: " << e.what();
+            }
+            if (!ok) {
+                LOG_ERROR << "mirrored: trial " << trial << " pair " << pair << " failed";
+                all_ok = false;
+            }
         }
     }
 
