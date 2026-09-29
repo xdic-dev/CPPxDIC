@@ -39,12 +39,11 @@ jobs:
         with:
           path: docs/doxygen/html
 
-  deploy:
-    name: Deploy to GitHub Pages
-    needs: build
+  check_pages:
+    name: Check GitHub Pages status
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
+    outputs:
+      enabled: ${{ steps.pages_status.outputs.enabled }}
     steps:
       - name: Check whether GitHub Pages is enabled
         id: pages_status
@@ -66,7 +65,15 @@ jobs:
                 throw error;
               }
             }
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: [build, check_pages]
+    if: needs.check_pages.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+    steps:
       - name: Deploy
-        if: steps.pages_status.outputs.enabled == 'true'
         id: deployment
         uses: actions/deploy-pages@v4
