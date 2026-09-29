@@ -339,6 +339,11 @@ int main(int argc, char* argv[]) {
         // Update derived variables
         config.updateVariables();
 
+        // Register the stereopair -> cameras table so every Utils::getCamerasForPair
+        // caller (Step D import/tracking, Step E DLT lookup, checkpoints) honours
+        // dic_params.txt `camera_pairs` instead of the legacy {1,2 ; 4,3} table.
+        Utils::setCameraPairs(config.camera_pairs);
+
         // Re-apply logging configuration now that config files are loaded, merging
         // their values (log_level/log_file/debug_mode) under any CLI flags, which
         // keep priority. Env was already applied in the early configure above.
@@ -372,7 +377,29 @@ int main(int argc, char* argv[]) {
                  << ", Material: " << config.material << ", Stereo Pairs: " << config.num_pair;
         LOG_INFO << "Reference trial number: " << config.ref_trial_id;
         LOG_INFO << "Frame: " << config.idx_frame_start << " to " << config.idx_frame_end
-                 << ", jump= " << config.frame_jump;
+                 << ", jump= " << config.frame_jump
+                 << (config.force_frame_window ? " (forced, protocol window ignored)"
+                                               : " (protocol window applies when a .mat protocol exists)");
+        {
+            std::ostringstream pairs;
+            for (int p = 1; p <= config.num_pair; ++p) {
+                int c1 = 0, c2 = 0;
+                Utils::getCamerasForPair(p, c1, c2);
+                pairs << (p > 1 ? "  " : "") << "pair" << p << "=(" << c1 << "," << c2 << ")";
+            }
+            LOG_INFO << "Camera pairs: " << pairs.str();
+            if (static_cast<int>(config.camera_pairs.size()) < config.num_pair) {
+                LOG_WARN << "camera_pairs lists " << config.camera_pairs.size() << " pair(s) but num_pair="
+                         << config.num_pair << "; missing pairs default to (2N-1, 2N)";
+            }
+        }
+        LOG_INFO << "Saturation: " << (config.im_saturation_mode ? "on" : "off")
+                 << " (limit_grayscale=" << (config.limit_grayscale > 0 ? std::to_string(config.limit_grayscale)
+                                                                         : std::string("auto"))
+                 << "), Image filtering: " << (config.im_filter_mode ? "on" : "off")
+                 << ", DIC engine: " << config.dic_engine
+                 << ", Threads (step D): " << config.step_d.total_threads
+                 << (config.parallel_processing ? " (parallel)" : " (sequential)");
         LOG_INFO << "Show visualization: " << config.showvisu
                  << ", Debug mode: " << config.debug_mode
                  << ", Automatic process: " << config.automatic_process;

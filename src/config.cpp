@@ -172,6 +172,10 @@ bool Config::loadFromDicParamsFile(const std::string& filepath) {
         // Processing flags
         else if (!(value = parseConfigValue(line, "im_filter_mode")).empty()) {
             im_filter_mode = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "im_saturation_mode")).empty()) {
+            im_saturation_mode = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "force_frame_window")).empty()) {
+            force_frame_window = parseBool(value);
         } else if (!(value = parseConfigValue(line, "automatic_process")).empty()) {
             automatic_process = parseBool(value);
         } else if (!(value = parseConfigValue(line, "parallel_processing")).empty()) {
@@ -296,7 +300,13 @@ bool Config::loadFromDicParamsFile(const std::string& filepath) {
             step_f.initial_seed = parseIntList(value);
         }
         // Step E specific parameters (3D reconstruction)
-        else if (!(value = parseConfigValue(line, "step_e_distortion_removal")).empty()) {
+        else if (!(value = parseConfigValue(line, "step_e_ray_bvh")).empty()) {
+            step_e_ray_bvh = parseBool(value);
+        } else if (!(value = parseConfigValue(line, "step_e_stitch_mode")).empty()) {
+            std::string m = value; std::transform(m.begin(), m.end(), m.begin(), ::tolower);
+            if (m == "geometric" || m == "simple") step_e_stitch_mode = m;
+            else LOG_WARN << "Unknown step_e_stitch_mode '" << value << "' (geometric|simple), keeping " << step_e_stitch_mode;
+        } else if (!(value = parseConfigValue(line, "step_e_distortion_removal")).empty()) {
             step_e_distortion_removal = parseBool(value);
         } else if (!(value = parseConfigValue(line, "step_d_replacebadcorr")).empty()) {
             step_d_replacebadcorr = parseBool(value);
@@ -392,6 +402,8 @@ bool Config::loadFromNcorrParamsFile(const std::string& filepath) {
             ncorr_cutoff_max_diffnorm = std::stod(value);
         } else if (!(value = parseConfigValue(line, "cutoff_max_corrcoef")).empty()) {
             ncorr_cutoff_max_corrcoef = std::stod(value);
+        } else if (!(value = parseConfigValue(line, "matching_cutoff_max_corrcoef")).empty()) {
+            ncorr_matching_cutoff_max_corrcoef = std::stod(value);
         } else if (!(value = parseConfigValue(line, "use_exact_matlab")).empty()) {
             ncorr_use_exact_matlab = parseBool(value);
         } else if (!(value = parseConfigValue(line, "no_update")).empty()) {
@@ -521,7 +533,24 @@ bool Config::loadFromVisualizationParamsFile(const std::string& filepath) {
         } else if (!(value = parseConfigValue(line, "video_codec")).empty()) {
             video_codec = value;
         } else if (!(value = parseConfigValue(line, "video_quality")).empty()) {
-            video_quality = std::stoi(value);
+            // Accept both a numeric 0-100 value and the named presets shipped in
+            // visualization_params.txt ("high"/"medium"/"low"); a bare stoi on the
+            // default "high" used to throw and abort the run before any DIC work.
+            std::string q = value;
+            std::transform(q.begin(), q.end(), q.begin(), ::tolower);
+            if (q == "high" || q == "best") {
+                video_quality = 95;
+            } else if (q == "medium" || q == "normal") {
+                video_quality = 75;
+            } else if (q == "low") {
+                video_quality = 50;
+            } else {
+                try {
+                    video_quality = std::stoi(q);
+                } catch (const std::exception&) {
+                    LOG_WARN << "Invalid video_quality '" << value << "', keeping " << video_quality;
+                }
+            }
         } else if (!(value = parseConfigValue(line, "video_alpha")).empty()) {
             video_alpha = std::stod(value);
         }

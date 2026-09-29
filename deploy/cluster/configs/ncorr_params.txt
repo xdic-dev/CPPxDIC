@@ -19,5 +19,17 @@ save_disps_steps = false
 perspective_interp = false
 units = mm
 seeds_are_optimized = false
-cutoff_max_diffnorm = 1e-5
-cutoff_max_corrcoef = 1.0
+cutoff_max_diffnorm = 0.1
+cutoff_max_corrcoef = 0.5
+
+# Seed-quality gate for inter-view MATCHING seeds (cam1->cam2 / view1->view2 at the
+# reference frame). Different perspectives correlate worse than consecutive frames,
+# so this gate is looser than cutoff_max_corrcoef (which applies to tracking seeds).
+# Default: 1.0
+matching_cutoff_max_corrcoef = 1.0
+
+# DIC engine: ncorr (CppNCorr, multi-threaded CPU via parallel_processing +
+# step_d_total_threads) or cuncorr (cuNCorr GPU; falls back to a single-threaded
+# CPU backend without a GPU). The compiled-in default is cuncorr, so a CPU-only
+# image MUST set ncorr explicitly.
+dic_engine = ncorr

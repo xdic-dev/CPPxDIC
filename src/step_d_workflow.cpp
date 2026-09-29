@@ -169,10 +169,16 @@ StepDWorkflow::execute(const std::string& trial, int stereopair, const StagePlan
             LOG_INFO << "Phase 'slide1': keeping " << keep << " frames";
         }
 
-        // 5. Saturation
+        // 5. Saturation (satur.m). Skipped for pre-filtered inputs (im_saturation_mode=false).
         std::vector<cv::Mat> cam_first_satur, cam_second_satur;
-        LOG_INFO << "Applying saturation...";
-        performSaturation(cam_first_raw, cam_second_raw, cam_first_satur, cam_second_satur);
+        if (config_.im_saturation_mode) {
+            LOG_INFO << "Applying saturation (limit_grayscale=" << base_params_.limit_grayscale << ")...";
+            performSaturation(cam_first_raw, cam_second_raw, cam_first_satur, cam_second_satur);
+        } else {
+            LOG_INFO << "Skipping saturation (im_saturation_mode=false): raw frames used as-is";
+            cam_first_satur = cam_first_raw;
+            cam_second_satur = cam_second_raw;
+        }
 
         // II. ROI, Seed, and Matching REF to Trial at frame 1
         //     (writes MATCHING2*.bin when absent; loads + applies it when present)
@@ -250,6 +256,13 @@ StepDWorkflow::execute(const std::string& trial, int stereopair, const StagePlan
         pairOrder = {1, 2};
         pairForced = false;
     }
+    // The protocol rule only orders the first two pairs; rigs with more stereopairs
+    // append the remaining ones in natural order so Step E stitches all of them.
+    for (int p = 1; p <= config_.num_pair; ++p) {
+        if (std::find(pairOrder.begin(), pairOrder.end(), p) == pairOrder.end()) {
+            pairOrder.push_back(p);
+        }
+    }
 
     // Post-preps. Format output (loads ncorr{cam1},{cam2},{cam1cam2} -> myDIC2DpairResults)
     if (plan.format) {
@@ -276,15 +289,22 @@ void StepDWorkflow::setupBaseParameters(const std::string& trial,
     base_params_.idxstart_set = config_.idx_frame_start;
     base_params_.idxend_set = config_.idx_frame_end;
     
-    // Set grayscale limit based on subject number
-    int subject_num = 0;
-    for (char ch : config_.subject_id) {
-        if (std::isdigit(ch)) {
-            subject_num = subject_num * 10 + (ch - '0');
+    // Grayscale limit: explicit config value wins; otherwise the legacy MATLAB rule
+    // keyed on the subject NUMBER (S01..S07 -> 70, S08+ -> 100). Subject ids that
+    // carry no digits (e.g. "Artem") count as 0 and get the S<8 default, so such
+    // datasets should set limit_grayscale (or im_saturation_mode=false) explicitly.
+    if (config_.limit_grayscale > 0) {
+        base_params_.limit_grayscale = config_.limit_grayscale;
+    } else {
+        int subject_num = 0;
+        for (char ch : config_.subject_id) {
+            if (std::isdigit(ch)) {
+                subject_num = subject_num * 10 + (ch - '0');
+            }
         }
+        base_params_.limit_grayscale = (subject_num < 8) ?
+            DICConstants::LIMIT_GRAYSCALE_DEFAULT : DICConstants::LIMIT_GRAYSCALE_S8_PLUS;
     }
-    base_params_.limit_grayscale = (subject_num < 8) ? 
-        DICConstants::LIMIT_GRAYSCALE_DEFAULT : DICConstants::LIMIT_GRAYSCALE_S8_PLUS;
     
     // Set camera numbers
     Utils::getCamerasForPair(stereopair, base_params_.cam_1, base_params_.cam_2);
@@ -333,7 +353,20 @@ bool StepDWorkflow::loadProtocol() {
     auto mat_files = Utils::findFiles(protocol_dir, "*.mat");
 
     if (mat_files.empty()) {
-        LOG_ERROR << "No protocol file found in: " << protocol_dir;
+        // Without a protocol the only things we cannot derive are the automatic
+        // reference trial and the direction-based pair order. A manual
+        // ref_trial_id makes the former unnecessary; the latter falls back to the
+        // natural 1..num_pair order. Datasets from other rigs (e.g. MNG .tsv
+        // protocols) therefore run with ref_trial_id set explicitly.
+        if (config_.ref_trial_id > 0) {
+            LOG_WARN << "No protocol .mat file in " << protocol_dir
+                     << " — using ref_trial_id=" << config_.ref_trial_id
+                     << " and the default pair order";
+            protocol_info_ = ProtocolInfo{};
+            return true;
+        }
+        LOG_ERROR << "No protocol file found in: " << protocol_dir
+                  << " (set ref_trial_id / --reftrial to run without a protocol)";
         return false;
     }
 
@@ -614,12 +647,36 @@ bool StepDWorkflow::matchingInitialFrame(const std::vector<cv::Mat>& cam_ref,
         static_cast<int>(ref_seed_point.pw[1])
     };
     
-    // Run ncorr analysis and save to cache-compatible path (for formatOutput to find)
-    auto dic_output = runNcorrAnalysis(cam_ref[0], cur_imgs, refmask_ref,
-                                      ref_seed_point, step1_2_params_,
+    // Run ncorr analysis and save to cache-compatible path (for formatOutput to find).
+    // The user-drawn seed is chosen on the REFERENCE view; near the ROI boundary the
+    // other camera may see that spot under a very oblique angle and the inter-camera
+    // seed does not converge ("could not seed any current image"). In that case retry
+    // once from the ROI centre of mass, which sits in the best-overlapping part of the
+    // surface; the mapped seed for the second camera is then derived from that point
+    // too (the first camera keeps the user seed for tracking).
+    SeedPoint matching_seed = ref_seed_point;
+    ncorr::DIC_analysis_output dic_output;
+    try {
+        dic_output = runNcorrAnalysis(cam_ref[0], cur_imgs, refmask_ref,
+                                      matching_seed, step1_2_params_,
                                       ncorr_matching_path, false, true); // false for parallel processing, true for no update
+    } catch (const std::runtime_error& e) {
+        const std::string what = e.what();
+        if (what.find("could not seed") == std::string::npos) throw;
+        const std::vector<int> c = ROIManager::findROICenter(refmask_ref); // [x, y]
+        matching_seed = SeedPoint(c[0], c[1]);
+        matching_seed.sw = ROIManager::mapPixel2Subset(matching_seed.pw, step1_2_params_.spacing);
+        LOG_WARN << "Matching seed (" << ref_seed_point.pw[0] << "," << ref_seed_point.pw[1]
+                 << ") did not converge in the other camera (" << what
+                 << "); retrying from the ROI centre of mass (" << matching_seed.pw[0] << ","
+                 << matching_seed.pw[1] << ")";
+        step1_2_params_.initial_seed = {matching_seed.pw[0], matching_seed.pw[1]};
+        dic_output = runNcorrAnalysis(cam_ref[0], cur_imgs, refmask_ref,
+                                      matching_seed, step1_2_params_,
+                                      ncorr_matching_path, false, true);
+    }
 
-    if (!updateMaskAndSeedFromOutput(refmask_ref, ref_seed_point, dic_output,
+    if (!updateMaskAndSeedFromOutput(refmask_ref, matching_seed, dic_output,
                                      refmask_cur_matched, after_disp_seed_point)) {
         LOG_ERROR << "No displacement output from matching";
         return false;
@@ -1101,7 +1158,48 @@ bool StepDWorkflow::updateMaskAndSeedFromOutput(const cv::Mat& input_mask,
         }
     }
 
-    output_seed.sw = ROIManager::mapPointCoordinate(input_seed.sw, U_mapped, V_mapped);
+    // The seed can only be transported through the field where the field is VALID.
+    // A user seed near the ROI edge often sits on a grid point the matching never
+    // converged at (u=v=0 there) and would be "mapped" onto itself, i.e. outside the
+    // matched ROI of the other camera -> the next tracking call cannot seed. In that
+    // case transport the valid grid point closest to the centroid of the valid field.
+    const auto& valid_mask = disp.get_roi().get_mask();
+    const int gw = static_cast<int>(u_data.data_width());
+    const int gh = static_cast<int>(u_data.data_height());
+    auto grid_valid = [&](int gx, int gy) {
+        if (gx < 0 || gy < 0 || gx >= gw || gy >= gh) return false;
+        return static_cast<bool>(valid_mask(gy, gx)) && std::isfinite(u_array(gy, gx)) &&
+               std::isfinite(v_array(gy, gx));
+    };
+    SeedPoint seed_used = input_seed;
+    if (!grid_valid(input_seed.sw[0], input_seed.sw[1])) {
+        double sx = 0.0, sy = 0.0;
+        long n = 0;
+        for (int gy = 0; gy < gh; ++gy)
+            for (int gx = 0; gx < gw; ++gx)
+                if (grid_valid(gx, gy)) { sx += gx; sy += gy; ++n; }
+        if (n == 0) {
+            LOG_ERROR << "Displacement field has no valid point: cannot transport the seed";
+            return false;
+        }
+        const double cx = sx / n, cy = sy / n;
+        int bx = -1, by = -1;
+        double best = 1e300;
+        for (int gy = 0; gy < gh; ++gy)
+            for (int gx = 0; gx < gw; ++gx)
+                if (grid_valid(gx, gy)) {
+                    const double d = (gx - cx) * (gx - cx) + (gy - cy) * (gy - cy);
+                    if (d < best) { best = d; bx = gx; by = gy; }
+                }
+        seed_used.sw = {bx, by};
+        seed_used.pw = ROIManager::mapSubset2Pixel(seed_used.sw, static_cast<int>(scale - 1.0));
+        LOG_WARN << "Seed (" << input_seed.pw[0] << "," << input_seed.pw[1]
+                 << ") lies where the matching field is invalid; transporting the seed from the "
+                    "valid grid point nearest the field centroid instead: ("
+                 << seed_used.pw[0] << "," << seed_used.pw[1] << ")";
+    }
+
+    output_seed.sw = ROIManager::mapPointCoordinate(seed_used.sw, U_mapped, V_mapped);
     output_seed.pw = ROIManager::mapSubset2Pixel(output_seed.sw, static_cast<int>(scale - 1.0));
 
     output_mask = input_mask.clone();
@@ -1291,7 +1389,20 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
     // when correlation drops, leading to ROI fragmentation and divergence around frame 60-70.
     // Setting this to ncorr_cutoff_corrcoef (default 10.0) effectively disables correlation-based updates.
     dic_input.update_corrcoef = config_.ncorr_cutoff_corrcoef;
-    
+
+    // Seed-quality gate (ncorr_params cutoff_max_corrcoef / matching_cutoff_max_corrcoef).
+    // A seed whose optimised corrcoef exceeds the gate is rejected ("could not seed any
+    // current image"). Inter-view MATCHING calls (<= 2 current images) legitimately
+    // correlate worse than frame-to-frame tracking because the two cameras see the
+    // surface under different perspectives, so they get their own, looser gate.
+    const bool is_matching_call = cur_imgs.size() <= 2;
+    const double seed_cutoff_corrcoef = is_matching_call
+        ? config_.ncorr_matching_cutoff_max_corrcoef
+        : config_.ncorr_cutoff_max_corrcoef;
+    LOG_DEBUG << "  Seed gate: cutoff_max_corrcoef=" << seed_cutoff_corrcoef
+              << (is_matching_call ? " (matching)" : " (tracking)")
+              << ", cutoff_max_diffnorm=" << config_.ncorr_cutoff_max_diffnorm;
+
     // Run DIC analysis (returns Lagrangian perspective in pixels)
     ncorr::DIC_analysis_output dic_output_raw;
 
@@ -1334,6 +1445,9 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
         // Create parallel input structure
         ncorr::DIC_analysis_parallel_input dic_parallel_input(dic_input, seeds);
         dic_parallel_input.fixed_step_ref = config_.ncorr_fixed_step_ref;
+        dic_parallel_input.seeds_are_optimized = config_.ncorr_seeds_are_optimized;
+        dic_parallel_input.cutoff_max_diffnorm = config_.ncorr_cutoff_max_diffnorm;
+        dic_parallel_input.cutoff_max_corrcoef = seed_cutoff_corrcoef;
         if (config_.ncorr_fixed_step_ref > 0) {
             LOG_INFO << "  Fixed-step reference updates: every "
                      << config_.ncorr_fixed_step_ref << " frames";
@@ -1348,8 +1462,11 @@ ncorr::DIC_analysis_output StepDWorkflow::runNcorrAnalysis(
                   << (config_.ncorr_use_exact_matlab ? " (exact_matlab_*)" : " (matlab_*)")
                   << "...";
         ncorr::DIC_analysis_parallel_input dic_sequential_input(
-            dic_input, {ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1])}, false);
+            dic_input, {ncorr::SeedParams(seed_point.pw[0], seed_point.pw[1])},
+            config_.ncorr_seeds_are_optimized);
         dic_sequential_input.fixed_step_ref = config_.ncorr_fixed_step_ref;
+        dic_sequential_input.cutoff_max_diffnorm = config_.ncorr_cutoff_max_diffnorm;
+        dic_sequential_input.cutoff_max_corrcoef = seed_cutoff_corrcoef;
         dic_output_raw = config_.ncorr_use_exact_matlab
             ? ncorr::exact_matlab_DIC_analysis_sequential(dic_sequential_input)
             : ncorr::matlab_DIC_analysis_sequential(dic_sequential_input);

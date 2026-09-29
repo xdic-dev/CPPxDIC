@@ -42,8 +42,9 @@ OUTPUT_DIR="${OUTPUT_DIR:-/scratch/${USER}/MultiDIC/DIC_Output}"
 #   cppxdic singledic proxyncorr gen_subject_trial xdic_stepsABC
 APP="${APP:-cppxdic}"
 
-# Extra arguments for non-cppxdic apps (word-split; cppxdic ignores this and uses
-# the config/SUBJECT/REFTRIAL knobs below). Example:
+# Extra arguments. For non-cppxdic apps they are the whole argument list
+# (word-split). For cppxdic they are appended after the config/SUBJECT/TRIAL
+# knobs below (e.g. APP_ARGS="--stages d --pair 1"). Example:
 #   APP=singledic APP_ARGS="--data-path /data --dic-path /output --subject S17 \
 #       --bloc bloc1 --trial vid_23 --reftrial vid_5 --dic-params /configs/dic_params.txt"
 APP_ARGS="${APP_ARGS:-}"
@@ -51,6 +52,10 @@ APP_ARGS="${APP_ARGS:-}"
 # Optional cppxdic overrides via environment or sbatch --export
 SUBJECT="${SUBJECT:-}"
 REFTRIAL="${REFTRIAL:-}"
+# Trial selection: TRIAL=7 (single) or TRIALS=1,2,3 (list; with a SLURM array,
+# task N runs the N-th trial). Without either, cppxdic runs its built-in default.
+TRIAL="${TRIAL:-}"
+TRIALS="${TRIALS:-}"
 
 # Config file names (inside CONFIG_DIR)
 DIC_PARAMS="${DIC_PARAMS:-dic_params.txt}"
@@ -143,6 +148,23 @@ if [ "${APP}" = "cppxdic" ]; then
     if [ -n "${REFTRIAL}" ]; then
         CPPXDIC_ARGS="${CPPXDIC_ARGS} --reftrial ${REFTRIAL}"
         echo "Reftrial override: ${REFTRIAL}"
+    fi
+
+    if [ -n "${TRIAL}" ] && [ -n "${TRIALS}" ]; then
+        echo "ERROR: set either TRIAL or TRIALS, not both" >&2
+        exit 2
+    fi
+    if [ -n "${TRIAL}" ]; then
+        CPPXDIC_ARGS="${CPPXDIC_ARGS} --trial ${TRIAL}"
+        echo "Trial: ${TRIAL}"
+    elif [ -n "${TRIALS}" ]; then
+        CPPXDIC_ARGS="${CPPXDIC_ARGS} --trials ${TRIALS}"
+        echo "Trials: ${TRIALS}${SLURM_ARRAY_TASK_ID:+ (array task ${SLURM_ARRAY_TASK_ID})}"
+    fi
+
+    if [ -n "${APP_ARGS}" ]; then
+        CPPXDIC_ARGS="${CPPXDIC_ARGS} ${APP_ARGS}"
+        echo "Extra arguments: ${APP_ARGS}"
     fi
 else
     # Other apps: forward APP_ARGS verbatim (word-split). They reference the

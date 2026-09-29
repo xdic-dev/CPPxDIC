@@ -32,6 +32,9 @@ using namespace ncorr;
 using namespace cppxdic;
 
 DicAnalysis::DicAnalysis(const Config& config) : config_(config) {
+    // Library entry point: make sure the configured stereopair table is active even
+    // when the caller is not main.cpp (tests, tools, other drivers).
+    Utils::setCameraPairs(config_.camera_pairs);
 }
 
 bool DicAnalysis::dicDeformationAnalysis(const std::vector<int>& trial_target) {
@@ -1173,7 +1176,12 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                     continue;
                 }
 
-                if (all_pairs.size() > 1 && all_pairs.size() == static_cast<size_t>(config_.num_pair)) {
+                cppxdic::setStitchRayAccel(config_.step_e_ray_bvh);
+                if (all_pairs.size() > 1 && config_.step_e_stitch_mode == "simple") {
+                    LOG_INFO << "  step_e_stitch_mode=simple: appending " << all_pairs.size()
+                             << " pairs without overlap removal";
+                    stitched = stitchPairsSimple(all_pairs);
+                } else if (all_pairs.size() > 1 && all_pairs.size() == static_cast<size_t>(config_.num_pair)) {
                     if (!have_stitch_metadata) {
                         bool protocol_loaded = false;
                         bool protocol_available = false;
@@ -1224,6 +1232,8 @@ bool DicAnalysis::dic3DReconstruction(const std::vector<int>& trial_target) {
                         LOG_INFO << "  Stitch order: " << stitch_order_oss.str();
                     }
                     LOG_INFO << "  Pair forced metadata: " << (stitch_pair_forced ? "true" : "false");
+                    LOG_INFO << "  Ray-cast prefilter (step_e_ray_bvh): "
+                             << (config_.step_e_ray_bvh ? "on (AABB hierarchy)" : "off (full scan)");
                     stitched = stitchPairsGeometric(all_pairs, stitch_pair_order, stitch_pair_forced);
                     LOG_INFO << "Geometric Stitching done!";
                 } else {

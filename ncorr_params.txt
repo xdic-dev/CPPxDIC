@@ -154,6 +154,12 @@ cutoff_max_diffnorm = 0.1
 # Used in parallel mode to predict when reference update is needed
 cutoff_max_corrcoef = 0.5
 
+# Seed-quality gate for inter-view MATCHING seeds (cam1->cam2 / view1->view2 at the
+# reference frame). Different perspectives correlate worse than consecutive frames,
+# so this gate is looser than cutoff_max_corrcoef (which applies to tracking seeds).
+# Default: 1.0
+matching_cutoff_max_corrcoef = 1.0
+
 # ============================================================================
 # VIDEO OUTPUT PARAMETERS
 # ============================================================================
@@ -199,3 +205,10 @@ cutoff_iterations = 100
 # Points with correlation above this value are filtered out
 # Default: 10.0 (effectively disabled)
 max_corr_coef_filter = 10.0
+
+# ============================================================================
+# DIC ENGINE
+# ============================================================================
+# ncorr   = CppNCorr (CPU, multi-threaded with parallel_processing + step_d_total_threads)
+# cuncorr = cuNCorr (GPU; single-threaded CPU fallback without a GPU) [compiled default]
+# dic_engine = ncorr

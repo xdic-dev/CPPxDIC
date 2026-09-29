@@ -18,6 +18,7 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
+#include <algorithm>
 
 bool Utils::dicCheck(const Config& config) {
     LOG_INFO << "Checking data and protocol...";
@@ -161,8 +162,20 @@ bool Utils::checkProtocolFiles(const Config& config) {
     auto protocol_files = findFiles(protocol_dir, "*.mat");
 
     if (protocol_files.empty()) {
+        // The protocol .mat drives (a) automatic reference-trial selection and
+        // (b) the protocol-derived frame window. Both have explicit config
+        // substitutes (ref_trial_id > 0 and idx_frame_start/end), so a missing
+        // protocol is only fatal when the reference trial must be inferred.
+        if (config.ref_trial_id > 0) {
+            LOG_WARN << "No protocol .mat file in " << protocol_dir
+                     << " — reference trial comes from ref_trial_id=" << config.ref_trial_id
+                     << " and the frame window from idx_frame_start/end ("
+                     << config.idx_frame_start << ".." << config.idx_frame_end << ").";
+            return true;
+        }
         LOG_ERROR << "Protocol files in " << protocol_dir
-                  << " must exist to be able to run DIC analysis. Protocol not found.";
+                  << " must exist to be able to run DIC analysis (needed to pick the reference "
+                     "trial; set ref_trial_id / --reftrial to run without one). Protocol not found.";
         return false;
     }
 
@@ -220,22 +233,26 @@ std::vector<std::string> Utils::split(const std::string& str, char delimiter) {
     return tokens;
 }
 
-void Utils::getCamerasForPair(int stereopair, int& cam_first, int& cam_second) {
-    // Standard mapping: pair N -> cameras (2N-1, 2N)
-    // Pair 1 -> cameras 1, 2
-    // Pair 2 -> cameras 4, 3
-    // error.
-    if (stereopair < 1 && stereopair != 2) {
-        throw std::runtime_error("Invalid stereopair value: must be >= 1 or equal to 2");
-    }
+// Process-wide stereopair table. Defaults to the historical 4-camera rig
+// (pair1 = cams 1,2 ; pair2 = cams 4,3) so callers that never register a
+// table (tests, tools) keep the legacy behaviour. main.cpp / DicAnalysis
+// register Config::camera_pairs so that the dic_params.txt `camera_pairs`
+// key is honoured everywhere (Step D import/tracking, Step E DLT lookup,
+// checkpoint paths...). Before this registry existed the config key was parsed
+// but silently ignored: every pair >= 3 was mapped to cameras (1,2).
+static const std::vector<std::pair<int, int>> kLegacyCameraPairs = {{1, 2}, {4, 3}};
+static std::vector<std::pair<int, int>> g_camera_pairs = kLegacyCameraPairs;
 
-    if (stereopair == 2) {
-        cam_first = 4;
-        cam_second = 3;
-    } else {
-        cam_first = 1;
-        cam_second = 2;
-    }
+void Utils::setCameraPairs(const std::vector<std::pair<int, int>>& camera_pairs) {
+    g_camera_pairs = camera_pairs.empty() ? kLegacyCameraPairs : camera_pairs;
+}
+
+const std::vector<std::pair<int, int>>& Utils::cameraPairs() {
+    return g_camera_pairs;
+}
+
+void Utils::getCamerasForPair(int stereopair, int& cam_first, int& cam_second) {
+    getCamerasForPair(stereopair, g_camera_pairs, cam_first, cam_second);
 }
 
 void Utils::getCamerasForPair(int stereopair, const std::vector<std::pair<int, int>>& camera_pairs,
@@ -248,8 +265,9 @@ void Utils::getCamerasForPair(int stereopair, const std::vector<std::pair<int, i
         cam_first = camera_pairs[idx].first;
         cam_second = camera_pairs[idx].second;
     } else {
-        // Fall back to default mapping
-        getCamerasForPair(stereopair, cam_first, cam_second);
+        // Beyond the configured table: generic mapping pair N -> cameras (2N-1, 2N).
+        cam_first = 2 * stereopair - 1;
+        cam_second = 2 * stereopair;
     }
 }
 
@@ -289,17 +307,34 @@ static bool ensure_dir(const std::string& path) {
 static std::string find_video_file(const std::string& video_dir, const std::string& subject,
                                    const std::string& material, const std::string& trialname,
                                    int cam_id) {
-    // std::cout << "Video directory: " << video_dir << std::endl;
     if (!Utils::directoryExists(video_dir)) return "";
-    // Pattern like: <subject>_<material>_speckles_<trialname with 3 digits>_.*_cam<cam_id>.mp4
-    // Example: S09_coating_speckles_007_545_050_trial005_cam_1.mp4
-    std::regex pat(subject + "_" + material + "_speckles_" + trialname + "_.*_cam_" +
-                   std::to_string(cam_id) + ".*\\.mp4$");
+    // Strict pattern (historical naming):
+    //   <subject>_<material>_speckles_<trialname with 3 digits>_.*_cam_<cam_id>.mp4
+    //   e.g. S09_coating_speckles_007_545_050_trial005_cam_1.mp4
+    // Relaxed fallback (other acquisition rigs, e.g. MNG "<subj>_<finger>_<block>_<trial>_..."):
+    //   any file carrying "_<trialname>_" and ending in "_cam_<cam_id>.mp4" — the camera id
+    //   is anchored so cam_1 never matches cam_10 / cam_1_0.
+    const std::regex strict(subject + "_" + material + "_speckles_" + trialname + "_.*_cam_" +
+                            std::to_string(cam_id) + "\\.mp4$");
+    const std::regex relaxed(".*_" + trialname + "_.*_cam_" + std::to_string(cam_id) + "\\.mp4$");
+
+    std::vector<std::string> names;
     for (const auto& entry : std::filesystem::directory_iterator(video_dir)) {
         if (!entry.is_regular_file()) continue;
-        std::string name = entry.path().filename().string();
-        if (std::regex_match(name, pat)) {
-            return entry.path().string();
+        names.push_back(entry.path().filename().string());
+    }
+    std::sort(names.begin(), names.end());  // deterministic choice when several match
+
+    for (const std::regex* pat : {&strict, &relaxed}) {
+        for (const auto& name : names) {
+            if (std::regex_match(name, *pat)) {
+                if (pat == &relaxed) {
+                    LOG_WARN << "Video for trial " << trialname << " cam " << cam_id
+                             << " matched by the relaxed pattern (no '" << subject << "_" << material
+                             << "_speckles_' prefix): " << name;
+                }
+                return (std::filesystem::path(video_dir) / name).string();
+            }
         }
     }
     return "";
@@ -472,11 +507,18 @@ bool Utils::importVid(const Config& config, int trial, int stereopair,
     int frameEnd = config.idx_frame_end;
     int frameJump = config.frame_jump;
 
-    // Read protocol to compute ranges if available
+    // Read protocol to compute ranges if available. With force_frame_window=true
+    // the config window is authoritative and the protocol is not consulted.
     try {
         std::string protocol_dir = Utils::buildProtocolDir(config, true, true, true, true);
 
-        auto protos = Utils::findFiles(protocol_dir, "*.mat");
+        auto protos = config.force_frame_window ? std::vector<std::string>{}
+                                                : Utils::findFiles(protocol_dir, "*.mat");
+        if (config.force_frame_window) {
+            LOG_INFO << "force_frame_window=true: using config frames " << frameStart << ".."
+                     << (frameEnd > 0 ? std::to_string(frameEnd) : std::string("end"))
+                     << " (jump " << frameJump << "), protocol window ignored";
+        }
         if (!protos.empty()) {
             std::string proto_file = protos.front();
             mat_t* matfp = Mat_Open(proto_file.c_str(), MAT_ACC_RDONLY);

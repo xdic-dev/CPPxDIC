@@ -49,6 +49,15 @@ public:
 
     // Processing flags
     bool im_filter_mode = true;
+    // Grayscale saturation (satur.m: clip pixels above limit_grayscale) applied to
+    // every imported frame before ROI/matching/tracking. Set false for videos that
+    // were already filtered/normalised upstream (e.g. MNG rigs), where clipping
+    // would flatten the speckle contrast and make ncorr diverge.
+    bool im_saturation_mode = true;
+    // When true, idx_frame_start/idx_frame_end/frame_jump are authoritative and the
+    // protocol-derived per-phase window (loading/slide/relax from the protocol .mat)
+    // is NOT applied. Default false keeps the historical protocol-driven behaviour.
+    bool force_frame_window = false;
     bool automatic_process = true;   // automatic processing flag
     bool parallel_processing = true; // parallel processing flag
 
@@ -120,7 +129,10 @@ public:
     // Units and subregion
     double units_per_pixel = 0.2; // e.g., mm per pixel
     int subregion_radius = 20;    // default subset radius (pixels)
-    int limit_grayscale = 70;     // Grayscale limit threshold
+    // Grayscale saturation limit. 0 (default) = automatic: 70 for subjects whose
+    // id number is < 8 (S01..S07), 100 otherwise (legacy MATLAB rule); any positive
+    // value is used as-is regardless of the subject id.
+    int limit_grayscale = 0;
 
     // Step-level DIC parameters (loaded from dic_params.txt)
     StepConfig step_d;       // Step D: initial tracking
@@ -132,6 +144,16 @@ public:
     StepConfig step_f; // Step F: combined/final
 
     // Step E specific parameters (3D reconstruction)
+    // Step E stitching of the per-pair 3D surfaces: "geometric" (MATLAB-faithful overlap
+    // removal + boundary zipping; O(iterations x boundary x faces), can take many hours
+    // on multi-pair rigs with large overlaps) or "simple" (plain append of all pairs,
+    // overlaps kept). Only used when every pair of the trial was reconstructed.
+    std::string step_e_stitch_mode = "geometric";
+    // Accelerate the geometric stitcher's ray casts with an AABB hierarchy over the
+    // faces. Exact (same hits, same result) — it only avoids testing triangles the ray
+    // cannot reach. Off by default while it is being validated against the brute-force
+    // path; on multi-pair rigs the brute-force ray casts dominate Step E.
+    bool step_e_ray_bvh = false;
     bool step_e_distortion_removal =
         false; // Remove distortion from 2D points (MATLAB default: false)
     bool step_d_replacebadcorr =
@@ -166,9 +188,17 @@ public:
                                             // true = biquintic B-spline (MATLAB ncorr behavior; safe
                                             // since the recursive bcoef filter fix)
     std::string ncorr_units = "mm";                          // Units string
-    bool ncorr_seeds_are_optimized = true;                   // Optimized seeds
-    double ncorr_cutoff_max_diffnorm = 1e-5;                 // Max diff norm cutoff
-    double ncorr_cutoff_max_corrcoef = 10.0;                 // Max corr coef cutoff
+    // Seed-quality gates (ncorr_params.txt). A seed whose optimised solution exceeds
+    // either gate is rejected -> "could not seed any current image". Defaults match
+    // CppNCorr's own defaults; before these were wired through, the engine defaults
+    // (0.1 / 0.5) always applied whatever the config said.
+    bool ncorr_seeds_are_optimized = false;                  // seeds already optimised (skip seed optimisation)
+    double ncorr_cutoff_max_diffnorm = 0.1;                  // max diffnorm accepted for a seed
+    double ncorr_cutoff_max_corrcoef = 0.5;                  // max corrcoef accepted for a TRACKING seed
+    // Looser gate for inter-view MATCHING seeds (cam1->cam2 / view1->view2 at the
+    // reference frame): different perspectives correlate worse than consecutive
+    // frames (MNG mirrored rig pair 1: 0.51, rejected by the 0.5 tracking gate).
+    double ncorr_matching_cutoff_max_corrcoef = 1.0;
     int ncorr_threads = 4;                                   // Number of threads
     bool ncorr_use_exact_matlab =
         false; // Use exact_matlab_DIC_analysis_* (mirrors MATLAB ncorr_alg_addanalysis chain

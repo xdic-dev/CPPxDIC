@@ -77,6 +77,38 @@ Merge order: 2→1 first, then 3→2. CppNCorr PR: `feat/fixed-step-ref` → mai
 - `debug_stepe.sbatch` — rerun selected `--stages` on an existing run dir under
   gdb (`cppxdic_dbg`), for backtraces. RUN=<name> STAGES=<spec> LOGLEVEL=debug.
 
+## Config keys that used to be silently ignored (fixed Sept 2026, fix/config-driven-pairs-mng-data)
+
+- `camera_pairs` is now the ONLY source of the stereopair -> cameras table
+  (`Utils::setCameraPairs`, registered in main.cpp / DicAnalysis ctor). Before,
+  every call site used the hard-coded {1,2 ; 4,3}: pair >= 3 mapped to cams
+  (1,2) -> "could not seed any current image" on multi-pair rigs.
+- `im_saturation_mode` (default true) — set false for videos already filtered
+  upstream (MNG rigs): satur.m clipping flattens the speckle and ncorr diverges
+  ("hessian failed" with huge p1/p2). `limit_grayscale = 0` = auto (subject
+  NUMBER rule: S01..S07 -> 70, else 100; ids without digits, e.g. "Artem", -> 70).
+- `force_frame_window` (default false) — idx_frame_start/end/jump authoritative;
+  otherwise ANY `*.mat` in the protocol dir silently sets the per-phase window.
+  A protocol .mat is optional when `ref_trial_id` is set (MNG `.tsv` protocols
+  are not parsed).
+- ncorr_params `cutoff_max_corrcoef` / `cutoff_max_diffnorm` /
+  `seeds_are_optimized` now really reach the engine (engine defaults 0.5 / 0.1
+  applied before). Inter-view MATCHING calls (<= 2 current images) use
+  `matching_cutoff_max_corrcoef` (default 1.0): the MNG pair-1 matching seed
+  converges at corrcoef 0.51 and the 0.5 tracking gate rejected it — that was
+  the whole July "mirrored mode cannot match" story.
+- Video lookup: strict `<subj>_<mat>_speckles_<trial>_*_cam_<id>.mp4` first,
+  then a relaxed `*_<trial>_*_cam_<id>.mp4` fallback (logged as WARN).
+- `video_quality = high` no longer crashes (stoi); `dic_engine` MUST be `ncorr`
+  in CPU-only images (compiled default cuncorr = single-thread CPU fallback).
+- External user's 8-view dataset ("Artem", 4 pairs 1,2;3,4;5,6;7,8, per-view
+  968x1216 pre-filtered videos) lives on LEMAITRE:
+  `/globalscratch/ucl/inma/jaoga/louis/`; rerun harness in `../louis_run/`.
+- Mirrored (MNG) mode work is a SEPARATE worktree/branch:
+  `../CPPxDIC-mirrored` = `feat/mirrored-mode-mng` (stacked on the fix branch);
+  Manneback copy synced WITHOUT .git (`.build_commit` carries the SHA), runs in
+  `/globalscratch/ucl/inma/jaoga/mirrored_run/`.
+
 ## Key findings (details in deploy/cluster/cpugpu/results/REPORT.md)
 
 - **Perf (Step D, 150-frame trial)**: GPU (1×A100) ~17 min ≈ 3.7-4× faster than
@@ -106,6 +138,41 @@ Merge order: 2→1 first, then 3→2. CppNCorr PR: `feat/fixed-step-ref` → mai
 - Historical Lemaitre profiling study (threading, seed-opt, import fix) lives
   in the `ja/profiling` branch CLAUDE.md; that OMP_NUM_THREADS-only sweeps
   measure nothing still applies.
+
+## Branch structure — SEPTEMBER 2026 UPDATE (read this, the section above is July)
+
+Everything in the July stack is merged into `main` (PR #41). Current work:
+
+1. `fix/config-driven-pairs-mng-data` (12 commits on `main`, pushed) — the config keys
+   that were parsed but ignored, the ncorr seed gates, `step_e_stitch_mode`,
+   `step_e_ray_bvh`, and two reports under `deploy/cluster/{artem,mirrored}/REPORT.md`.
+   `Tools/CppNCorr` now tracks CppNCorr **`main`** (`ae8262f`): the fixed-step-ref work
+   was merged upstream as PR #20, so the old divergent pin to `feat/fixed-step-ref`
+   (01b6e81) is gone. The new main also brings the leveled logging facility (#18) and the
+   CI workflows, which the old pin lacked — `src/ncorr.cpp` differs by ~343 lines, so
+   **any image rebuilt after 2026-09-29 is not binary-comparable with the ones built
+   before** (relevant to the GPU timing question).
+2. `feat/mirrored-mode-mng` (3 commits, stacked on 1, pushed) — worktree at
+   `../CPPxDIC-mirrored`.
+
+`Tools/MultiDIC` shows as modified in the worktree (recorded 0466ade vs checked-out
+f0e4877). Pre-existing drift from c7c574c — do NOT commit it.
+
+## Cluster timing trap (measured 2026-09-14)
+
+Lemaitre is **faster** than Manneback on Step D (multi-threaded) and **5-15x slower** on
+Step F (single-threaded, memory-bound); Step E geometric stitching behaves like Step F.
+Never compare Step E/F timings across the two clusters, and run them on Manneback.
+This — not the stitching algorithm — is what made a 9-minute stitch take 5 hours there.
+
+## Things that look like bugs and are not (or are)
+
+- `camera_pairs` ordering is part of the calibration: `6,5` and `5,6` are different runs
+  (it decides which camera is the reference, hence which REF mask/seed applies).
+- Geometric stitching on the 2-pair S09 inputs silently yields **0 faces** and reports
+  success (the July 7a0e3ce image does the same). Undiagnosed.
+- The 3.7-4.2x cuNCorr speedup from the S09 study does NOT reproduce on the Artem rig
+  (1.15x). Open — see the memory note `gpu-speedup-regression`.
 
 ## Routine operations
 

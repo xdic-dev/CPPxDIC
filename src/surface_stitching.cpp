@@ -348,6 +348,164 @@ static double rayTriangleHit(const Eigen::Vector3d& O,
     return t;
 }
 
+// ============================================================================
+// Optional axis-aligned bounding-box acceleration for the ray casts
+// ----------------------------------------------------------------------------
+// The overlap-removal erosion casts a ray from every boundary vertex of one
+// surface against EVERY face of the other surface, and it does so once per
+// removed vertex. On the 2-pair S09 rig that costs minutes; on a 4-pair 8-view
+// rig it ran for more than nine hours without finishing. A bounding-volume
+// hierarchy over the faces turns the per-ray cost from O(F) triangle tests into
+// O(log F) box tests plus a handful of triangle tests.
+//
+// The prefilter is EXACT, not an approximation: a ray that intersects a triangle
+// necessarily intersects that triangle's (epsilon-padded) axis-aligned box, so no
+// real hit can ever be pruned, and the surviving candidates are scored with the
+// same rayTriangleHit() test and the same "keep the smallest t" rule. The result
+// is therefore identical to the brute-force path.
+//
+// Gated by step_e_ray_bvh (default off) while the option is being validated
+// against the brute-force results.
+// ============================================================================
+static bool g_stitch_ray_bvh = false;
+
+void setStitchRayAccel(bool enabled) { g_stitch_ray_bvh = enabled; }
+bool stitchRayAccel() { return g_stitch_ray_bvh; }
+
+namespace {
+
+// Per-face boxes plus a median-split hierarchy over them.
+struct FaceBVH {
+    struct Node {
+        Eigen::Vector3d lo, hi;
+        int left = -1, right = -1; // interior nodes
+        int first = 0, count = 0;  // leaves: range into `order`
+    };
+    std::vector<Node> nodes;
+    std::vector<int> order;                // face indices, permuted during the build
+    std::vector<Eigen::Vector3d> f_lo, f_hi, f_c; // indexed BY FACE INDEX
+};
+
+// Collect the boxes of the faces that the brute-force path would actually test
+// (same validity checks), so the traversal never sees a degenerate face.
+void bvhCollectFaces(FaceBVH& b, const std::vector<int>& faces,
+                     const std::vector<Eigen::Vector3d>& vertices, double pad) {
+    const size_t nF = faces.size() / 3;
+    const Eigen::Vector3d nanv = Eigen::Vector3d::Constant(std::nan(""));
+    b.f_lo.assign(nF, nanv);
+    b.f_hi.assign(nF, nanv);
+    b.f_c.assign(nF, nanv);
+    b.order.reserve(nF);
+    const Eigen::Vector3d padv = Eigen::Vector3d::Constant(pad);
+    for (size_t i = 0; i < nF; ++i) {
+        const int v0 = faces[i * 3], v1 = faces[i * 3 + 1], v2 = faces[i * 3 + 2];
+        if (v0 < 0 || v1 < 0 || v2 < 0) continue;
+        if (static_cast<size_t>(v0) >= vertices.size() ||
+            static_cast<size_t>(v1) >= vertices.size() ||
+            static_cast<size_t>(v2) >= vertices.size()) continue;
+        const auto& A = vertices[v0];
+        const auto& B = vertices[v1];
+        const auto& C = vertices[v2];
+        if (A.hasNaN() || B.hasNaN() || C.hasNaN()) continue;
+        b.f_lo[i] = A.cwiseMin(B).cwiseMin(C) - padv;
+        b.f_hi[i] = A.cwiseMax(B).cwiseMax(C) + padv;
+        b.f_c[i] = 0.5 * (b.f_lo[i] + b.f_hi[i]);
+        b.order.push_back(static_cast<int>(i));
+    }
+}
+
+int bvhBuild(FaceBVH& b, int first, int count, int leaf_size) {
+    const double inf = std::numeric_limits<double>::infinity();
+    Eigen::Vector3d lo = Eigen::Vector3d::Constant(inf);
+    Eigen::Vector3d hi = Eigen::Vector3d::Constant(-inf);
+    Eigen::Vector3d clo = lo, chi = hi;
+    for (int k = first; k < first + count; ++k) {
+        const int f = b.order[k];
+        lo = lo.cwiseMin(b.f_lo[f]);
+        hi = hi.cwiseMax(b.f_hi[f]);
+        clo = clo.cwiseMin(b.f_c[f]);
+        chi = chi.cwiseMax(b.f_c[f]);
+    }
+    const int self = static_cast<int>(b.nodes.size());
+    b.nodes.emplace_back();
+    b.nodes[self].lo = lo;
+    b.nodes[self].hi = hi;
+
+    const Eigen::Vector3d ext = chi - clo;
+    int axis = (ext[0] > ext[1]) ? ((ext[0] > ext[2]) ? 0 : 2) : ((ext[1] > ext[2]) ? 1 : 2);
+    if (count <= leaf_size || !(ext[axis] > 0.0)) { // leaf, or all centroids coincide
+        b.nodes[self].first = first;
+        b.nodes[self].count = count;
+        return self;
+    }
+    const int mid = first + count / 2;
+    std::nth_element(b.order.begin() + first, b.order.begin() + mid,
+                     b.order.begin() + first + count,
+                     [&b, axis](int x, int y) { return b.f_c[x][axis] < b.f_c[y][axis]; });
+    const int l = bvhBuild(b, first, mid - first, leaf_size);
+    const int r = bvhBuild(b, mid, first + count - mid, leaf_size);
+    b.nodes[self].left = l;
+    b.nodes[self].right = r;
+    return self;
+}
+
+// Slab test over [0, t_max]; t_enter lets the traversal skip nodes that start
+// beyond the best hit found so far.
+bool rayBoxHit(const Eigen::Vector3d& O, const Eigen::Vector3d& D, const Eigen::Vector3d& lo,
+               const Eigen::Vector3d& hi, double t_max, double& t_enter) {
+    double tmin = 0.0, tmax = t_max;
+    for (int i = 0; i < 3; ++i) {
+        if (std::abs(D[i]) < 1e-300) {          // parallel to this slab
+            if (O[i] < lo[i] || O[i] > hi[i]) return false;
+            continue;
+        }
+        const double inv = 1.0 / D[i];
+        double t0 = (lo[i] - O[i]) * inv;
+        double t1 = (hi[i] - O[i]) * inv;
+        if (t0 > t1) std::swap(t0, t1);
+        if (t0 > tmin) tmin = t0;
+        if (t1 < tmax) tmax = t1;
+        if (tmin > tmax) return false;
+    }
+    t_enter = tmin;
+    return true;
+}
+
+// Closest hit along the semi-infinite ray, or +inf when the ray misses.
+double bvhClosestHit(const FaceBVH& b, const std::vector<int>& faces,
+                     const std::vector<Eigen::Vector3d>& vertices, const Eigen::Vector3d& O,
+                     const Eigen::Vector3d& D, double eps) {
+    double best_t = std::numeric_limits<double>::infinity();
+    if (b.nodes.empty()) return best_t;
+    int stack[128];
+    int sp = 0;
+    stack[sp++] = 0;
+    while (sp > 0) {
+        const FaceBVH::Node& n = b.nodes[stack[--sp]];
+        double t_enter = 0.0;
+        if (!rayBoxHit(O, D, n.lo, n.hi, best_t, t_enter)) continue;
+        if (t_enter > best_t) continue;
+        if (n.left < 0) { // leaf
+            for (int k = n.first; k < n.first + n.count; ++k) {
+                const int i = b.order[k];
+                const double t = rayTriangleHit(O, D, vertices[faces[i * 3]],
+                                                vertices[faces[i * 3 + 1]],
+                                                vertices[faces[i * 3 + 2]], eps);
+                if (!std::isnan(t) && t < best_t) best_t = t;
+            }
+        } else if (sp + 2 <= 128) {
+            stack[sp++] = n.left;
+            stack[sp++] = n.right;
+        } else {
+            LOG_WARN << "stitch BVH traversal stack overflow; falling back to a full scan";
+            return -1.0; // caller re-runs this ray brute force
+        }
+    }
+    return best_t;
+}
+
+} // namespace
+
 // For each (origin, direction) pair, find closest hit point on the mesh.
 // Returns hit positions; NaN-filled Vector3d when no hit.
 // Matches MATLAB triSurfRaySetIntersect with optStruct.ray='ray', triangle='two sided'.
@@ -361,11 +519,32 @@ static std::vector<Eigen::Vector3d> raySetTriangleIntersect(
     std::vector<Eigen::Vector3d> hits(origins.size(),
                                       Eigen::Vector3d::Constant(std::nan("")));
     size_t nF = faces.size() / 3;
+
+    // Fast path: prune candidate triangles with an AABB hierarchy (exact, see above).
+    FaceBVH bvh;
+    bool use_bvh = g_stitch_ray_bvh && nF > 0 && !origins.empty();
+    if (use_bvh) {
+        bvhCollectFaces(bvh, faces, vertices, 1e-9);
+        if (bvh.order.empty()) {
+            use_bvh = false;
+        } else {
+            bvh.nodes.reserve(2 * bvh.order.size());
+            bvhBuild(bvh, 0, static_cast<int>(bvh.order.size()), 8);
+        }
+    }
+
     for (size_t r = 0; r < origins.size(); ++r) {
         const auto& O = origins[r];
         const auto& D = dirs[r];
         if (O.hasNaN() || D.hasNaN() || D.norm() < 1e-12) continue;
         double best_t = std::numeric_limits<double>::infinity();
+        if (use_bvh) {
+            const double t = bvhClosestHit(bvh, faces, vertices, O, D, eps);
+            if (t >= 0.0) { // negative marks a traversal bail-out -> full scan below
+                if (std::isfinite(t)) hits[r] = O + t * D;
+                continue;
+            }
+        }
         for (size_t i = 0; i < nF; ++i) {
             int v0 = faces[i*3], v1 = faces[i*3+1], v2 = faces[i*3+2];
             if (v0 < 0 || v1 < 0 || v2 < 0) continue;

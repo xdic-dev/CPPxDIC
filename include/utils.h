@@ -141,13 +141,28 @@ public:
                                                              const RigidTransform& transform);
     
      /**
-     * Get camera numbers for a given stereopair
-     * @param stereopair The stereopair number (1 or 2)
+     * Register the process-wide stereopair -> (cam_first, cam_second) table.
+     *
+     * Called once with Config::camera_pairs after the configuration is resolved
+     * (main.cpp / DicAnalysis ctor). Every getCamerasForPair(stereopair, ...)
+     * call then honours the configured mapping instead of the legacy
+     * {1,2 ; 4,3} hard-coded table. Passing an empty vector restores the legacy
+     * default.
+     */
+    static void setCameraPairs(const std::vector<std::pair<int,int>>& camera_pairs);
+
+    /** Currently registered stereopair table (see setCameraPairs). */
+    static const std::vector<std::pair<int,int>>& cameraPairs();
+
+     /**
+     * Get camera numbers for a given stereopair using the registered table
+     * (setCameraPairs). Pairs beyond the table fall back to (2N-1, 2N).
+     * @param stereopair The stereopair number (1-indexed)
      * @param cam_first Output: first camera number
      * @param cam_second Output: second camera number
      */
     static void getCamerasForPair(int stereopair, int& cam_first, int& cam_second);
-    
+
     /**
      * Get camera numbers for a given stereopair using config camera_pairs mapping
      * @param stereopair The stereopair number (1-indexed)

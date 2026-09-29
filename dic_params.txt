@@ -46,6 +46,15 @@ dic_path = /Users/jaoga/devlab/MultiDIC/analysis
 # Image filter mode
 im_filter_mode = false
 
+# Grayscale saturation (satur.m clipping above limit_grayscale) on imported frames.
+# Set false for videos already filtered/normalised upstream (e.g. MNG rigs):
+# clipping such frames flattens the speckle contrast and makes ncorr diverge.
+im_saturation_mode = true
+
+# When true, idx_frame_start/idx_frame_end/frame_jump are authoritative; the
+# protocol-derived per-phase window (from the protocol .mat) is not applied.
+force_frame_window = false
+
 # Automatic processing flag
 automatic_process = true
 
@@ -214,6 +223,10 @@ step_f_initial_seed =
 
 # Camera pairs: semicolon-separated pairs, each pair is "cam_first,cam_second"
 # Matches MATLAB import_raw_vid.m: pair1=(1,2), pair2=(4,3)
+# One entry per stereopair, in pair order; must list at least num_pair entries
+# (e.g. an 8-camera rig: camera_pairs = 1,2;3,4;5,6;7,8). Missing entries default
+# to (2N-1, 2N). Video files, REF masks/seeds and DLT calibrations are resolved
+# from these camera ids.
 camera_pairs = 1,2;4,3
 
 # ============================================================================
@@ -223,6 +236,17 @@ camera_pairs = 1,2;4,3
 # Enable distortion removal for 3D reconstruction
 # MATLAB step3_dic_rewrited.m has distortionRemovalLogic = 0 (disabled)
 step_e_distortion_removal = false
+
+# Stitching of the per-pair 3D surfaces (used when all pairs of a trial exist):
+#   geometric = MATLAB-faithful overlap removal + boundary zipping (can take hours
+#               on multi-pair rigs with large overlaps, e.g. 8-view MNG)
+#   simple    = plain append of all pairs (overlaps kept), seconds
+step_e_stitch_mode = geometric
+
+# Accelerate the geometric stitcher's ray casts with an AABB hierarchy over the faces.
+# Exact: same hits, same stitched result; it only skips triangles the ray cannot reach.
+# The brute-force scan dominates Step E on rigs with several pairs (hours vs minutes).
+step_e_ray_bvh = false
 
 # ============================================================================
 # STEP D: 2D DIC POST-PROCESSING OPTIONS
@@ -258,7 +282,9 @@ units_per_pixel = 0.2
 subregion_radius = 20
 
 # Grayscale limit threshold
-limit_grayscale = 70
+# Saturation limit: 0 = automatic (70 for subject numbers < 8, 100 otherwise);
+# any positive value is used as-is (needed for subjects without a number, e.g. Artem)
+limit_grayscale = 0
 
 # ============================================================================
 # OUTPUT CONTROL
