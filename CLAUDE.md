@@ -146,8 +146,12 @@ Everything in the July stack is merged into `main` (PR #41). Current work:
 1. `fix/config-driven-pairs-mng-data` (12 commits on `main`, pushed) — the config keys
    that were parsed but ignored, the ncorr seed gates, `step_e_stitch_mode`,
    `step_e_ray_bvh`, and two reports under `deploy/cluster/{artem,mirrored}/REPORT.md`.
-   Keeps `Tools/CppNCorr` pinned to `feat/fixed-step-ref` (01b6e81) because `main` uses
-   `fixed_step_ref`, which CppNCorr `main` does not have.
+   `Tools/CppNCorr` now tracks CppNCorr **`main`** (`ae8262f`): the fixed-step-ref work
+   was merged upstream as PR #20, so the old divergent pin to `feat/fixed-step-ref`
+   (01b6e81) is gone. The new main also brings the leveled logging facility (#18) and the
+   CI workflows, which the old pin lacked — `src/ncorr.cpp` differs by ~343 lines, so
+   **any image rebuilt after 2026-09-29 is not binary-comparable with the ones built
+   before** (relevant to the GPU timing question).
 2. `feat/mirrored-mode-mng` (3 commits, stacked on 1, pushed) — worktree at
    `../CPPxDIC-mirrored`.
 
